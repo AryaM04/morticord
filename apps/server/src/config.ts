@@ -10,10 +10,33 @@ const envSchema = z.object({
   POSTGRES_DB: z.string().min(1),
   POSTGRES_USER: z.string().min(1),
   POSTGRES_PASSWORD: z.string().min(1),
-  JWT_SECRET: z.string().min(1),
+  JWT_SECRET: z.string().min(32, "JWT_SECRET must have at least 32 characters."),
   TURN_SECRET: z.string().min(1),
   TURN_DOMAIN: z.string().min(1),
   TURN_PORT: z.coerce.number().int().positive().default(3478),
+
+  // Origin of the web app. The server puts it in email links and OAuth redirects.
+  WEB_ORIGIN: z.string().min(1).default("http://localhost:5173"),
+
+  // Directory for files the server keeps on disk, such as avatars.
+  DATA_DIR: z.string().min(1).default("./data"),
+
+  // SMTP settings for account email (verification, password reset).
+  SMTP_HOST: z.string().min(1),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
+  SMTP_FROM: z.string().min(1),
+
+  // OAuth app credentials. A provider is off when its pair is not set.
+  GITHUB_CLIENT_ID: z.string().optional(),
+  GITHUB_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+
+  // Browser-visible origin of the API. The server builds OAuth redirect
+  // URIs from this value, so it must match what the OAuth app registers.
+  PUBLIC_API_URL: z.string().min(1).default("http://localhost:5173"),
 });
 
 export interface AppConfig {
@@ -23,6 +46,20 @@ export interface AppConfig {
   turnSecret: string;
   turnDomain: string;
   turnPort: number;
+  webOrigin: string;
+  dataDir: string;
+  smtp: {
+    host: string;
+    port: number;
+    user?: string;
+    password?: string;
+    from: string;
+  };
+  oauth: {
+    github?: { clientId: string; clientSecret: string };
+    google?: { clientId: string; clientSecret: string };
+  };
+  publicApiUrl: string;
 }
 
 /** Read and check the process environment. Throw a clear error on bad input. */
@@ -38,6 +75,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const data = parsed.data;
   const databaseUrl = `postgres://${data.POSTGRES_USER}:${data.POSTGRES_PASSWORD}@${data.POSTGRES_HOST}:${data.POSTGRES_PORT}/${data.POSTGRES_DB}`;
 
+  const oauth: AppConfig["oauth"] = {};
+  if (data.GITHUB_CLIENT_ID && data.GITHUB_CLIENT_SECRET) {
+    oauth.github = { clientId: data.GITHUB_CLIENT_ID, clientSecret: data.GITHUB_CLIENT_SECRET };
+  }
+  if (data.GOOGLE_CLIENT_ID && data.GOOGLE_CLIENT_SECRET) {
+    oauth.google = { clientId: data.GOOGLE_CLIENT_ID, clientSecret: data.GOOGLE_CLIENT_SECRET };
+  }
+
   return {
     apiPort: data.API_PORT,
     databaseUrl,
@@ -45,5 +90,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     turnSecret: data.TURN_SECRET,
     turnDomain: data.TURN_DOMAIN,
     turnPort: data.TURN_PORT,
+    webOrigin: data.WEB_ORIGIN,
+    dataDir: data.DATA_DIR,
+    smtp: {
+      host: data.SMTP_HOST,
+      port: data.SMTP_PORT,
+      user: data.SMTP_USER,
+      password: data.SMTP_PASSWORD,
+      from: data.SMTP_FROM,
+    },
+    oauth,
+    publicApiUrl: data.PUBLIC_API_URL,
   };
 }

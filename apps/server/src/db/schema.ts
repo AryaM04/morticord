@@ -38,6 +38,22 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** A one-use token sent by email, for email verification or password reset. */
+export const emailTokens = pgTable(
+  "email_tokens",
+  {
+    id: snowflake().primaryKey(),
+    userId: snowflake("user_id")
+      .notNull()
+      .references(() => users.id),
+    purpose: text("purpose", { enum: ["verify_email", "reset_password"] }).notNull(),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+  },
+  (table) => [index("email_tokens_user_purpose_idx").on(table.userId, table.purpose)],
+);
+
 export const oauthAccounts = pgTable(
   "oauth_accounts",
   {
