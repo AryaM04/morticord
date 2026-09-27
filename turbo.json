@@ -13,7 +13,8 @@
     "typecheck": {},
     "test": {},
     "e2e": {
-      "cache": false
+      "cache": false,
+      "passThroughEnv": ["TURN_TEST_HOST"]
     }
   }
 }
