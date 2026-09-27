@@ -16,6 +16,10 @@ import {
   presenceUpdatePayloadSchema,
   readyPayloadSchema,
   resumedPayloadSchema,
+  eventCreatePayloadSchema,
+  eventRedactPayloadSchema,
+  typingStartPayloadSchema,
+  readStateUpdatePayloadSchema,
   type DispatchEventName,
 } from "@discord-clone/shared";
 import type { z } from "zod";
@@ -88,6 +92,10 @@ const DISPATCH_SCHEMAS: Record<string, z.ZodType> = {
   GUILD_MEMBER_UPDATE: guildMemberSchema,
   GUILD_MEMBER_REMOVE: guildMemberRemovePayloadSchema,
   PRESENCE_UPDATE: presenceUpdatePayloadSchema,
+  EVENT_CREATE: eventCreatePayloadSchema,
+  EVENT_REDACT: eventRedactPayloadSchema,
+  TYPING_START: typingStartPayloadSchema,
+  READ_STATE_UPDATE: readStateUpdatePayloadSchema,
 };
 
 function defaultCreateSocket(url: string): WebSocketLike {
