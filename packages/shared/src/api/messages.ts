@@ -116,6 +116,8 @@ export const eventSchema = z.object({
   megolmSessionId: z.string().nullable(),
   /** Base64url ciphertext. Empty when the event is redacted. */
   ciphertext: z.string(),
+  /** The nonce the sending device chose. Lets that device match its own optimistic entry to this event. */
+  nonce: z.string(),
   createdAt: z.string(),
   redactedAt: z.string().nullable(),
 });

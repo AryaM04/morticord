@@ -15,6 +15,7 @@ export function toEventJson(row: EventRow): EventJson {
     codec: row.codec as EventCodec,
     megolmSessionId: row.megolmSessionId,
     ciphertext: encodeBase64Url(row.ciphertext),
+    nonce: row.nonce,
     createdAt: row.createdAt.toISOString(),
     redactedAt: row.redactedAt?.toISOString() ?? null,
   };
