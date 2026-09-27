@@ -70,7 +70,38 @@ The end-to-end tests are not part of the default `pnpm test` run. A
 separate CI job runs them on Linux, with coturn started through Docker
 Compose.
 
+## Server tests
+
+Most server tests run with no setup. The server auth and users tests also
+need a real Postgres database, which they use to make one throwaway
+database per test file.
+
+1. Start the database, if it does not run yet.
+
+   ```sh
+   docker compose --env-file .env -f infra/docker-compose.dev.yml up -d postgres
+   ```
+
+2. Set `TEST_DATABASE_URL` to a user that can create and drop databases.
+   The `postgres` service user has this right. Use the `postgres` system
+   database as the connection target; the test helper makes its own
+   databases next to it.
+
+   ```sh
+   export TEST_DATABASE_URL="postgres://discord_clone:<password-from-.env>@localhost:5432/postgres"
+   ```
+
+3. Run the tests.
+
+   ```sh
+   pnpm test
+   ```
+
+When `TEST_DATABASE_URL` is not set, the database-backed tests skip with a
+clear message, and every other test still runs.
+
 ## Project status
 
-This repository is at milestone M0: monorepo setup, tooling and risk
-spikes. See the milestone table in the plan for what comes next.
+This repository is at milestone M1: user accounts (register, login, token
+refresh, email verification, password reset, OAuth, profile and avatar).
+See the milestone table in the plan for what comes next.
