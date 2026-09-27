@@ -8,6 +8,22 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: discord_clone
+          POSTGRES_PASSWORD: discord_clone
+          POSTGRES_DB: discord_clone
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U discord_clone"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://discord_clone:discord_clone@localhost:5432/postgres
     steps:
       - name: Check out the code
         uses: actions/checkout@v5
