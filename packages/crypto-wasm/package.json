@@ -1,0 +1,16 @@
+{
+  "name": "@discord-clone/crypto-wasm",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./pkg/crypto_wasm.js",
+  "types": "./pkg/crypto_wasm.d.ts",
+  "files": ["pkg"],
+  "scripts": {
+    "build:wasm": "wasm-pack build --target web --release --out-dir pkg --no-pack",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.5"
+  }
+}
