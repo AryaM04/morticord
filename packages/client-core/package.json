@@ -1,0 +1,23 @@
+{
+  "name": "@discord-clone/client-core",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@discord-clone/shared": "workspace:*",
+    "zustand": "^5.0.1"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.0.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.5",
+    "zod": "^3.23.8"
+  }
+}
