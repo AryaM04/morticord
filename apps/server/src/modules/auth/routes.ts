@@ -1,0 +1,213 @@
+// Auth routes. Each handler validates the body, calls a service function,
+// and replies. The logic lives in service.ts and oauth.ts.
+import type { FastifyInstance } from "fastify";
+import {
+  forgotPasswordRequestSchema,
+  loginRequestSchema,
+  oauthExchangeRequestSchema,
+  oauthProviderSchema,
+  refreshRequestSchema,
+  registerRequestSchema,
+  resetPasswordRequestSchema,
+  verifyEmailRequestSchema,
+  type OAuthProvider,
+} from "@discord-clone/shared";
+import { generateCodeVerifier, generateState, type GitHub, type Google } from "arctic";
+import type { AppDeps } from "../../app.js";
+import { AppError } from "../../errors.js";
+import { consumeOAuthCode, storeOAuthCode } from "./oauth-codes.js";
+import { createOAuthClients, completeOAuthLogin, fetchGitHubProfile, fetchGoogleProfile } from "./oauth.js";
+import {
+  forgotPassword,
+  loginUser,
+  logoutDevice,
+  refreshSession,
+  registerUser,
+  resendVerification,
+  resetPassword,
+  toAuthResult,
+  createSession,
+  verifyEmail,
+} from "./service.js";
+
+const OAUTH_COOKIE_NAME = "oauth_flow";
+const OAUTH_COOKIE_TTL_SECONDS = 10 * 60;
+
+interface OAuthCookiePayload {
+  provider: OAuthProvider;
+  state: string;
+  codeVerifier?: string;
+}
+
+export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): Promise<void> {
+  const authDeps = { db: deps.db, config: deps.config, mailer: deps.mailer };
+  const oauthClients = createOAuthClients(deps.config);
+
+  app.post(
+    "/register",
+    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const input = registerRequestSchema.parse(request.body);
+      const result = await registerUser(authDeps, input);
+      return reply.status(201).send(result);
+    },
+  );
+
+  app.post(
+    "/login",
+    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const input = loginRequestSchema.parse(request.body);
+      const result = await loginUser(authDeps, input);
+      return reply.status(200).send(result);
+    },
+  );
+
+  app.post(
+    "/refresh",
+    { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const input = refreshRequestSchema.parse(request.body);
+      const result = await refreshSession(authDeps, input.refreshToken);
+      return reply.status(200).send(result);
+    },
+  );
+
+  app.post("/logout", { preHandler: app.authenticate }, async (request, reply) => {
+    await logoutDevice(authDeps, request.auth!.deviceId);
+    return reply.status(204).send();
+  });
+
+  app.post("/verify-email", async (request, reply) => {
+    const input = verifyEmailRequestSchema.parse(request.body);
+    await verifyEmail(authDeps, input.token);
+    return reply.status(204).send();
+  });
+
+  app.post(
+    "/resend-verification",
+    { preHandler: app.authenticate, config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      await resendVerification(authDeps, request.auth!.userId);
+      return reply.status(202).send();
+    },
+  );
+
+  app.post(
+    "/forgot-password",
+    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const input = forgotPasswordRequestSchema.parse(request.body);
+      await forgotPassword(authDeps, input.email);
+      return reply.status(202).send();
+    },
+  );
+
+  app.post("/reset-password", async (request, reply) => {
+    const input = resetPasswordRequestSchema.parse(request.body);
+    await resetPassword(authDeps, input.token, input.password);
+    return reply.status(204).send();
+  });
+
+  app.get("/providers", async (_request, reply) => {
+    return reply.send({ providers: Object.keys(oauthClients) as OAuthProvider[] });
+  });
+
+  app.get("/oauth/:provider/start", async (request, reply) => {
+    const provider = oauthProviderSchema.parse((request.params as { provider: string }).provider);
+    const client = oauthClients[provider];
+    if (!client) {
+      throw new AppError(404, "OAUTH_PROVIDER_DISABLED", "This sign-in provider is not turned on.");
+    }
+
+    const state = generateState();
+    const cookiePayload: OAuthCookiePayload = { provider, state };
+
+    let url: URL;
+    if (provider === "google") {
+      const codeVerifier = generateCodeVerifier();
+      cookiePayload.codeVerifier = codeVerifier;
+      url = (client as Google).createAuthorizationURL(state, codeVerifier, ["openid", "email"]);
+    } else {
+      url = (client as GitHub).createAuthorizationURL(state, ["read:user", "user:email"]);
+    }
+
+    reply.setCookie(OAUTH_COOKIE_NAME, JSON.stringify(cookiePayload), {
+      httpOnly: true,
+      sameSite: "lax",
+      signed: true,
+      path: "/api/v1/auth/oauth",
+      maxAge: OAUTH_COOKIE_TTL_SECONDS,
+    });
+
+    return reply.redirect(url.toString(), 302);
+  });
+
+  app.get("/oauth/:provider/callback", async (request, reply) => {
+    const provider = oauthProviderSchema.parse((request.params as { provider: string }).provider);
+    const errorRedirect = (code: string) => {
+      reply.clearCookie(OAUTH_COOKIE_NAME, { path: "/api/v1/auth/oauth" });
+      return reply.redirect(`${deps.config.webOrigin}/auth/callback#error=${code}`, 302);
+    };
+
+    const client = oauthClients[provider];
+    if (!client) {
+      return errorRedirect("OAUTH_PROVIDER_DISABLED");
+    }
+
+    const query = request.query as { code?: string; state?: string };
+    const rawCookie = request.cookies[OAUTH_COOKIE_NAME];
+    if (!query.code || !query.state || !rawCookie) {
+      return errorRedirect("OAUTH_STATE_MISSING");
+    }
+
+    const unsigned = request.unsignCookie(rawCookie);
+    if (!unsigned.valid || !unsigned.value) {
+      return errorRedirect("OAUTH_STATE_INVALID");
+    }
+
+    let cookiePayload: OAuthCookiePayload;
+    try {
+      cookiePayload = JSON.parse(unsigned.value) as OAuthCookiePayload;
+    } catch {
+      return errorRedirect("OAUTH_STATE_INVALID");
+    }
+
+    if (cookiePayload.provider !== provider || cookiePayload.state !== query.state) {
+      return errorRedirect("OAUTH_STATE_INVALID");
+    }
+
+    try {
+      const tokens =
+        provider === "google"
+          ? await (client as Google).validateAuthorizationCode(query.code, cookiePayload.codeVerifier ?? "")
+          : await (client as GitHub).validateAuthorizationCode(query.code);
+
+      const profile =
+        provider === "google"
+          ? await fetchGoogleProfile(tokens.accessToken())
+          : await fetchGitHubProfile(tokens.accessToken());
+
+      const user = await completeOAuthLogin(deps.db, provider, profile);
+      const session = await createSession(deps.db, deps.config, user.id);
+      const result = toAuthResult(user, session);
+      const code = storeOAuthCode(result);
+
+      reply.clearCookie(OAUTH_COOKIE_NAME, { path: "/api/v1/auth/oauth" });
+      return reply.redirect(`${deps.config.webOrigin}/auth/callback#code=${code}`, 302);
+    } catch (error) {
+      request.log.warn(error, "The OAuth callback failed.");
+      const code = error instanceof AppError ? error.code : "OAUTH_FAILED";
+      return errorRedirect(code);
+    }
+  });
+
+  app.post("/oauth/exchange", async (request, reply) => {
+    const input = oauthExchangeRequestSchema.parse(request.body);
+    const result = consumeOAuthCode(input.code);
+    if (!result) {
+      throw new AppError(401, "INVALID_OAUTH_CODE", "This sign-in code is not valid, expired or already used.");
+    }
+    return reply.status(200).send(result);
+  });
+}
