@@ -14,6 +14,7 @@ import {
   expireTyping,
   formatBadgeCount,
   isChannelUnread,
+  laterReadMarker,
   loadPage,
   markAllStale,
   markPendingFailed,
@@ -424,6 +425,31 @@ describe("read marker", () => {
   it("never moves backward", () => {
     let channel = advanceReadMarker(createChannelMessagesState(), "5");
     channel = advanceReadMarker(channel, "3");
+    expect(channel.lastReadEventId).toBe("5");
+  });
+});
+
+describe("laterReadMarker", () => {
+  it("picks the greater of two ids", () => {
+    expect(laterReadMarker("3", "5")).toBe("5");
+    expect(laterReadMarker("5", "3")).toBe("5");
+  });
+
+  it("treats null as earliest", () => {
+    expect(laterReadMarker(null, "5")).toBe("5");
+    expect(laterReadMarker("5", null)).toBe("5");
+    expect(laterReadMarker(null, null)).toBeNull();
+  });
+
+  it("protects a fresh markRead from a stale openChannel argument", () => {
+    // This is the exact race `openChannel` guards against: it captures
+    // `lastReadEventId` before its fetch starts, so a `markRead` for the
+    // same channel that lands while the fetch is in flight must not be
+    // undone once the stale value is applied.
+    let channel = advanceReadMarker(createChannelMessagesState(), "5"); // markRead lands first
+    const staleCapturedValue = "1"; // read before the fetch started
+    const next = laterReadMarker(channel.lastReadEventId, staleCapturedValue);
+    channel = { ...channel, lastReadEventId: next };
     expect(channel.lastReadEventId).toBe("5");
   });
 });

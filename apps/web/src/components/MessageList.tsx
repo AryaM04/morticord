@@ -51,6 +51,16 @@ export function MessageList({
   // rows) can leave it showing nothing at all, because there is no prior
   // item position for it to scroll from or measure against.
   const [hasLoaded, setHasLoaded] = useState(false);
+  // A stable, ever-decreasing index for the first loaded row, required
+  // by react-virtuoso to prepend older pages correctly (its own docs
+  // call this out for exactly this "load older history" pattern):
+  // without it, Virtuoso cannot tell that row 0 after a prepend is a
+  // different, older message than row 0 before it, and its scroll
+  // anchoring and `startReached` re-arming both become unreliable.
+  const FIRST_ITEM_INDEX_START = 1_000_000;
+  const [firstItemIndex, setFirstItemIndex] = useState(FIRST_ITEM_INDEX_START);
+  const oldestEventIdRef = useRef<string | null>(null);
+  const rowCountRef = useRef(0);
 
   function highlightFor2s(id: string): void {
     setHighlightId(id);
@@ -115,13 +125,32 @@ export function MessageList({
 
   useEffect(() => {
     setHasLoaded(false);
+    setFirstItemIndex(FIRST_ITEM_INDEX_START);
+    oldestEventIdRef.current = null;
+    rowCountRef.current = 0;
   }, [channelId]);
 
   useEffect(() => {
     if (rows.length > 0) {
       setHasLoaded(true);
     }
-  }, [rows.length]);
+    const oldestEventId = channel?.eventIds[0] ?? null;
+    if (
+      oldestEventId !== null &&
+      oldestEventIdRef.current !== null &&
+      oldestEventId !== oldestEventIdRef.current
+    ) {
+      // The oldest loaded event changed to a different one: an older
+      // page was prepended. Move the index back by however many rows
+      // that added, so it keeps matching `data`'s new first row.
+      const addedRows = rows.length - rowCountRef.current;
+      if (addedRows > 0) {
+        setFirstItemIndex((current) => current - addedRows);
+      }
+    }
+    oldestEventIdRef.current = oldestEventId;
+    rowCountRef.current = rows.length;
+  }, [channel?.eventIds, rows.length]);
 
   if (!channel) {
     return null;
@@ -147,6 +176,14 @@ export function MessageList({
         ref={virtuosoRef}
         style={{ height: "100%" }}
         data={rows}
+        // Start this fresh mount already scrolled to the newest message.
+        // Without it, Virtuoso mounts scrolled to row 0 (the oldest
+        // loaded message): with more history than fits on screen, that
+        // reads as "at the top", so `startReached` fires immediately and
+        // races older pages against `followOutput`'s scroll to the
+        // bottom, leaving the view stranded somewhere in the middle.
+        initialTopMostItemIndex={Math.max(0, rows.length - 1)}
+        firstItemIndex={firstItemIndex}
         followOutput={atBottom ? "smooth" : false}
         atBottomStateChange={setAtBottom}
         startReached={() => void messagesStore.getState().loadOlder(channelId)}
