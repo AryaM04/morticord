@@ -2,7 +2,7 @@
 // its message list and composer; a voice channel shows a placeholder
 // (voice itself arrives in M4).
 import { useEffect, useMemo, useState } from "react";
-import type { AggregatedMessage } from "@discord-clone/client-core";
+import { needsStaleRefetch, type AggregatedMessage } from "@discord-clone/client-core";
 import { Permission, hasPermission } from "@discord-clone/shared";
 import { ConnectionBanner } from "./ConnectionBanner.js";
 import { Composer, type EditTarget, type ReplyTarget } from "./Composer.js";
@@ -25,18 +25,36 @@ export function ChatPane({ channelId }: { channelId: string | null }) {
   const canSend = hasPermission(permissions, Permission.SEND_MESSAGES);
   const canManageMessages = hasPermission(permissions, Permission.MANAGE_MESSAGES);
 
+  const channelState = channelId ? messagesState.channels[channelId] : undefined;
+
   useEffect(() => {
     setReplyTarget(null);
     setEditTarget(null);
     if (channelId && channel?.type === "text") {
-      void messagesStore.getState().openChannel(channelId, channel.lastEventId, null);
+      // A fresh READY (see `applyDispatch` in the store) already seeds
+      // this channel's read marker before this effect runs, so read it
+      // from the store instead of passing `null`: passing `null` would
+      // wipe out the marker and break the unread and mention badges as
+      // soon as the channel is opened.
+      const seededReadId = messagesStore.getState().channels[channelId]?.lastReadEventId ?? null;
+      void messagesStore.getState().openChannel(channelId, channel.lastEventId, seededReadId);
     }
   }, [channelId, channel?.type]);
+
+  // A gateway reconnect that gets a fresh READY (not a RESUMED) marks
+  // every cached channel window `stale`, because a fresh READY carries
+  // no guarantee that no event was missed while disconnected. Refetch
+  // the currently open channel's latest page when that happens, so its
+  // messages do not silently fall behind.
+  useEffect(() => {
+    if (channelId && needsStaleRefetch(channelState)) {
+      void messagesStore.getState().refetchLatest(channelId);
+    }
+  }, [channelId, channelState?.stale]);
 
   // Mark the channel read once its window catches up to the newest
   // message: this only fires when the tab has focus and the view is at
   // the bottom, per the `markRead` debounce in the store.
-  const channelState = channelId ? messagesState.channels[channelId] : undefined;
   useEffect(() => {
     if (!channelId || !channelState || !document.hasFocus() || !channelState.atLatest) {
       return;
