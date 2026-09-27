@@ -1,0 +1,339 @@
+// Drizzle ORM schema for the whole data model.
+// Every ID is a snowflake, stored as a Postgres bigint and read back as a
+// JavaScript bigint. Encrypted content is stored as bytea (raw ciphertext
+// bytes); the server never reads or writes plaintext for these columns.
+import { sql } from "drizzle-orm";
+import {
+  bigint,
+  boolean,
+  customType,
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
+
+/** Raw ciphertext bytes. The server stores and moves these bytes, and never reads them. */
+const bytea = customType<{ data: Uint8Array }>({
+  dataType() {
+    return "bytea";
+  },
+});
+
+function snowflake(name?: string) {
+  return name === undefined ? bigint({ mode: "bigint" }) : bigint(name, { mode: "bigint" });
+}
+
+export const users = pgTable("users", {
+  id: snowflake().primaryKey(),
+  username: text("username").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: boolean("email_verified").notNull().default(false),
+  passwordHash: text("password_hash"),
+  avatarKey: text("avatar_key"),
+  statusText: text("status_text"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const oauthAccounts = pgTable(
+  "oauth_accounts",
+  {
+    provider: text("provider").notNull(),
+    providerUserId: text("provider_user_id").notNull(),
+    userId: snowflake("user_id")
+      .notNull()
+      .references(() => users.id),
+  },
+  (table) => [primaryKey({ columns: [table.provider, table.providerUserId] })],
+);
+
+export const refreshTokens = pgTable("refresh_tokens", {
+  id: snowflake().primaryKey(),
+  userId: snowflake("user_id")
+    .notNull()
+    .references(() => users.id),
+  deviceId: text("device_id").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+});
+
+export const devices = pgTable("devices", {
+  id: text("id").primaryKey(),
+  userId: snowflake("user_id")
+    .notNull()
+    .references(() => users.id),
+  name: text("name").notNull(),
+  curve25519Key: text("curve25519_key").notNull(),
+  ed25519Key: text("ed25519_key").notNull(),
+  signatureByUserSsk: text("signature_by_user_ssk"),
+  lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const oneTimeKeys = pgTable(
+  "one_time_keys",
+  {
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id),
+    keyId: text("key_id").notNull(),
+    key: text("key").notNull(),
+    claimed: boolean("claimed").notNull().default(false),
+  },
+  (table) => [primaryKey({ columns: [table.deviceId, table.keyId] })],
+);
+
+export const fallbackKeys = pgTable("fallback_keys", {
+  deviceId: text("device_id")
+    .primaryKey()
+    .references(() => devices.id),
+  keyId: text("key_id").notNull(),
+  key: text("key").notNull(),
+});
+
+export const crossSigningKeys = pgTable("cross_signing_keys", {
+  userId: snowflake("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  masterKey: text("master_key").notNull(),
+  selfSigningKey: text("self_signing_key").notNull(),
+  signatures: text("signatures").notNull(),
+});
+
+export const toDeviceQueue = pgTable("to_device_queue", {
+  id: snowflake().primaryKey(),
+  recipientDeviceId: text("recipient_device_id")
+    .notNull()
+    .references(() => devices.id),
+  senderDeviceId: text("sender_device_id")
+    .notNull()
+    .references(() => devices.id),
+  type: text("type").notNull(),
+  ciphertext: bytea("ciphertext").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const keyBackupVersions = pgTable(
+  "key_backup_versions",
+  {
+    userId: snowflake("user_id")
+      .notNull()
+      .references(() => users.id),
+    version: integer("version").notNull(),
+    publicKey: text("public_key").notNull(),
+    authData: text("auth_data").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.version] })],
+);
+
+export const keyBackupSessions = pgTable(
+  "key_backup_sessions",
+  {
+    userId: snowflake("user_id").notNull(),
+    version: integer("version").notNull(),
+    channelId: snowflake("channel_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    firstIndex: integer("first_index").notNull(),
+    encryptedSession: bytea("encrypted_session").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.version, table.sessionId] })],
+);
+
+export const guilds = pgTable("guilds", {
+  id: snowflake().primaryKey(),
+  name: text("name").notNull(),
+  iconKey: text("icon_key"),
+  ownerId: snowflake("owner_id")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const guildMembers = pgTable(
+  "guild_members",
+  {
+    guildId: snowflake("guild_id")
+      .notNull()
+      .references(() => guilds.id),
+    userId: snowflake("user_id")
+      .notNull()
+      .references(() => users.id),
+    nickname: text("nickname"),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.guildId, table.userId] })],
+);
+
+export const roles = pgTable("roles", {
+  id: snowflake().primaryKey(),
+  guildId: snowflake("guild_id")
+    .notNull()
+    .references(() => guilds.id),
+  name: text("name").notNull(),
+  color: integer("color").notNull().default(0),
+  position: integer("position").notNull().default(0),
+  permissions: bigint("permissions", { mode: "bigint" }).notNull().default(sql`0`),
+  mentionable: boolean("mentionable").notNull().default(true),
+});
+
+export const memberRoles = pgTable(
+  "member_roles",
+  {
+    guildId: snowflake("guild_id").notNull(),
+    userId: snowflake("user_id").notNull(),
+    roleId: snowflake("role_id")
+      .notNull()
+      .references(() => roles.id),
+  },
+  (table) => [
+    primaryKey({ columns: [table.guildId, table.userId, table.roleId] }),
+    index("member_roles_guild_user_idx").on(table.guildId, table.userId),
+  ],
+);
+
+export const bans = pgTable(
+  "bans",
+  {
+    guildId: snowflake("guild_id")
+      .notNull()
+      .references(() => guilds.id),
+    userId: snowflake("user_id")
+      .notNull()
+      .references(() => users.id),
+    reason: text("reason"),
+    by: snowflake("by")
+      .notNull()
+      .references(() => users.id),
+  },
+  (table) => [primaryKey({ columns: [table.guildId, table.userId] })],
+);
+
+export const channels = pgTable("channels", {
+  id: snowflake().primaryKey(),
+  guildId: snowflake("guild_id").references(() => guilds.id),
+  type: text("type", { enum: ["text", "voice", "category", "dm", "group_dm"] }).notNull(),
+  name: text("name"),
+  topic: text("topic"),
+  position: integer("position").notNull().default(0),
+  parentId: snowflake("parent_id"),
+  nsfw: boolean("nsfw").notNull().default(false),
+  ownerId: snowflake("owner_id").references(() => users.id),
+});
+
+export const channelRecipients = pgTable(
+  "channel_recipients",
+  {
+    channelId: snowflake("channel_id")
+      .notNull()
+      .references(() => channels.id),
+    userId: snowflake("user_id")
+      .notNull()
+      .references(() => users.id),
+  },
+  (table) => [primaryKey({ columns: [table.channelId, table.userId] })],
+);
+
+export const permissionOverwrites = pgTable(
+  "permission_overwrites",
+  {
+    channelId: snowflake("channel_id")
+      .notNull()
+      .references(() => channels.id),
+    targetId: snowflake("target_id").notNull(),
+    targetType: text("target_type", { enum: ["role", "member"] }).notNull(),
+    allow: bigint("allow", { mode: "bigint" }).notNull().default(sql`0`),
+    deny: bigint("deny", { mode: "bigint" }).notNull().default(sql`0`),
+  },
+  (table) => [primaryKey({ columns: [table.channelId, table.targetId, table.targetType] })],
+);
+
+export const events = pgTable(
+  "events",
+  {
+    id: snowflake().primaryKey(),
+    channelId: snowflake("channel_id")
+      .notNull()
+      .references(() => channels.id),
+    senderUserId: snowflake("sender_user_id")
+      .notNull()
+      .references(() => users.id),
+    senderDeviceId: text("sender_device_id")
+      .notNull()
+      .references(() => devices.id),
+    type: text("type").notNull().default("m.encrypted"),
+    relatesToId: snowflake("relates_to_id"),
+    relType: text("rel_type", { enum: ["edit", "reaction", "reply"] }),
+    megolmSessionId: text("megolm_session_id"),
+    ciphertext: bytea("ciphertext").notNull(),
+    redactedAt: timestamp("redacted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("events_channel_created_idx").on(table.channelId, table.createdAt)],
+);
+
+export const attachments = pgTable("attachments", {
+  id: snowflake().primaryKey(),
+  uploaderId: snowflake("uploader_id")
+    .notNull()
+    .references(() => users.id),
+  channelId: snowflake("channel_id")
+    .notNull()
+    .references(() => channels.id),
+  size: integer("size").notNull(),
+  storagePath: text("storage_path").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const invites = pgTable("invites", {
+  code: text("code").primaryKey(),
+  guildId: snowflake("guild_id")
+    .notNull()
+    .references(() => guilds.id),
+  channelId: snowflake("channel_id")
+    .notNull()
+    .references(() => channels.id),
+  inviterId: snowflake("inviter_id")
+    .notNull()
+    .references(() => users.id),
+  maxUses: integer("max_uses"),
+  uses: integer("uses").notNull().default(0),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+});
+
+export const friendships = pgTable(
+  "friendships",
+  {
+    userId: snowflake("user_id")
+      .notNull()
+      .references(() => users.id),
+    otherId: snowflake("other_id")
+      .notNull()
+      .references(() => users.id),
+    status: text("status", { enum: ["pending", "accepted", "blocked"] }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.otherId] })],
+);
+
+export const readStates = pgTable(
+  "read_states",
+  {
+    userId: snowflake("user_id")
+      .notNull()
+      .references(() => users.id),
+    channelId: snowflake("channel_id")
+      .notNull()
+      .references(() => channels.id),
+    lastReadEventId: snowflake("last_read_event_id"),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.channelId] })],
+);
+
+export const userSettings = pgTable("user_settings", {
+  userId: snowflake("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  encryptedBlob: bytea("encrypted_blob").notNull(),
+});

@@ -1,0 +1,27 @@
+/* Theme tokens for this app. Colors are our own brand, not Discord colors. */
+@import "tailwindcss";
+
+:root {
+  --color-bg-rail: #14151a;
+  --color-bg-sidebar: #1b1d24;
+  --color-bg-main: #21232c;
+  --color-bg-members: #1b1d24;
+  --color-text-primary: #e7e9ee;
+  --color-text-muted: #9a9dab;
+  --color-accent: #5b6cff;
+  --color-border: #2a2c37;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background-color: var(--color-bg-main);
+  color: var(--color-text-primary);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+}
