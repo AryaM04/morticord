@@ -70,9 +70,12 @@ export class GatewayService {
   private readonly userSessions = new Map<string, Set<string>>();
   private readonly guildUsers = new Map<string, Set<string>>();
   private readonly presence = new Map<string, PresenceStatus>();
-  /** Last TYPING_START send time per "userId:channelId" pair, for the 3s throttle. */
+  /** Last TYPING_START send time per "userId:channelId" pair. */
   private readonly typingThrottle = new Map<string, number>();
-  private static readonly TYPING_THROTTLE_MS = 3000;
+  // The client sends TYPING at most once per 3 s. The server limit is lower,
+  // so that network jitter cannot make the server drop a correct TYPING.
+  private static readonly TYPING_THROTTLE_MS = 2500;
+  private static readonly TYPING_THROTTLE_MAX_ENTRIES = 10_000;
 
   constructor(options: GatewayServiceOptions = {}) {
     this.resumeBufferTtlMs = options.resumeBufferTtlMs ?? 60_000;
@@ -325,7 +328,7 @@ export class GatewayService {
 
   // ---- dispatch / fan-out --------------------------------------------------
 
-  /** True at most once per 3s per (user, channel) pair; also records this call as a send. */
+  /** True at most once per throttle period per (user, channel) pair. Also records this call as a send. */
   shouldSendTyping(userId: bigint, channelId: bigint): boolean {
     const key = `${userId.toString()}:${channelId.toString()}`;
     const now = Date.now();
@@ -333,8 +336,25 @@ export class GatewayService {
     if (now - last < GatewayService.TYPING_THROTTLE_MS) {
       return false;
     }
+    if (this.typingThrottle.size >= GatewayService.TYPING_THROTTLE_MAX_ENTRIES) {
+      this.removeExpiredTypingEntries(now);
+    }
     this.typingThrottle.set(key, now);
     return true;
+  }
+
+  /** Forget the typing throttle of a user in a channel. Call this after the user sends a message. */
+  clearTyping(userId: bigint, channelId: bigint): void {
+    this.typingThrottle.delete(`${userId.toString()}:${channelId.toString()}`);
+  }
+
+  /** Keep the throttle map bounded: remove the entries that no longer block a send. */
+  private removeExpiredTypingEntries(now: number): void {
+    for (const [key, last] of this.typingThrottle) {
+      if (now - last >= GatewayService.TYPING_THROTTLE_MS) {
+        this.typingThrottle.delete(key);
+      }
+    }
   }
 
   /** Send one dispatch to every live session of one user, buffering it for resume. */

@@ -285,7 +285,7 @@ describeWithDb("messages gateway", () => {
     expect(echoed).toBe(true);
   });
 
-  it("throttles TYPING_START to once per 3 seconds per user and channel", async () => {
+  it("throttles TYPING_START per user and channel", async () => {
     const owner = await registerUser();
     const guild = await createGuild(owner.accessToken);
     const channelId = textChannelOf(guild);
@@ -303,6 +303,31 @@ describeWithDb("messages gateway", () => {
     ownerSession.ws.send(JSON.stringify({ op: GatewayOpcode.TYPING, d: { channelId } }));
     const missed = await neverArrives(viewerSession.ws, (env) => env.t === "TYPING_START", 500);
     expect(missed).toBe(true);
+  });
+
+  it("lets TYPING through at once after the user sends a message", async () => {
+    const owner = await registerUser();
+    const guild = await createGuild(owner.accessToken);
+    const channelId = textChannelOf(guild);
+    const ownerSession = await identifyExisting(owner);
+    openSockets.push(ownerSession.ws);
+
+    const { session: viewerSession } = await identify();
+    openSockets.push(viewerSession.ws);
+    await inviteAndJoin(owner.accessToken, channelId, viewerSession.accessToken);
+
+    const first = nextMessage(viewerSession.ws, (env) => env.t === "TYPING_START");
+    ownerSession.ws.send(JSON.stringify({ op: GatewayOpcode.TYPING, d: { channelId } }));
+    await first;
+
+    // The message ends the typing state, so the throttle must not block the next TYPING.
+    const created = nextMessage(viewerSession.ws, (env) => env.t === "EVENT_CREATE");
+    await postMessage(owner.accessToken, channelId, "done typing");
+    await created;
+
+    const second = nextMessage(viewerSession.ws, (env) => env.t === "TYPING_START");
+    ownerSession.ws.send(JSON.stringify({ op: GatewayOpcode.TYPING, d: { channelId } }));
+    await second;
   });
 
   it("sends READ_STATE_UPDATE only to the user's other sessions", async () => {
