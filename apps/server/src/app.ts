@@ -16,6 +16,8 @@ import { registerAuthRoutes } from "./modules/auth/routes.js";
 import { registerGuildRoutes } from "./modules/guilds/routes.js";
 import { registerMessageRoutes } from "./modules/messages/routes.js";
 import { registerUserRoutes } from "./modules/users/routes.js";
+import { registerVoiceRoutes } from "./modules/voice/routes.js";
+import { VoiceService } from "./modules/voice/service.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -29,6 +31,10 @@ export interface AppDeps {
   gateway?: GatewayService;
   /** Shorter heartbeat/identify timers for tests, so they do not sleep for real seconds. */
   gatewayTiming?: GatewayTimingOptions;
+  /** The voice hub. Tests can pass one in to inspect it; buildApp makes one when it is left out. */
+  voice?: VoiceService;
+  /** How long a disconnected voice peer's state stays, in case it resumes. Tests can shorten it. */
+  voiceGraceMs?: number;
 }
 
 const IMAGE_CONTENT_TYPES = ["image/png", "image/jpeg", "image/webp"];
@@ -37,7 +43,8 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
   const gateway = rawDeps.gateway ?? new GatewayService();
   await gateway.primeFromDatabase(rawDeps.db);
-  const deps: AppDeps = { ...rawDeps, gateway };
+  const voice = rawDeps.voice ?? new VoiceService(rawDeps.voiceGraceMs);
+  const deps: AppDeps = { ...rawDeps, gateway, voice };
 
   // Raw image bytes for the avatar upload route. Fastify parses only JSON
   // and text by default, so image bodies need their own parser.
@@ -68,7 +75,8 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
   await app.register(async (instance) => registerUserRoutes(instance, deps), { prefix: "/api/v1" });
   await app.register(async (instance) => registerGuildRoutes(instance, deps), { prefix: "/api/v1" });
   await app.register(async (instance) => registerMessageRoutes(instance, deps), { prefix: "/api/v1" });
-  registerGatewayRoute(app, { db: deps.db, config: deps.config, gateway }, deps.gatewayTiming);
+  await app.register(async (instance) => registerVoiceRoutes(instance, deps), { prefix: "/api/v1" });
+  registerGatewayRoute(app, { db: deps.db, config: deps.config, gateway, voice }, deps.gatewayTiming);
 
   return app;
 }

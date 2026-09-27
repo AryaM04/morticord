@@ -53,7 +53,7 @@ function parseId(text: string): bigint {
 }
 
 export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): Promise<void> {
-  const guildsDeps = { db: deps.db, config: deps.config, gateway: deps.gateway };
+  const guildsDeps = { db: deps.db, config: deps.config, gateway: deps.gateway, voice: deps.voice };
 
   app.post("/guilds", { preHandler: app.authenticate }, async (request, reply) => {
     const input = createGuildRequestSchema.parse(request.body);
@@ -199,7 +199,7 @@ export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): 
 
   app.delete("/channels/:id", { preHandler: app.authenticate }, async (request, reply) => {
     const channelId = parseId((request.params as { id: string }).id);
-    await deleteChannel(deps.db, channelId, request.auth!.userId, deps.gateway);
+    await deleteChannel(deps.db, channelId, request.auth!.userId, deps.gateway, deps.voice);
     return reply.status(204).send();
   });
 

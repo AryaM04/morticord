@@ -6,6 +6,8 @@ import { channels } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
 import type { GatewayService } from "../gateway/service.js";
+import { removeChannelVoice } from "../voice/gateway-ops.js";
+import type { VoiceService } from "../voice/service.js";
 import { loadMemberContext, loadOverwrites } from "./member-context.js";
 import { requirePermission } from "./service.js";
 import { toChannelJson } from "./serialize.js";
@@ -172,6 +174,7 @@ export async function deleteChannel(
   channelId: bigint,
   userId: bigint,
   gateway?: GatewayService,
+  voice?: VoiceService,
 ): Promise<void> {
   const channel = await loadChannelOrThrow(db, channelId);
   const context = await loadMemberContext(db, channel.guildId!, userId);
@@ -195,6 +198,10 @@ export async function deleteChannel(
     id: channelId.toString(),
     guildId: channel.guildId!.toString(),
   });
+
+  if (channel.type === "voice" && gateway && voice) {
+    removeChannelVoice({ gateway, voice }, channelId, viewerIds);
+  }
 }
 
 export interface ChannelOrderEntry {
