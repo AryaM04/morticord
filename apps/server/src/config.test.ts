@@ -63,4 +63,22 @@ describe("loadConfig", () => {
     expect(config.oauth.github).toEqual({ clientId: "id", clientSecret: "secret" });
     expect(config.oauth.google).toBeUndefined();
   });
+
+  it("uses TURN_DOMAIN as the default TURN_PUBLIC_HOST", () => {
+    const config = loadConfig(validEnv);
+    expect(config.turnPublicHost).toBe("localhost");
+    expect(config.turnTlsEnabled).toBe(false);
+    expect(config.turnTlsPort).toBe(5349);
+  });
+
+  it("uses TURN_PUBLIC_HOST when it is set", () => {
+    const config = loadConfig({ ...validEnv, TURN_PUBLIC_HOST: "turn.example.com" });
+    expect(config.turnPublicHost).toBe("turn.example.com");
+  });
+
+  it("turns on TURN over TLS only when TURN_TLS_ENABLED is \"true\"", () => {
+    const config = loadConfig({ ...validEnv, TURN_TLS_ENABLED: "true", TURN_TLS_PORT: "5350" });
+    expect(config.turnTlsEnabled).toBe(true);
+    expect(config.turnTlsPort).toBe(5350);
+  });
 });

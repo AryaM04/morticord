@@ -14,6 +14,15 @@ const envSchema = z.object({
   TURN_SECRET: z.string().min(1),
   TURN_DOMAIN: z.string().min(1),
   TURN_PORT: z.coerce.number().int().positive().default(3478),
+  // The host name or address that voice clients use to reach TURN. It
+  // defaults to TURN_DOMAIN, so most deployments need not set it.
+  TURN_PUBLIC_HOST: z.string().min(1).optional(),
+  // Set to "true" to also offer a `turns:` (TURN over TLS) URL.
+  TURN_TLS_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  TURN_TLS_PORT: z.coerce.number().int().positive().default(5349),
 
   // Origin of the web app. The server puts it in email links and OAuth redirects.
   WEB_ORIGIN: z.string().min(1).default("http://localhost:5173"),
@@ -46,6 +55,9 @@ export interface AppConfig {
   turnSecret: string;
   turnDomain: string;
   turnPort: number;
+  turnPublicHost: string;
+  turnTlsEnabled: boolean;
+  turnTlsPort: number;
   webOrigin: string;
   dataDir: string;
   smtp: {
@@ -90,6 +102,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     turnSecret: data.TURN_SECRET,
     turnDomain: data.TURN_DOMAIN,
     turnPort: data.TURN_PORT,
+    turnPublicHost: data.TURN_PUBLIC_HOST ?? data.TURN_DOMAIN,
+    turnTlsEnabled: data.TURN_TLS_ENABLED ?? false,
+    turnTlsPort: data.TURN_TLS_PORT,
     webOrigin: data.WEB_ORIGIN,
     dataDir: data.DATA_DIR,
     smtp: {
