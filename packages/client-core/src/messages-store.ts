@@ -695,7 +695,12 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
     const state = get();
     const current = state.channels[channelId] ?? createChannelMessagesState();
     const next = fn(current);
-    set({ channels: { ...state.channels, [channelId]: next } });
+    // Skip the store update when nothing changed (for example, a typing
+    // tick that expired no one): this keeps idle CPU use low, since a
+    // pointless update would still wake every subscriber.
+    if (next !== current) {
+      set({ channels: { ...state.channels, [channelId]: next } });
+    }
     return next;
   }
 

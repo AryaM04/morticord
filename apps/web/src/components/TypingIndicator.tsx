@@ -5,8 +5,13 @@ import { useRealtime } from "../lib/useRealtime.js";
 import { displayNameOf } from "../lib/members.js";
 import { messagesStore } from "../lib/messages.js";
 
+// A stable fallback object: a fresh `{}` on every render would break the
+// store subscription (it always looks "changed"), causing a render loop,
+// so a module-level constant is used instead (see `MemberList.tsx`).
+const EMPTY_TYPING: Record<string, number> = {};
+
 export function TypingIndicator({ channelId, guildId }: { channelId: string; guildId: string }) {
-  const typing = useMessages((s) => s.channels[channelId]?.typing ?? {});
+  const typing = useMessages((s) => s.channels[channelId]?.typing ?? EMPTY_TYPING);
   const state = useRealtime((s) => s);
   const userIds = Object.keys(typing);
 
