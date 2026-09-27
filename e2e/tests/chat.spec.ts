@@ -256,29 +256,13 @@ test.describe("chat", () => {
     await deleteRow.getByRole("button", { name: "Delete" }).click({ modifiers: ["Shift"] });
     await expect(pageB.getByText("Message to delete")).not.toBeVisible({ timeout: 10_000 });
 
-    // 6. While A types, B sees the typing indicator. `notifyTyping`
-    // throttles its own gateway send to once per 3s (see
-    // TYPING_SEND_INTERVAL_MS), both on the client and again on the
-    // server (per user and channel), and every earlier `sendMessage`
-    // above already triggered one through the composer's onChange
-    // handler, so wait that cooldown out first or this step's keystroke
-    // is dropped. Retry a couple of times: a slow CI runner can still
-    // lose the single gateway message to timing.
-    const typingIndicator = pageB.getByText(`${userA.displayName} is typing…`);
-    let typingSeen = false;
-    for (let attempt = 0; attempt < 3 && !typingSeen; attempt += 1) {
-      await pageA.waitForTimeout(3_500);
-      await composerBox(pageA).pressSequentially("typing but not sending", { delay: 20 });
-      // Bring B to front: a backgrounded page's rendering can lag behind
-      // its (already-updated) store state in this environment, the same
-      // reason the read-marker check in step 8 needs it.
-      await pageB.bringToFront();
-      typingSeen = await typingIndicator
-        .waitFor({ state: "visible", timeout: 4_000 })
-        .then(() => true)
-        .catch(() => false);
-    }
-    expect(typingSeen).toBe(true);
+    // 6. While A types, B sees the typing indicator. A sent message resets
+    // the typing throttle on the client and on the server, so the first
+    // keystroke after a send must reach B at once. Do not wait or retry here.
+    await composerBox(pageA).pressSequentially("typing but not sending", { delay: 20 });
+    // Bring B to front: a background page can draw later than its store changes.
+    await pageB.bringToFront();
+    await expect(pageB.getByText(`${userA.displayName} is typing…`)).toBeVisible({ timeout: 5_000 });
     await composerBox(pageA).fill("");
 
     // 7. Markdown renders; a script payload shows as plain text and never runs.

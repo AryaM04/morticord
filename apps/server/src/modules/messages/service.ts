@@ -154,6 +154,9 @@ export async function createEvent(
 
   const row = await loadEventInChannel(db, channelId, eventId);
   if (gateway) {
+    if (isTimelineEvent(row)) {
+      gateway.clearTyping(userId, channelId);
+    }
     await gateway.toChannelViewers(db, channelId, DispatchEvent.EVENT_CREATE, toEventJson(row));
   }
   return { event: row, created: true };

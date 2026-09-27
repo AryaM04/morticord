@@ -808,6 +808,8 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
     },
 
     async sendMessage(channelId, body, mentions, relatesToId) {
+      // A sent message ends the typing state. The next keystroke must send TYPING again at once.
+      updateChannel(get, set, channelId, (c) => ({ ...c, lastTypingSentAt: -Infinity }));
       const nonce = makeNonce();
       const pending: PendingMessage = {
         nonce,
