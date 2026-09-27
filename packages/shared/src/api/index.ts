@@ -4,3 +4,4 @@ export * from "./auth.js";
 export * from "./users.js";
 export * from "./guilds.js";
 export * from "./messages.js";
+export * from "./voice.js";
