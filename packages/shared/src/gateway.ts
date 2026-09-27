@@ -7,6 +7,8 @@
 
 import { z } from "zod";
 import { guildViewSchema } from "./api/guilds.js";
+import { eventSchema, readStateSchema } from "./api/messages.js";
+import { idSchema } from "./api/common.js";
 
 export const GatewayOpcode = {
   DISPATCH: 0,
@@ -98,6 +100,8 @@ export const readyPayloadSchema = z.object({
   user: z.object({ id: z.string().min(1) }).passthrough(),
   guilds: z.array(guildViewSchema),
   presences: z.array(presenceEntrySchema),
+  /** The caller's last-read event id per channel, for unread markers. */
+  readStates: z.array(readStateSchema),
 });
 
 /** Sent by the server after a successful RESUME, once missed dispatches replay. */
@@ -116,6 +120,29 @@ export const guildMemberRemovePayloadSchema = z.object({
 });
 export const presenceUpdatePayloadSchema = presenceEntrySchema;
 
+/** Sent by the server to channel viewers right after a new event commits. */
+export const eventCreatePayloadSchema = eventSchema;
+
+/** Sent by the server to channel viewers after a redaction: the target event and its redacted relations. */
+export const eventRedactPayloadSchema = z.object({
+  channelId: idSchema,
+  ids: z.array(idSchema).min(1),
+});
+
+/** Sent by the client to say it is typing in a channel. */
+export const typingPayloadSchema = z.object({
+  channelId: idSchema,
+});
+
+/** Sent by the server to other viewers of a channel when someone is typing. */
+export const typingStartPayloadSchema = z.object({
+  channelId: idSchema,
+  userId: idSchema,
+});
+
+/** Sent by the server to a user's other sessions once one session marks a channel read. */
+export const readStateUpdatePayloadSchema = readStateSchema;
+
 export type HelloPayload = z.infer<typeof helloPayloadSchema>;
 export type IdentifyPayload = z.infer<typeof identifyPayloadSchema>;
 export type ResumePayload = z.infer<typeof resumePayloadSchema>;
@@ -130,6 +157,11 @@ export type GuildDeletePayload = z.infer<typeof guildDeletePayloadSchema>;
 export type ChannelDeletePayload = z.infer<typeof channelDeletePayloadSchema>;
 export type GuildMemberRemovePayload = z.infer<typeof guildMemberRemovePayloadSchema>;
 export type PresenceUpdatePayload = z.infer<typeof presenceUpdatePayloadSchema>;
+export type EventCreatePayload = z.infer<typeof eventCreatePayloadSchema>;
+export type EventRedactPayload = z.infer<typeof eventRedactPayloadSchema>;
+export type TypingPayload = z.infer<typeof typingPayloadSchema>;
+export type TypingStartPayload = z.infer<typeof typingStartPayloadSchema>;
+export type ReadStateUpdatePayload = z.infer<typeof readStateUpdatePayloadSchema>;
 
 /** Names of every dispatch event ("t" field), for the fan-out code and tests. */
 export const DispatchEvent = {
@@ -143,6 +175,10 @@ export const DispatchEvent = {
   GUILD_MEMBER_UPDATE: "GUILD_MEMBER_UPDATE",
   GUILD_MEMBER_REMOVE: "GUILD_MEMBER_REMOVE",
   PRESENCE_UPDATE: "PRESENCE_UPDATE",
+  EVENT_CREATE: "EVENT_CREATE",
+  EVENT_REDACT: "EVENT_REDACT",
+  TYPING_START: "TYPING_START",
+  READ_STATE_UPDATE: "READ_STATE_UPDATE",
 } as const;
 
 export type DispatchEventName = (typeof DispatchEvent)[keyof typeof DispatchEvent];

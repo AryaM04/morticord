@@ -45,7 +45,7 @@ function ready(sessionId = "session-1") {
   return {
     op: GatewayOpcode.DISPATCH,
     t: "READY",
-    d: { sessionId, user: { id: "1" }, guilds: [], presences: [] },
+    d: { sessionId, user: { id: "1" }, guilds: [], presences: [], readStates: [] },
   };
 }
 
