@@ -20,8 +20,13 @@
           iceServers: iceServers,
           iceTransportPolicy: "relay",
         });
+        window.iceLog = [];
+        pc.onicecandidateerror = function (event) {
+          window.iceLog.push("error " + event.errorCode + " " + event.errorText + " " + event.url);
+        };
         pc.onicecandidate = function (event) {
           if (event.candidate) {
+            window.iceLog.push("candidate " + event.candidate.candidate);
             window.candidateQueue.push(event.candidate.toJSON());
           }
         };
