@@ -27,17 +27,25 @@ function snowflake(name?: string) {
   return name === undefined ? bigint({ mode: "bigint" }) : bigint(name, { mode: "bigint" });
 }
 
-export const users = pgTable("users", {
-  id: snowflake().primaryKey(),
-  username: text("username").notNull().unique(),
-  displayName: text("display_name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: boolean("email_verified").notNull().default(false),
-  passwordHash: text("password_hash"),
-  avatarKey: text("avatar_key"),
-  statusText: text("status_text"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const users = pgTable(
+  "users",
+  {
+    id: snowflake().primaryKey(),
+    username: text("username").notNull().unique(),
+    displayName: text("display_name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: boolean("email_verified").notNull().default(false),
+    passwordHash: text("password_hash"),
+    avatarKey: text("avatar_key"),
+    statusText: text("status_text"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Speeds up the case-insensitive prefix match of member search.
+    index("users_username_lower_idx").using("btree", sql`lower(${table.username}) text_pattern_ops`),
+    index("users_display_name_lower_idx").using("btree", sql`lower(${table.displayName}) text_pattern_ops`),
+  ],
+);
 
 /** A one-use token sent by email, for email verification or password reset. */
 export const emailTokens = pgTable(
@@ -199,7 +207,11 @@ export const guildMembers = pgTable(
     nickname: text("nickname"),
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [primaryKey({ columns: [table.guildId, table.userId] })],
+  (table) => [
+    primaryKey({ columns: [table.guildId, table.userId] }),
+    // Speeds up the case-insensitive prefix match of member search.
+    index("guild_members_nickname_lower_idx").using("btree", sql`lower(${table.nickname}) text_pattern_ops`),
+  ],
 );
 
 export const roles = pgTable("roles", {

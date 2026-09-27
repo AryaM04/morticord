@@ -110,6 +110,7 @@ export function ChatPane({ channelId }: { channelId: string | null }) {
           <TypingIndicator channelId={channelId} guildId={channel.guildId} />
           <Composer
             channelId={channelId}
+            guildId={channel.guildId}
             canSend={canSend}
             disabledReason="You do not have permission to send a message here."
             replyTarget={replyTarget}

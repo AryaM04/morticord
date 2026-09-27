@@ -29,6 +29,13 @@
       "when": 1790484823166,
       "tag": "0003_m3_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790488168936,
+      "tag": "0004_m4_member_search",
+      "breakpoints": true
     }
   ]
 }
