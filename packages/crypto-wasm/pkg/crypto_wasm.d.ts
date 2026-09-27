@@ -1,0 +1,192 @@
+/* tslint:disable */
+/* eslint-disable */
+
+/**
+ * The long-term identity of one device.
+ */
+export class Account {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Creates a session from the first message of the other device.
+     * Get the session with `take_session`. The first plaintext is in `plaintext`.
+     */
+    create_inbound_session(identity_key: string, message_type: number, ciphertext: Uint8Array): InboundResult;
+    create_outbound_session(identity_key: string, one_time_key: string): Session;
+    static from_pickle(pickle: string, key: Uint8Array): Account;
+    generate_one_time_keys(count: number): void;
+    mark_keys_as_published(): void;
+    constructor();
+    /**
+     * Returns a JSON object: key id to base64 public key.
+     */
+    one_time_keys(): string;
+    pickle(key: Uint8Array): string;
+    sign(message: string): string;
+    readonly curve25519_key: string;
+    readonly ed25519_key: string;
+}
+
+export class Decrypted {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    readonly plaintext: Uint8Array;
+    readonly message_index: number;
+}
+
+export class Encrypted {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    readonly ciphertext: Uint8Array;
+    readonly message_type: number;
+}
+
+/**
+ * The send side of a Megolm session. One device owns it for one channel.
+ */
+export class GroupSession {
+    free(): void;
+    [Symbol.dispose](): void;
+    encrypt(plaintext: Uint8Array): string;
+    static from_pickle(pickle: string, key: Uint8Array): GroupSession;
+    constructor();
+    pickle(key: Uint8Array): string;
+    readonly message_index: number;
+    readonly session_id: string;
+    /**
+     * The key to send to other devices (through Olm) so that they can decrypt.
+     */
+    readonly session_key: string;
+}
+
+/**
+ * The receive side of a Megolm session.
+ */
+export class InboundGroupSession {
+    free(): void;
+    [Symbol.dispose](): void;
+    decrypt(ciphertext: string): Decrypted;
+    /**
+     * Exports the key from `index`. Returns undefined if the index is too old.
+     */
+    export_at(index: number): string | undefined;
+    static from_pickle(pickle: string, key: Uint8Array): InboundGroupSession;
+    /**
+     * Creates the session from an exported key (history share or backup).
+     */
+    static import(exported_key: string): InboundGroupSession;
+    /**
+     * Creates the session from a key that the sender shared directly.
+     */
+    constructor(session_key: string);
+    pickle(key: Uint8Array): string;
+    readonly first_known_index: number;
+    readonly session_id: string;
+}
+
+export class InboundResult {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Gives the session to the caller. Call this only one time.
+     */
+    take_session(): Session;
+    readonly plaintext: Uint8Array;
+}
+
+/**
+ * An Olm session between two devices.
+ */
+export class Session {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    decrypt(message_type: number, ciphertext: Uint8Array): Uint8Array;
+    encrypt(plaintext: Uint8Array): Encrypted;
+    static from_pickle(pickle: string, key: Uint8Array): Session;
+    pickle(key: Uint8Array): string;
+    readonly session_id: string;
+}
+
+export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
+
+export interface InitOutput {
+    readonly memory: WebAssembly.Memory;
+    readonly __wbg_account_free: (a: number, b: number) => void;
+    readonly __wbg_decrypted_free: (a: number, b: number) => void;
+    readonly __wbg_encrypted_free: (a: number, b: number) => void;
+    readonly __wbg_get_decrypted_message_index: (a: number) => number;
+    readonly __wbg_get_encrypted_message_type: (a: number) => number;
+    readonly __wbg_groupsession_free: (a: number, b: number) => void;
+    readonly __wbg_inboundgroupsession_free: (a: number, b: number) => void;
+    readonly __wbg_inboundresult_free: (a: number, b: number) => void;
+    readonly __wbg_session_free: (a: number, b: number) => void;
+    readonly account_create_inbound_session: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly account_create_outbound_session: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly account_curve25519_key: (a: number) => [number, number];
+    readonly account_ed25519_key: (a: number) => [number, number];
+    readonly account_from_pickle: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly account_generate_one_time_keys: (a: number, b: number) => void;
+    readonly account_mark_keys_as_published: (a: number) => void;
+    readonly account_new: () => number;
+    readonly account_one_time_keys: (a: number) => [number, number];
+    readonly account_pickle: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly account_sign: (a: number, b: number, c: number) => [number, number];
+    readonly decrypted_plaintext: (a: number) => [number, number];
+    readonly encrypted_ciphertext: (a: number) => [number, number];
+    readonly groupsession_encrypt: (a: number, b: number, c: number) => [number, number];
+    readonly groupsession_from_pickle: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly groupsession_message_index: (a: number) => number;
+    readonly groupsession_new: () => number;
+    readonly groupsession_pickle: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly groupsession_session_id: (a: number) => [number, number];
+    readonly groupsession_session_key: (a: number) => [number, number];
+    readonly inboundgroupsession_decrypt: (a: number, b: number, c: number) => [number, number, number];
+    readonly inboundgroupsession_export_at: (a: number, b: number) => [number, number];
+    readonly inboundgroupsession_first_known_index: (a: number) => number;
+    readonly inboundgroupsession_from_pickle: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly inboundgroupsession_import: (a: number, b: number) => [number, number, number];
+    readonly inboundgroupsession_new: (a: number, b: number) => [number, number, number];
+    readonly inboundgroupsession_pickle: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly inboundgroupsession_session_id: (a: number) => [number, number];
+    readonly inboundresult_plaintext: (a: number) => [number, number];
+    readonly inboundresult_take_session: (a: number) => [number, number, number];
+    readonly session_decrypt: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly session_encrypt: (a: number, b: number, c: number) => [number, number, number];
+    readonly session_from_pickle: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly session_pickle: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly session_session_id: (a: number) => [number, number];
+    readonly __wbindgen_exn_store: (a: number) => void;
+    readonly __externref_table_alloc: () => number;
+    readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __externref_table_dealloc: (a: number) => void;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __wbindgen_start: () => void;
+}
+
+export type SyncInitInput = BufferSource | WebAssembly.Module;
+
+/**
+ * Instantiates the given `module`, which can either be bytes or
+ * a precompiled `WebAssembly.Module`.
+ *
+ * @param {{ module: SyncInitInput }} module - Passing `SyncInitInput` directly is deprecated.
+ *
+ * @returns {InitOutput}
+ */
+export function initSync(module: { module: SyncInitInput } | SyncInitInput): InitOutput;
+
+/**
+ * If `module_or_path` is {RequestInfo} or {URL}, makes a request and
+ * for everything else, calls `WebAssembly.instantiate` directly.
+ *
+ * @param {{ module_or_path: InitInput | Promise<InitInput> }} module_or_path - Passing `InitInput` directly is deprecated.
+ *
+ * @returns {Promise<InitOutput>}
+ */
+export default function __wbg_init (module_or_path?: { module_or_path: InitInput | Promise<InitInput> } | InitInput | Promise<InitInput>): Promise<InitOutput>;

@@ -10,3 +10,4 @@ coverage/
 apps/web/dist/
 apps/server/dist/
 src-tauri/target/
+packages/crypto-wasm/target/
