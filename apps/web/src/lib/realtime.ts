@@ -10,6 +10,7 @@ import {
 } from "@discord-clone/client-core";
 import { GatewayOpcode } from "@discord-clone/shared";
 import { session } from "./session.js";
+import { messagesStore } from "./messages.js";
 
 export const realtimeStore = createRealtimeStore();
 
@@ -34,7 +35,14 @@ function startGateway(deviceId: string): void {
     url: gatewayUrl(),
     deviceId,
     api: session.apiClient,
-    onEvent: (event) => realtimeStore.getState().applyDispatch(event),
+    onEvent: (event) => {
+      realtimeStore.getState().applyDispatch(event);
+      if (event.t === "READY") {
+        const payload = event.d as { user: { id: string } };
+        messagesStore.getState().setSelfUserId(payload.user.id);
+      }
+      messagesStore.getState().applyDispatch(event.t, event.d);
+    },
     onState: (state) => connectionStore.setState({ state }),
     onFatal: () => {
       void session.store.getState().logout();
@@ -46,6 +54,7 @@ function stopGateway(): void {
   client?.close();
   client = null;
   realtimeStore.getState().reset();
+  messagesStore.setState({ selfUserId: null, channels: {}, channelOrder: [] });
   connectionStore.setState({ state: "closed" });
 }
 
