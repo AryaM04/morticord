@@ -10,14 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Read the Node version from .nvmrc
         id: node-version
         run: echo "version=$(cat .nvmrc)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ steps.node-version.outputs.version }}
 
@@ -43,14 +43,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Read the Node version from .nvmrc
         id: node-version
         run: echo "version=$(cat .nvmrc)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ steps.node-version.outputs.version }}
 
@@ -64,7 +64,11 @@ jobs:
         run: pnpm --filter @discord-clone/e2e exec playwright install --with-deps chromium
 
       - name: Copy the environment file
-        run: cp .env.example .env
+        # On Linux, 127.0.0.1 in the container is not the host. Coturn must
+        # announce the host IP, so that relay packets go back through Docker.
+        run: |
+          cp .env.example .env
+          sed -i "s/^TURN_EXTERNAL_IP=.*/TURN_EXTERNAL_IP=$(hostname -I | awk '{print $1}')/" .env
 
       - name: Start coturn
         run: docker compose --env-file .env -f infra/docker-compose.dev.yml up -d coturn
