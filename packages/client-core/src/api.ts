@@ -51,6 +51,12 @@ export interface ApiClient {
   request<T>(method: string, path: string, options?: RequestOptions<T>): Promise<T>;
   getTokens(): Promise<TokenSet | null>;
   setTokens(tokens: TokenSet | null): Promise<void>;
+  /**
+   * A fresh access token for the signed-in device, refreshed first when it
+   * is near expiry. Used by the gateway client, which needs a token but
+   * does not go through `request`. Throws when no session is stored.
+   */
+  getAccessToken(): Promise<string>;
 }
 
 // A refresh should happen a little before the access token truly expires,
@@ -208,5 +214,16 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     return parsed.data;
   }
 
-  return { request, getTokens, setTokens };
+  async function getAccessToken(): Promise<string> {
+    let tokens = await getTokens();
+    if (!tokens) {
+      throw new ApiError(401, "SIGNED_OUT", "There is no session to get a token for.");
+    }
+    if (isExpiringSoon(tokens.accessTokenExpiresAt)) {
+      tokens = await refresh(tokens);
+    }
+    return tokens.accessToken;
+  }
+
+  return { request, getTokens, setTokens, getAccessToken };
 }

@@ -175,6 +175,9 @@ importers:
       '@discord-clone/shared':
         specifier: workspace:*
         version: link:../shared
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
       zustand:
         specifier: ^5.0.1
         version: 5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.7.0(react@19.3.0))
@@ -188,9 +191,6 @@ importers:
       vitest:
         specifier: ^2.1.5
         version: 2.1.9(@types/node@22.20.4)(lightningcss@1.32.0)
-      zod:
-        specifier: ^3.23.8
-        version: 3.25.76
 
   packages/crypto-wasm:
     devDependencies:
