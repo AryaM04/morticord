@@ -41,7 +41,7 @@ interface OAuthCookiePayload {
 }
 
 export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): Promise<void> {
-  const authDeps = { db: deps.db, config: deps.config, mailer: deps.mailer };
+  const authDeps = { db: deps.db, config: deps.config, mailer: deps.mailer, gateway: deps.gateway };
   const oauthClients = createOAuthClients(deps.config);
 
   app.post(

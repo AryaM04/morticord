@@ -1,14 +1,16 @@
 // Invite logic and database access: create, preview, accept, list, delete.
 import { randomInt } from "node:crypto";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
-import { Permission } from "@discord-clone/shared";
+import { DispatchEvent, Permission } from "@discord-clone/shared";
 import type { DbClient } from "../../db/client.js";
 import { bans, channels, guildMembers, guilds, invites, users } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
+import type { GatewayService } from "../gateway/service.js";
 import { loadMemberContext } from "./member-context.js";
 import { requirePermission } from "./service.js";
 import { channelsInGuild } from "./channels.js";
 import { buildGuildView } from "./service.js";
+import { toMemberJson } from "./serialize.js";
 
 const CODE_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const CODE_LENGTH = 8;
@@ -140,7 +142,7 @@ export async function getInvitePreview(db: DbClient, code: string) {
   };
 }
 
-export async function acceptInvite(db: DbClient, code: string, userId: bigint) {
+export async function acceptInvite(db: DbClient, code: string, userId: bigint, gateway?: GatewayService) {
   const rows = await db.select().from(invites).where(eq(invites.code, code)).limit(1);
   const invite = rows[0];
   if (!invite || isInviteExpiredOrUsedUp(invite)) {
@@ -183,9 +185,22 @@ export async function acceptInvite(db: DbClient, code: string, userId: bigint) {
     throw new AppError(404, "INVITE_NOT_FOUND", "This invite is not valid, expired or fully used.");
   }
 
-  await db.insert(guildMembers).values({ guildId: invite.guildId, userId, nickname: null }).onConflictDoNothing();
+  const memberRows = await db
+    .insert(guildMembers)
+    .values({ guildId: invite.guildId, userId, nickname: null })
+    .onConflictDoNothing()
+    .returning();
+  const memberRow = memberRows[0];
 
-  return buildGuildView(db, invite.guildId, userId);
+  const view = await buildGuildView(db, invite.guildId, userId);
+
+  if (gateway && memberRow) {
+    gateway.addUserToGuild(invite.guildId, userId);
+    gateway.toGuild(invite.guildId, DispatchEvent.GUILD_MEMBER_ADD, toMemberJson(memberRow, []), userId);
+    gateway.toUser(userId, DispatchEvent.GUILD_CREATE, view);
+  }
+
+  return view;
 }
 
 export async function listGuildInvites(db: DbClient, guildId: bigint, userId: bigint) {

@@ -45,13 +45,13 @@ export async function registerUserRoutes(app: FastifyInstance, deps: AppDeps): P
   });
 
   app.get("/users/@me/devices", { preHandler: app.authenticate }, async (request, reply) => {
-    const authDeps = { db: deps.db, config: deps.config, mailer: deps.mailer };
+    const authDeps = { db: deps.db, config: deps.config, mailer: deps.mailer, gateway: deps.gateway };
     const result = await listDevices(authDeps, request.auth!.userId, request.auth!.deviceId);
     return reply.send({ devices: result });
   });
 
   app.delete("/users/@me/devices/:id", { preHandler: app.authenticate }, async (request, reply) => {
-    const authDeps = { db: deps.db, config: deps.config, mailer: deps.mailer };
+    const authDeps = { db: deps.db, config: deps.config, mailer: deps.mailer, gateway: deps.gateway };
     const { id } = request.params as { id: string };
     await deleteDevice(authDeps, request.auth!.userId, id);
     return reply.status(204).send();

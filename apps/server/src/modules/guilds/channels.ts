@@ -1,12 +1,14 @@
 // Channel logic and database access: create, update, delete and reorder.
 import { and, eq, inArray } from "drizzle-orm";
-import { Permission, type ChannelType } from "@discord-clone/shared";
+import { DispatchEvent, Permission, type ChannelType } from "@discord-clone/shared";
 import type { DbClient } from "../../db/client.js";
 import { channels } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
+import type { GatewayService } from "../gateway/service.js";
 import { loadMemberContext } from "./member-context.js";
 import { requirePermission } from "./service.js";
+import { toChannelJson } from "./serialize.js";
 
 /** Lowercase, spaces to dashes, and strip anything outside [a-z0-9-_]. */
 export function normalizeTextChannelName(raw: string): string {
@@ -73,7 +75,13 @@ export interface CreateChannelInput {
   topic?: string;
 }
 
-export async function createChannel(db: DbClient, guildId: bigint, userId: bigint, input: CreateChannelInput) {
+export async function createChannel(
+  db: DbClient,
+  guildId: bigint,
+  userId: bigint,
+  input: CreateChannelInput,
+  gateway?: GatewayService,
+) {
   const context = await loadMemberContext(db, guildId, userId);
   if (!context) {
     throw new AppError(404, "NOT_FOUND", "This guild does not exist.");
@@ -95,7 +103,11 @@ export async function createChannel(db: DbClient, guildId: bigint, userId: bigin
     position: 0,
   });
 
-  return loadChannelOrThrow(db, channelId);
+  const channel = await loadChannelOrThrow(db, channelId);
+  if (gateway) {
+    await gateway.toChannelViewers(db, channelId, DispatchEvent.CHANNEL_CREATE, toChannelJson(channel));
+  }
+  return channel;
 }
 
 export interface UpdateChannelInput {
@@ -104,7 +116,13 @@ export interface UpdateChannelInput {
   parentId?: bigint | null;
 }
 
-export async function updateChannel(db: DbClient, channelId: bigint, userId: bigint, input: UpdateChannelInput) {
+export async function updateChannel(
+  db: DbClient,
+  channelId: bigint,
+  userId: bigint,
+  input: UpdateChannelInput,
+  gateway?: GatewayService,
+) {
   const channel = await loadChannelOrThrow(db, channelId);
   const context = await loadMemberContext(db, channel.guildId!, userId);
   if (!context) {
@@ -127,10 +145,22 @@ export async function updateChannel(db: DbClient, channelId: bigint, userId: big
   if (Object.keys(patch).length > 0) {
     await db.update(channels).set(patch).where(eq(channels.id, channelId));
   }
-  return loadChannelOrThrow(db, channelId);
+  const updated = await loadChannelOrThrow(db, channelId);
+  if (gateway) {
+    // A permission-affecting update (parent, and later overwrites in M5)
+    // can change who may view the channel; a simple UPDATE is sent to
+    // today's viewers, which is right whenever visibility did not change.
+    await gateway.toChannelViewers(db, channelId, DispatchEvent.CHANNEL_UPDATE, toChannelJson(updated));
+  }
+  return updated;
 }
 
-export async function deleteChannel(db: DbClient, channelId: bigint, userId: bigint): Promise<void> {
+export async function deleteChannel(
+  db: DbClient,
+  channelId: bigint,
+  userId: bigint,
+  gateway?: GatewayService,
+): Promise<void> {
   const channel = await loadChannelOrThrow(db, channelId);
   const context = await loadMemberContext(db, channel.guildId!, userId);
   if (!context) {
@@ -138,11 +168,20 @@ export async function deleteChannel(db: DbClient, channelId: bigint, userId: big
   }
   requirePermission(context, Permission.MANAGE_CHANNELS);
 
+  // Compute who could see the channel before it is gone: once the DELETE
+  // commits, the permission-overwrite rows for this channel cascade away.
+  const viewerIds = gateway ? await gateway.computeChannelViewers(db, channel.guildId!, channelId) : [];
+
   await db.transaction(async (tx) => {
     if (channel.type === "category") {
       await tx.update(channels).set({ parentId: null }).where(eq(channels.parentId, channelId));
     }
     await tx.delete(channels).where(eq(channels.id, channelId));
+  });
+
+  gateway?.toUsers(viewerIds, DispatchEvent.CHANNEL_DELETE, {
+    id: channelId.toString(),
+    guildId: channel.guildId!.toString(),
   });
 }
 

@@ -5,9 +5,11 @@ import type { AuthResult, RefreshResult } from "@discord-clone/shared";
 import type { AppConfig } from "../../config.js";
 import type { DbClient } from "../../db/client.js";
 import { devices, emailTokens, refreshTokens, users } from "../../db/schema.js";
+import { GatewayCloseCode } from "@discord-clone/shared";
 import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
 import type { Mailer } from "../../mailer.js";
+import type { GatewayService } from "../gateway/service.js";
 import { toUserJson, type UserRow } from "../users/serialize.js";
 import {
   EMAIL_VERIFY_TOKEN_TTL_MS,
@@ -24,6 +26,7 @@ export interface AuthDeps {
   db: DbClient;
   config: AppConfig;
   mailer: Mailer;
+  gateway?: GatewayService;
 }
 
 // A constant hash, verified against when the user does not exist or has no
@@ -289,6 +292,7 @@ export async function logoutDevice(deps: AuthDeps, deviceId: string): Promise<vo
     .where(and(eq(refreshTokens.deviceId, deviceId), isNull(refreshTokens.revokedAt)));
   // The device row stays. Its E2EE keys, if any, are still valid for
   // events sent to it while it was signed in.
+  deps.gateway?.closeDevice(deviceId, GatewayCloseCode.DEVICE_REVOKED, "Signed out.");
 }
 
 export interface DeviceSummary {
@@ -354,8 +358,7 @@ export async function deleteDevice(deps: AuthDeps, userId: bigint, deviceId: str
     await db.delete(devices).where(eq(devices.id, deviceId));
   }
 
-  // TODO(M2 gateway): close every live gateway connection for this device
-  // with close code 4010, once the gateway module exists.
+  deps.gateway?.closeDevice(deviceId, GatewayCloseCode.DEVICE_REVOKED, "This device was removed.");
 }
 
 export async function verifyEmail(deps: AuthDeps, token: string): Promise<void> {
@@ -450,6 +453,8 @@ export async function resetPassword(deps: AuthDeps, token: string, newPassword: 
     .update(refreshTokens)
     .set({ revokedAt: now })
     .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+
+  deps.gateway?.closeUser(userId, GatewayCloseCode.DEVICE_REVOKED, "The password was reset.");
 }
 
 export { createSession, findUserByEmail, findUserById, toAuthResult };

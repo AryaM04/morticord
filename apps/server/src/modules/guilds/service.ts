@@ -1,11 +1,13 @@
 // Guild logic and database access. Routes stay thin and call these functions.
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { hasPermission, Permission } from "@discord-clone/shared";
+import { DispatchEvent } from "@discord-clone/shared";
 import type { AppConfig } from "../../config.js";
 import type { DbClient } from "../../db/client.js";
 import { channels, guildMembers, guilds, roles } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
+import type { GatewayService } from "../gateway/service.js";
 import { deleteIconFile, generateIconKey, saveIconFile } from "./icon.js";
 import {
   guildPermissions,
@@ -35,6 +37,7 @@ const DEFAULT_EVERYONE_PERMISSIONS =
 export interface GuildsDeps {
   db: DbClient;
   config: AppConfig;
+  gateway?: GatewayService;
 }
 
 async function loadOwnMemberRow(db: DbClient, guildId: bigint, userId: bigint): Promise<MemberRow> {
@@ -64,7 +67,7 @@ export async function buildGuildView(db: DbClient, guildId: bigint, userId: bigi
 }
 
 export async function createGuild(deps: GuildsDeps, userId: bigint, name: string) {
-  const { db } = deps;
+  const { db, gateway } = deps;
 
   const ownedCount = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -108,7 +111,10 @@ export async function createGuild(deps: GuildsDeps, userId: bigint, name: string
     ]);
   });
 
-  return buildGuildView(db, guildId, userId);
+  gateway?.addUserToGuild(guildId, userId);
+  const view = await buildGuildView(db, guildId, userId);
+  gateway?.toUser(userId, DispatchEvent.GUILD_CREATE, view);
+  return view;
 }
 
 export async function getGuildView(db: DbClient, guildId: bigint, userId: bigint) {
@@ -116,11 +122,12 @@ export async function getGuildView(db: DbClient, guildId: bigint, userId: bigint
 }
 
 export async function updateGuild(
-  db: DbClient,
+  deps: GuildsDeps,
   guildId: bigint,
   userId: bigint,
   patch: { name?: string },
 ) {
+  const { db, gateway } = deps;
   const context = await loadMemberContext(db, guildId, userId);
   if (!context) {
     throw new AppError(404, "NOT_FOUND", "This guild does not exist.");
@@ -130,11 +137,19 @@ export async function updateGuild(
   if (patch.name !== undefined) {
     await db.update(guilds).set({ name: patch.name }).where(eq(guilds.id, guildId));
   }
-  return buildGuildView(db, guildId, userId);
+  const view = await buildGuildView(db, guildId, userId);
+  gateway?.toGuild(guildId, DispatchEvent.GUILD_UPDATE, {
+    id: view.id,
+    name: view.name,
+    iconKey: view.iconKey,
+    ownerId: view.ownerId,
+    createdAt: view.createdAt,
+  });
+  return view;
 }
 
 export async function deleteGuild(deps: GuildsDeps, guildId: bigint, userId: bigint): Promise<void> {
-  const { db, config } = deps;
+  const { db, config, gateway } = deps;
   const context = await loadMemberContext(db, guildId, userId);
   if (!context) {
     throw new AppError(404, "NOT_FOUND", "This guild does not exist.");
@@ -143,9 +158,19 @@ export async function deleteGuild(deps: GuildsDeps, guildId: bigint, userId: big
     throw new AppError(403, "OWNER_ONLY", "Only the guild owner can delete the guild.");
   }
 
+  const memberRows = await db
+    .select({ userId: guildMembers.userId })
+    .from(guildMembers)
+    .where(eq(guildMembers.guildId, guildId));
+
   await db.delete(guilds).where(eq(guilds.id, guildId));
   if (context.guild.iconKey) {
     await deleteIconFile(config.dataDir, guildId);
+  }
+
+  if (gateway) {
+    gateway.toUsers(memberRows.map((row) => row.userId), DispatchEvent.GUILD_DELETE, { id: guildId.toString() });
+    gateway.removeGuild(guildId);
   }
 }
 
@@ -176,7 +201,8 @@ export async function removeGuildIcon(deps: GuildsDeps, guildId: bigint, userId:
   return buildGuildView(db, guildId, userId);
 }
 
-export async function leaveGuild(db: DbClient, guildId: bigint, userId: bigint): Promise<void> {
+export async function leaveGuild(deps: GuildsDeps, guildId: bigint, userId: bigint): Promise<void> {
+  const { db, gateway } = deps;
   const context = await loadMemberContext(db, guildId, userId);
   if (!context) {
     throw new AppError(404, "NOT_FOUND", "This guild does not exist.");
@@ -185,6 +211,10 @@ export async function leaveGuild(db: DbClient, guildId: bigint, userId: bigint):
     throw new AppError(409, "OWNER_CANNOT_LEAVE", "The guild owner cannot leave. Delete the guild instead.");
   }
   await db.delete(guildMembers).where(and(eq(guildMembers.guildId, guildId), eq(guildMembers.userId, userId)));
+
+  gateway?.toGuild(guildId, DispatchEvent.GUILD_MEMBER_REMOVE, { guildId: guildId.toString(), userId: userId.toString() });
+  gateway?.toUser(userId, DispatchEvent.GUILD_DELETE, { id: guildId.toString() });
+  gateway?.removeUserFromGuild(guildId, userId);
 }
 
 export interface ListMembersInput {
