@@ -35,3 +35,43 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  # Separate job: browser tests that need a real TURN server. It does
+  # not run in the "build" job above, since it needs Docker Compose and
+  # a real Chromium engine, and it is slower than a unit test run.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Read the Node version from .nvmrc
+        id: node-version
+        run: echo "version=$(cat .nvmrc)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.node-version.outputs.version }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install the Playwright browser
+        run: pnpm --filter @discord-clone/e2e exec playwright install --with-deps chromium
+
+      - name: Copy the environment file
+        run: cp .env.example .env
+
+      - name: Start coturn
+        run: docker compose --env-file .env -f infra/docker-compose.dev.yml up -d coturn
+
+      - name: Run the end-to-end tests
+        run: pnpm e2e
+
+      - name: Stop coturn
+        if: always()
+        run: docker compose --env-file .env -f infra/docker-compose.dev.yml down

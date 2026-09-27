@@ -20,15 +20,25 @@ services:
       retries: 10
     mem_limit: 512m
 
+  # coturn does not read the secret or the external IP from the config
+  # file at start-up, so both values come in as command-line flags, read
+  # from .env. This keeps the secret out of the image and lets the
+  # external IP change per host, without editing turnserver.conf.
+  #
+  # Docker Desktop (Windows and macOS) runs containers inside a hidden VM,
+  # so a container never shares the host network. Each TURN port, and the
+  # full relay port range, must be published to the host here. The relay
+  # candidate address must then be set to the address a peer on the host
+  # actually dials (127.0.0.1 for a one-machine dev or test set-up). This
+  # same set-up also works on native Linux Docker.
   coturn:
     image: coturn/coturn:latest
     restart: unless-stopped
-    command: ["-c", "/etc/coturn/turnserver.conf"]
-    environment:
-      TURN_SECRET: ${TURN_SECRET}
-      TURN_DOMAIN: ${TURN_DOMAIN}
-      TURN_RELAY_MIN_PORT: ${TURN_RELAY_MIN_PORT}
-      TURN_RELAY_MAX_PORT: ${TURN_RELAY_MAX_PORT}
+    command:
+      - "-c"
+      - "/etc/coturn/turnserver.conf"
+      - "--static-auth-secret=${TURN_SECRET}"
+      - "--external-ip=${TURN_EXTERNAL_IP}"
     ports:
       - "${TURN_PORT}:3478"
       - "${TURN_PORT}:3478/udp"
