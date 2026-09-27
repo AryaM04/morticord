@@ -73,7 +73,7 @@ jobs:
           echo "TURN_TEST_HOST=$HOST_IP" >> "$GITHUB_ENV"
 
       - name: Start coturn
-        run: docker compose --env-file .env -f infra/docker-compose.dev.yml up -d coturn
+        run: docker compose --env-file .env -f infra/docker-compose.dev.yml -f infra/docker-compose.ci.yml up -d coturn
 
       - name: Run the end-to-end tests
         run: pnpm e2e
@@ -82,8 +82,8 @@ jobs:
         if: failure()
         run: |
           grep TURN_EXTERNAL_IP .env
-          docker compose --env-file .env -f infra/docker-compose.dev.yml logs coturn | tail -n 80
+          docker compose --env-file .env -f infra/docker-compose.dev.yml -f infra/docker-compose.ci.yml logs coturn | tail -n 80
 
       - name: Stop coturn
         if: always()
-        run: docker compose --env-file .env -f infra/docker-compose.dev.yml down
+        run: docker compose --env-file .env -f infra/docker-compose.dev.yml -f infra/docker-compose.ci.yml down
