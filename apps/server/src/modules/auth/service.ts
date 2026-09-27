@@ -4,7 +4,7 @@ import { hash, verify } from "@node-rs/argon2";
 import type { AuthResult, RefreshResult } from "@discord-clone/shared";
 import type { AppConfig } from "../../config.js";
 import type { DbClient } from "../../db/client.js";
-import { emailTokens, refreshTokens, users } from "../../db/schema.js";
+import { devices, emailTokens, refreshTokens, users } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
 import type { Mailer } from "../../mailer.js";
@@ -60,16 +60,27 @@ async function loadUserOrThrow(db: DbClient, id: bigint): Promise<UserRow> {
   return user;
 }
 
-/** Create one device session: a refresh token row and a signed access token. */
+/**
+ * Create one device session: a device row, a refresh token row and a
+ * signed access token. `deviceName` should come from the request's
+ * User-Agent header, summarized with `summarizeUserAgent`.
+ */
 async function createSession(
   db: DbClient,
   config: AppConfig,
   userId: bigint,
+  deviceName = "Unknown device",
 ): Promise<{ deviceId: string; accessToken: string; accessTokenExpiresAt: Date; refreshToken: string }> {
   const deviceId = generateDeviceId();
   const refreshToken = generateRefreshToken();
   const tokenHash = hashRefreshToken(refreshToken);
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+  await db.insert(devices).values({
+    id: deviceId,
+    userId,
+    name: deviceName,
+  });
 
   await db.insert(refreshTokens).values({
     id: nextId(),
@@ -127,7 +138,11 @@ export interface RegisterInput {
   displayName?: string;
 }
 
-export async function registerUser(deps: AuthDeps, input: RegisterInput): Promise<AuthResult> {
+export async function registerUser(
+  deps: AuthDeps,
+  input: RegisterInput,
+  deviceName?: string,
+): Promise<AuthResult> {
   const { db } = deps;
 
   const conflicts = await db
@@ -168,7 +183,7 @@ export async function registerUser(deps: AuthDeps, input: RegisterInput): Promis
     throw error;
   }
 
-  const session = await createSession(db, deps.config, id);
+  const session = await createSession(db, deps.config, id, deviceName);
   await sendVerificationEmail(deps, id, input.email);
 
   const user = await loadUserOrThrow(db, id);
@@ -180,7 +195,11 @@ export interface LoginInput {
   password: string;
 }
 
-export async function loginUser(deps: AuthDeps, input: LoginInput): Promise<AuthResult> {
+export async function loginUser(
+  deps: AuthDeps,
+  input: LoginInput,
+  deviceName?: string,
+): Promise<AuthResult> {
   const { db } = deps;
   const user = await findUserByEmail(db, input.email);
   const hashToCheck = user?.passwordHash ?? (await getDummyHash());
@@ -190,7 +209,7 @@ export async function loginUser(deps: AuthDeps, input: LoginInput): Promise<Auth
     throw new AppError(401, "INVALID_CREDENTIALS", "The email or password is not correct.");
   }
 
-  const session = await createSession(db, deps.config, user.id);
+  const session = await createSession(db, deps.config, user.id, deviceName);
   return toAuthResult(user, session);
 }
 
@@ -268,6 +287,75 @@ export async function logoutDevice(deps: AuthDeps, deviceId: string): Promise<vo
     .update(refreshTokens)
     .set({ revokedAt: new Date() })
     .where(and(eq(refreshTokens.deviceId, deviceId), isNull(refreshTokens.revokedAt)));
+  // The device row stays. Its E2EE keys, if any, are still valid for
+  // events sent to it while it was signed in.
+}
+
+export interface DeviceSummary {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastSeen: string;
+  current: boolean;
+}
+
+/** List a user's devices (login sessions), newest first. */
+export async function listDevices(
+  deps: AuthDeps,
+  userId: bigint,
+  currentDeviceId: string,
+): Promise<DeviceSummary[]> {
+  const rows = await deps.db
+    .select({
+      id: devices.id,
+      name: devices.name,
+      createdAt: devices.createdAt,
+      lastSeen: devices.lastSeen,
+    })
+    .from(devices)
+    .where(eq(devices.userId, userId))
+    .orderBy(devices.createdAt);
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    createdAt: row.createdAt.toISOString(),
+    lastSeen: row.lastSeen.toISOString(),
+    current: row.id === currentDeviceId,
+  }));
+}
+
+/**
+ * Revoke a device's refresh tokens, so it must sign in again. The device
+ * row is deleted only when it holds no end-to-end encryption keys; a
+ * device with keys stays, since other devices may still send it queued
+ * "to-device" events under those keys.
+ */
+export async function deleteDevice(deps: AuthDeps, userId: bigint, deviceId: string): Promise<void> {
+  const { db } = deps;
+  const now = new Date();
+
+  const rows = await db
+    .select({ id: devices.id, curve25519Key: devices.curve25519Key })
+    .from(devices)
+    .where(and(eq(devices.id, deviceId), eq(devices.userId, userId)))
+    .limit(1);
+  const device = rows[0];
+  if (!device) {
+    throw new AppError(404, "NOT_FOUND", "This device does not exist.");
+  }
+
+  await db
+    .update(refreshTokens)
+    .set({ revokedAt: now })
+    .where(and(eq(refreshTokens.deviceId, deviceId), isNull(refreshTokens.revokedAt)));
+
+  if (device.curve25519Key === null) {
+    await db.delete(devices).where(eq(devices.id, deviceId));
+  }
+
+  // TODO(M2 gateway): close every live gateway connection for this device
+  // with close code 4010, once the gateway module exists.
 }
 
 export async function verifyEmail(deps: AuthDeps, token: string): Promise<void> {

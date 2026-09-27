@@ -13,6 +13,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
 } from "drizzle-orm/pg-core";
 
 /** Raw ciphertext bytes. The server stores and moves these bytes, and never reads them. */
@@ -51,7 +52,10 @@ export const emailTokens = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     usedAt: timestamp("used_at", { withTimezone: true }),
   },
-  (table) => [index("email_tokens_user_purpose_idx").on(table.userId, table.purpose)],
+  (table) => [
+    index("email_tokens_user_purpose_idx").on(table.userId, table.purpose),
+    unique("email_tokens_token_hash_key").on(table.tokenHash),
+  ],
 );
 
 export const oauthAccounts = pgTable(
@@ -66,26 +70,41 @@ export const oauthAccounts = pgTable(
   (table) => [primaryKey({ columns: [table.provider, table.providerUserId] })],
 );
 
-export const refreshTokens = pgTable("refresh_tokens", {
-  id: snowflake().primaryKey(),
-  userId: snowflake("user_id")
-    .notNull()
-    .references(() => users.id),
-  deviceId: text("device_id").notNull(),
-  tokenHash: text("token_hash").notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  revokedAt: timestamp("revoked_at", { withTimezone: true }),
-});
+export const refreshTokens = pgTable(
+  "refresh_tokens",
+  {
+    id: snowflake().primaryKey(),
+    userId: snowflake("user_id")
+      .notNull()
+      .references(() => users.id),
+    deviceId: text("device_id")
+      .notNull()
+      .references(() => devices.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("refresh_tokens_token_hash_key").on(table.tokenHash),
+    index("refresh_tokens_device_id_idx").on(table.deviceId),
+  ],
+);
 
+/**
+ * One device is one login session (a browser tab or an app install). The
+ * E2EE keys start empty and are filled in by the device once it sets up
+ * end-to-end encryption (milestone M6).
+ */
 export const devices = pgTable("devices", {
   id: text("id").primaryKey(),
   userId: snowflake("user_id")
     .notNull()
     .references(() => users.id),
   name: text("name").notNull(),
-  curve25519Key: text("curve25519_key").notNull(),
-  ed25519Key: text("ed25519_key").notNull(),
+  curve25519Key: text("curve25519_key"),
+  ed25519Key: text("ed25519_key"),
   signatureByUserSsk: text("signature_by_user_ssk"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -173,7 +192,7 @@ export const guildMembers = pgTable(
   {
     guildId: snowflake("guild_id")
       .notNull()
-      .references(() => guilds.id),
+      .references(() => guilds.id, { onDelete: "cascade" }),
     userId: snowflake("user_id")
       .notNull()
       .references(() => users.id),
@@ -187,7 +206,7 @@ export const roles = pgTable("roles", {
   id: snowflake().primaryKey(),
   guildId: snowflake("guild_id")
     .notNull()
-    .references(() => guilds.id),
+    .references(() => guilds.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   color: integer("color").notNull().default(0),
   position: integer("position").notNull().default(0),
@@ -198,11 +217,13 @@ export const roles = pgTable("roles", {
 export const memberRoles = pgTable(
   "member_roles",
   {
-    guildId: snowflake("guild_id").notNull(),
+    guildId: snowflake("guild_id")
+      .notNull()
+      .references(() => guilds.id, { onDelete: "cascade" }),
     userId: snowflake("user_id").notNull(),
     roleId: snowflake("role_id")
       .notNull()
-      .references(() => roles.id),
+      .references(() => roles.id, { onDelete: "cascade" }),
   },
   (table) => [
     primaryKey({ columns: [table.guildId, table.userId, table.roleId] }),
@@ -215,7 +236,7 @@ export const bans = pgTable(
   {
     guildId: snowflake("guild_id")
       .notNull()
-      .references(() => guilds.id),
+      .references(() => guilds.id, { onDelete: "cascade" }),
     userId: snowflake("user_id")
       .notNull()
       .references(() => users.id),
@@ -229,7 +250,7 @@ export const bans = pgTable(
 
 export const channels = pgTable("channels", {
   id: snowflake().primaryKey(),
-  guildId: snowflake("guild_id").references(() => guilds.id),
+  guildId: snowflake("guild_id").references(() => guilds.id, { onDelete: "cascade" }),
   type: text("type", { enum: ["text", "voice", "category", "dm", "group_dm"] }).notNull(),
   name: text("name"),
   topic: text("topic"),
@@ -244,7 +265,7 @@ export const channelRecipients = pgTable(
   {
     channelId: snowflake("channel_id")
       .notNull()
-      .references(() => channels.id),
+      .references(() => channels.id, { onDelete: "cascade" }),
     userId: snowflake("user_id")
       .notNull()
       .references(() => users.id),
@@ -257,7 +278,7 @@ export const permissionOverwrites = pgTable(
   {
     channelId: snowflake("channel_id")
       .notNull()
-      .references(() => channels.id),
+      .references(() => channels.id, { onDelete: "cascade" }),
     targetId: snowflake("target_id").notNull(),
     targetType: text("target_type", { enum: ["role", "member"] }).notNull(),
     allow: bigint("allow", { mode: "bigint" }).notNull().default(sql`0`),
@@ -272,7 +293,7 @@ export const events = pgTable(
     id: snowflake().primaryKey(),
     channelId: snowflake("channel_id")
       .notNull()
-      .references(() => channels.id),
+      .references(() => channels.id, { onDelete: "cascade" }),
     senderUserId: snowflake("sender_user_id")
       .notNull()
       .references(() => users.id),
@@ -307,10 +328,10 @@ export const invites = pgTable("invites", {
   code: text("code").primaryKey(),
   guildId: snowflake("guild_id")
     .notNull()
-    .references(() => guilds.id),
+    .references(() => guilds.id, { onDelete: "cascade" }),
   channelId: snowflake("channel_id")
     .notNull()
-    .references(() => channels.id),
+    .references(() => channels.id, { onDelete: "cascade" }),
   inviterId: snowflake("inviter_id")
     .notNull()
     .references(() => users.id),
@@ -341,7 +362,7 @@ export const readStates = pgTable(
       .references(() => users.id),
     channelId: snowflake("channel_id")
       .notNull()
-      .references(() => channels.id),
+      .references(() => channels.id, { onDelete: "cascade" }),
     lastReadEventId: snowflake("last_read_event_id"),
   },
   (table) => [primaryKey({ columns: [table.userId, table.channelId] })],

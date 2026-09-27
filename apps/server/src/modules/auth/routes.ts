@@ -15,6 +15,7 @@ import {
 import { generateCodeVerifier, generateState, type GitHub, type Google } from "arctic";
 import type { AppDeps } from "../../app.js";
 import { AppError } from "../../errors.js";
+import { summarizeUserAgent } from "./device-name.js";
 import { consumeOAuthCode, storeOAuthCode } from "./oauth-codes.js";
 import { createOAuthClients, completeOAuthLogin, fetchGitHubProfile, fetchGoogleProfile } from "./oauth.js";
 import {
@@ -48,7 +49,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
     { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
     async (request, reply) => {
       const input = registerRequestSchema.parse(request.body);
-      const result = await registerUser(authDeps, input);
+      const result = await registerUser(authDeps, input, summarizeUserAgent(request.headers["user-agent"]));
       return reply.status(201).send(result);
     },
   );
@@ -58,7 +59,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
     { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
     async (request, reply) => {
       const input = loginRequestSchema.parse(request.body);
-      const result = await loginUser(authDeps, input);
+      const result = await loginUser(authDeps, input, summarizeUserAgent(request.headers["user-agent"]));
       return reply.status(200).send(result);
     },
   );
@@ -189,7 +190,12 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
           : await fetchGitHubProfile(tokens.accessToken());
 
       const user = await completeOAuthLogin(deps.db, provider, profile);
-      const session = await createSession(deps.db, deps.config, user.id);
+      const session = await createSession(
+        deps.db,
+        deps.config,
+        user.id,
+        summarizeUserAgent(request.headers["user-agent"]),
+      );
       const result = toAuthResult(user, session);
       const code = storeOAuthCode(result);
 
