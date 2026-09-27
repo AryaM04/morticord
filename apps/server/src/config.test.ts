@@ -76,6 +76,12 @@ describe("loadConfig", () => {
     expect(config.turnPublicHost).toBe("turn.example.com");
   });
 
+  it("falls back to TURN_DOMAIN when TURN_PUBLIC_HOST is an empty string", () => {
+    // A copied .env.example leaves this variable set but empty, not unset.
+    const config = loadConfig({ ...validEnv, TURN_PUBLIC_HOST: "" });
+    expect(config.turnPublicHost).toBe("localhost");
+  });
+
   it("turns on TURN over TLS only when TURN_TLS_ENABLED is \"true\"", () => {
     const config = loadConfig({ ...validEnv, TURN_TLS_ENABLED: "true", TURN_TLS_PORT: "5350" });
     expect(config.turnTlsEnabled).toBe(true);

@@ -15,8 +15,10 @@ const envSchema = z.object({
   TURN_DOMAIN: z.string().min(1),
   TURN_PORT: z.coerce.number().int().positive().default(3478),
   // The host name or address that voice clients use to reach TURN. It
-  // defaults to TURN_DOMAIN, so most deployments need not set it.
-  TURN_PUBLIC_HOST: z.string().min(1).optional(),
+  // defaults to TURN_DOMAIN, so most deployments need not set it. An
+  // empty value (the common case in a copied .env.example) also falls
+  // back to the default, the same as leaving the variable unset.
+  TURN_PUBLIC_HOST: z.string().optional(),
   // Set to "true" to also offer a `turns:` (TURN over TLS) URL.
   TURN_TLS_ENABLED: z
     .string()
@@ -102,7 +104,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     turnSecret: data.TURN_SECRET,
     turnDomain: data.TURN_DOMAIN,
     turnPort: data.TURN_PORT,
-    turnPublicHost: data.TURN_PUBLIC_HOST ?? data.TURN_DOMAIN,
+    turnPublicHost: data.TURN_PUBLIC_HOST && data.TURN_PUBLIC_HOST.length > 0 ? data.TURN_PUBLIC_HOST : data.TURN_DOMAIN,
     turnTlsEnabled: data.TURN_TLS_ENABLED ?? false,
     turnTlsPort: data.TURN_TLS_PORT,
     webOrigin: data.WEB_ORIGIN,
