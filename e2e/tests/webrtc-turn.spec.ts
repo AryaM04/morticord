@@ -10,7 +10,9 @@ import { loadRootEnv } from "../env.js";
 
 loadRootEnv();
 
-const TURN_HOST = "127.0.0.1";
+// Chromium on Linux does not send ICE traffic through the loopback
+// interface. On Linux, set TURN_TEST_HOST to the host IP address.
+const TURN_HOST = process.env.TURN_TEST_HOST ?? "127.0.0.1";
 const TURN_PORT = Number(process.env.TURN_PORT ?? "3478");
 const TURN_SECRET = process.env.TURN_SECRET ?? "";
 const CANDIDATE_RELAY_TIMEOUT_MS = 20_000;

@@ -67,8 +67,10 @@ jobs:
         # On Linux, 127.0.0.1 in the container is not the host. Coturn must
         # announce the host IP, so that relay packets go back through Docker.
         run: |
+          HOST_IP=$(hostname -I | awk '{print $1}')
           cp .env.example .env
-          sed -i "s/^TURN_EXTERNAL_IP=.*/TURN_EXTERNAL_IP=$(hostname -I | awk '{print $1}')/" .env
+          sed -i "s/^TURN_EXTERNAL_IP=.*/TURN_EXTERNAL_IP=$HOST_IP/" .env
+          echo "TURN_TEST_HOST=$HOST_IP" >> "$GITHUB_ENV"
 
       - name: Start coturn
         run: docker compose --env-file .env -f infra/docker-compose.dev.yml up -d coturn
