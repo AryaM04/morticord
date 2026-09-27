@@ -70,6 +70,9 @@ export class GatewayService {
   private readonly userSessions = new Map<string, Set<string>>();
   private readonly guildUsers = new Map<string, Set<string>>();
   private readonly presence = new Map<string, PresenceStatus>();
+  /** Last TYPING_START send time per "userId:channelId" pair, for the 3s throttle. */
+  private readonly typingThrottle = new Map<string, number>();
+  private static readonly TYPING_THROTTLE_MS = 3000;
 
   constructor(options: GatewayServiceOptions = {}) {
     this.resumeBufferTtlMs = options.resumeBufferTtlMs ?? 60_000;
@@ -322,6 +325,18 @@ export class GatewayService {
 
   // ---- dispatch / fan-out --------------------------------------------------
 
+  /** True at most once per 3s per (user, channel) pair; also records this call as a send. */
+  shouldSendTyping(userId: bigint, channelId: bigint): boolean {
+    const key = `${userId.toString()}:${channelId.toString()}`;
+    const now = Date.now();
+    const last = this.typingThrottle.get(key) ?? 0;
+    if (now - last < GatewayService.TYPING_THROTTLE_MS) {
+      return false;
+    }
+    this.typingThrottle.set(key, now);
+    return true;
+  }
+
   /** Send one dispatch to every live session of one user, buffering it for resume. */
   toUser(userId: bigint, t: DispatchEventName, d: unknown): void {
     const sessionIds = this.userSessions.get(userId.toString());
@@ -330,6 +345,20 @@ export class GatewayService {
     }
     for (const sessionId of sessionIds) {
       this.dispatchToSession(sessionId, t, d);
+    }
+  }
+
+  /** Send one dispatch to every live session of one user, except sessions on `excludeDeviceId`. */
+  toUserExceptDevice(userId: bigint, excludeDeviceId: string, t: DispatchEventName, d: unknown): void {
+    const sessionIds = this.userSessions.get(userId.toString());
+    if (!sessionIds) {
+      return;
+    }
+    for (const sessionId of sessionIds) {
+      const session = this.sessions.get(sessionId);
+      if (session && session.deviceId !== excludeDeviceId) {
+        this.dispatchToSession(sessionId, t, d);
+      }
     }
   }
 
@@ -386,6 +415,26 @@ export class GatewayService {
     }
     const viewers = await this.computeChannelViewers(db, channel.guildId, channelId);
     this.toUsers(viewers, t, d);
+  }
+
+  /**
+   * Send one dispatch to every viewer of a channel except one user, e.g. a
+   * TYPING_START that must not echo back to the person who is typing.
+   */
+  async toChannelViewersExcept(
+    db: DbClient,
+    channelId: bigint,
+    excludeUserId: bigint,
+    t: DispatchEventName,
+    d: unknown,
+  ): Promise<void> {
+    const channelRows = await db.select().from(channels).where(eq(channels.id, channelId)).limit(1);
+    const channel = channelRows[0];
+    if (!channel || channel.guildId === null) {
+      return;
+    }
+    const viewers = await this.computeChannelViewers(db, channel.guildId, channelId);
+    this.toUsers(viewers.filter((userId) => userId !== excludeUserId), t, d);
   }
 
   /** Send one dispatch to an explicit list of users, e.g. viewers computed before a delete. */

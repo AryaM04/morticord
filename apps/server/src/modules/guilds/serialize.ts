@@ -52,6 +52,7 @@ export function toChannelJson(channel: ChannelRow, overwrites: OverwriteInput[] 
     topic: channel.topic,
     position: channel.position,
     parentId: channel.parentId?.toString() ?? null,
+    lastEventId: channel.lastEventId?.toString() ?? null,
     permissionOverwrites: overwrites.map((overwrite) => ({
       targetId: overwrite.targetId.toString(),
       targetType: overwrite.targetType,

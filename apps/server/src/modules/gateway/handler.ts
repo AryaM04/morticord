@@ -10,6 +10,7 @@ import {
   identifyPayloadSchema,
   presenceSetPayloadSchema,
   resumePayloadSchema,
+  typingPayloadSchema,
   type DispatchEventName,
   type ReadyPayload,
 } from "@discord-clone/shared";
@@ -19,6 +20,8 @@ import type { DbClient } from "../../db/client.js";
 import { users } from "../../db/schema.js";
 import { verifyAccessToken } from "../auth/tokens.js";
 import { buildGuildView } from "../guilds/service.js";
+import { handleTyping } from "../messages/typing.js";
+import { loadReadStates } from "../messages/service.js";
 import { GatewayService, loadGuildIdsForUser, type GatewaySocket } from "./service.js";
 
 export interface GatewayTimingOptions {
@@ -53,12 +56,17 @@ async function buildReadyPayload(
   const user = userRows[0];
   const guildIds = await loadGuildIdsForUser(db, userId);
   const guilds = await Promise.all(guildIds.map((guildId) => buildGuildView(db, guildId, userId)));
+  const readStateRows = await loadReadStates(db, userId);
 
   return {
     sessionId,
     user: { id: userId.toString(), username: user?.username, displayName: user?.displayName },
     guilds,
     presences: gateway.onlinePresencesFor(userId),
+    readStates: readStateRows.map((row) => ({
+      channelId: row.channelId.toString(),
+      lastReadEventId: row.lastReadEventId?.toString() ?? null,
+    })),
   };
 }
 
@@ -213,6 +221,22 @@ export function registerGatewayRoute(
       send(GatewayOpcode.HEARTBEAT_ACK);
     }
 
+    function handleTypingOp(payload: unknown): void {
+      if (!state.sessionId) {
+        closeConnection(GatewayCloseCode.NOT_AUTHENTICATED, "Identify before sending typing.");
+        return;
+      }
+      const parsed = typingPayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        closeConnection(GatewayCloseCode.DECODE_ERROR, "The TYPING payload is not valid.");
+        return;
+      }
+      const info = gateway.getSession(state.sessionId);
+      if (info) {
+        void handleTyping(db, gateway, info.userId, BigInt(parsed.data.channelId));
+      }
+    }
+
     function handlePresenceSet(payload: unknown): void {
       if (!state.sessionId) {
         closeConnection(GatewayCloseCode.NOT_AUTHENTICATED, "Identify before setting presence.");
@@ -268,6 +292,9 @@ export function registerGatewayRoute(
           break;
         case GatewayOpcode.PRESENCE_SET:
           handlePresenceSet(envelope.d);
+          break;
+        case GatewayOpcode.TYPING:
+          handleTypingOp(envelope.d);
           break;
         default:
           closeConnection(GatewayCloseCode.UNKNOWN_OPCODE, "Unknown opcode.");
