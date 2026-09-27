@@ -51,7 +51,7 @@ function parseId(text: string): bigint {
 }
 
 export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): Promise<void> {
-  const guildsDeps = { db: deps.db, config: deps.config };
+  const guildsDeps = { db: deps.db, config: deps.config, gateway: deps.gateway };
 
   app.post("/guilds", { preHandler: app.authenticate }, async (request, reply) => {
     const input = createGuildRequestSchema.parse(request.body);
@@ -68,7 +68,7 @@ export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): 
   app.patch("/guilds/:id", { preHandler: app.authenticate }, async (request, reply) => {
     const guildId = parseId((request.params as { id: string }).id);
     const input = updateGuildRequestSchema.parse(request.body);
-    const guild = await updateGuild(deps.db, guildId, request.auth!.userId, input);
+    const guild = await updateGuild(guildsDeps, guildId, request.auth!.userId, input);
     return reply.send(guild);
   });
 
@@ -133,19 +133,25 @@ export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): 
 
   app.delete("/guilds/:id/members/@me", { preHandler: app.authenticate }, async (request, reply) => {
     const guildId = parseId((request.params as { id: string }).id);
-    await leaveGuild(deps.db, guildId, request.auth!.userId);
+    await leaveGuild(guildsDeps, guildId, request.auth!.userId);
     return reply.status(204).send();
   });
 
   app.post("/guilds/:id/channels", { preHandler: app.authenticate }, async (request, reply) => {
     const guildId = parseId((request.params as { id: string }).id);
     const input = createChannelRequestSchema.parse(request.body);
-    const channel = await createChannel(deps.db, guildId, request.auth!.userId, {
-      name: input.name,
-      type: input.type,
-      parentId: input.parentId ? BigInt(input.parentId) : null,
-      topic: input.topic,
-    });
+    const channel = await createChannel(
+      deps.db,
+      guildId,
+      request.auth!.userId,
+      {
+        name: input.name,
+        type: input.type,
+        parentId: input.parentId ? BigInt(input.parentId) : null,
+        topic: input.topic,
+      },
+      deps.gateway,
+    );
     return reply.status(201).send(toChannelJson(channel));
   });
 
@@ -168,17 +174,23 @@ export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): 
   app.patch("/channels/:id", { preHandler: app.authenticate }, async (request, reply) => {
     const channelId = parseId((request.params as { id: string }).id);
     const input = updateChannelRequestSchema.parse(request.body);
-    const channel = await updateChannel(deps.db, channelId, request.auth!.userId, {
-      name: input.name,
-      topic: input.topic,
-      parentId: input.parentId === undefined ? undefined : input.parentId ? BigInt(input.parentId) : null,
-    });
+    const channel = await updateChannel(
+      deps.db,
+      channelId,
+      request.auth!.userId,
+      {
+        name: input.name,
+        topic: input.topic,
+        parentId: input.parentId === undefined ? undefined : input.parentId ? BigInt(input.parentId) : null,
+      },
+      deps.gateway,
+    );
     return reply.send(toChannelJson(channel));
   });
 
   app.delete("/channels/:id", { preHandler: app.authenticate }, async (request, reply) => {
     const channelId = parseId((request.params as { id: string }).id);
-    await deleteChannel(deps.db, channelId, request.auth!.userId);
+    await deleteChannel(deps.db, channelId, request.auth!.userId, deps.gateway);
     return reply.status(204).send();
   });
 
@@ -203,7 +215,7 @@ export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): 
 
   app.post("/invites/:code", { preHandler: app.authenticate }, async (request, reply) => {
     const { code } = request.params as { code: string };
-    const guild = await acceptInvite(deps.db, code, request.auth!.userId);
+    const guild = await acceptInvite(deps.db, code, request.auth!.userId, deps.gateway);
     return reply.status(200).send({ guild });
   });
 
