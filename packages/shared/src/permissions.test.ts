@@ -181,6 +181,19 @@ describe("computePermissions", () => {
       }),
       expected: ALL_PERMISSIONS,
     },
+    {
+      name: "a member that cannot see the channel has no permissions in it",
+      input: baseInput({
+        everyoneRole: {
+          id: EVERYONE_ID,
+          permissions: Permission.VIEW_CHANNEL | Permission.SEND_MESSAGES,
+        },
+        overwrites: [
+          { targetId: EVERYONE_ID, targetType: "role", allow: 0n, deny: Permission.VIEW_CHANNEL },
+        ],
+      }),
+      expected: 0n,
+    },
   ];
 
   for (const { name, input, expected } of cases) {
