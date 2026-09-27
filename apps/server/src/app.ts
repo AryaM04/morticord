@@ -3,10 +3,13 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
+import websocket from "@fastify/websocket";
 import { sql } from "drizzle-orm";
 import type { AppConfig } from "./config.js";
 import type { DbClient } from "./db/client.js";
 import { registerErrorHandler } from "./errors.js";
+import { registerGatewayRoute, MAX_PAYLOAD_BYTES, type GatewayTimingOptions } from "./modules/gateway/handler.js";
+import { GatewayService } from "./modules/gateway/service.js";
 import type { Mailer } from "./mailer.js";
 import { authGuardPlugin } from "./plugins/auth-guard.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
@@ -20,12 +23,20 @@ export interface AppDeps {
   /** Turn the rate limiter on or off. Defaults to on. Tests that make many
    * fast requests to the same route can turn it off, to test other things. */
   rateLimit?: boolean;
+  /** The gateway hub. Tests can pass one in to inspect it; buildApp makes
+   * one when it is left out. */
+  gateway?: GatewayService;
+  /** Shorter heartbeat/identify timers for tests, so they do not sleep for real seconds. */
+  gatewayTiming?: GatewayTimingOptions;
 }
 
 const IMAGE_CONTENT_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
-export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
+export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
+  const gateway = rawDeps.gateway ?? new GatewayService();
+  await gateway.primeFromDatabase(rawDeps.db);
+  const deps: AppDeps = { ...rawDeps, gateway };
 
   // Raw image bytes for the avatar upload route. Fastify parses only JSON
   // and text by default, so image bodies need their own parser.
@@ -38,6 +49,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     await app.register(rateLimit, { global: false });
   }
   await app.register(authGuardPlugin, { jwtSecret: deps.config.jwtSecret });
+  await app.register(websocket, { options: { maxPayload: MAX_PAYLOAD_BYTES } });
 
   registerErrorHandler(app);
 
@@ -54,6 +66,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(async (instance) => registerAuthRoutes(instance, deps), { prefix: "/api/v1/auth" });
   await app.register(async (instance) => registerUserRoutes(instance, deps), { prefix: "/api/v1" });
   await app.register(async (instance) => registerGuildRoutes(instance, deps), { prefix: "/api/v1" });
+  registerGatewayRoute(app, { db: deps.db, config: deps.config, gateway }, deps.gatewayTiming);
 
   return app;
 }

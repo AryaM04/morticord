@@ -1,0 +1,302 @@
+// The `/gateway` WebSocket route. One connection can carry one session.
+// The protocol is documented in packages/shared/src/gateway.ts and in
+// docs/concepts/gateway.md.
+import { eq } from "drizzle-orm";
+import {
+  GatewayCloseCode,
+  GatewayOpcode,
+  gatewayEnvelopeSchema,
+  heartbeatPayloadSchema,
+  identifyPayloadSchema,
+  presenceSetPayloadSchema,
+  resumePayloadSchema,
+  type DispatchEventName,
+  type ReadyPayload,
+} from "@discord-clone/shared";
+import type { FastifyInstance } from "fastify";
+import type { AppConfig } from "../../config.js";
+import type { DbClient } from "../../db/client.js";
+import { users } from "../../db/schema.js";
+import { verifyAccessToken } from "../auth/tokens.js";
+import { buildGuildView } from "../guilds/service.js";
+import { GatewayService, loadGuildIdsForUser, type GatewaySocket } from "./service.js";
+
+export interface GatewayTimingOptions {
+  /** How often HELLO tells the client to heartbeat. Default 30000. */
+  heartbeatIntervalMs?: number;
+  /** How long a connection has to IDENTIFY before it is closed. Default 10000. */
+  identifyTimeoutMs?: number;
+}
+
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
+const DEFAULT_IDENTIFY_TIMEOUT_MS = 10_000;
+const HEARTBEAT_TIMEOUT_FACTOR = 1.5;
+const RATE_LIMIT_MAX_MESSAGES = 120;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const MAX_PAYLOAD_BYTES = 64 * 1024;
+
+interface ConnectionState {
+  sessionId: string | null;
+  identifyTimer: ReturnType<typeof setTimeout> | null;
+  heartbeatTimer: ReturnType<typeof setTimeout> | null;
+  messageTimestamps: number[];
+  closed: boolean;
+}
+
+async function buildReadyPayload(
+  db: DbClient,
+  gateway: GatewayService,
+  userId: bigint,
+  sessionId: string,
+): Promise<ReadyPayload> {
+  const userRows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  const user = userRows[0];
+  const guildIds = await loadGuildIdsForUser(db, userId);
+  const guilds = await Promise.all(guildIds.map((guildId) => buildGuildView(db, guildId, userId)));
+
+  return {
+    sessionId,
+    user: { id: userId.toString(), username: user?.username, displayName: user?.displayName },
+    guilds,
+    presences: gateway.onlinePresencesFor(userId),
+  };
+}
+
+export function registerGatewayRoute(
+  app: FastifyInstance,
+  deps: { db: DbClient; config: AppConfig; gateway: GatewayService },
+  timing: GatewayTimingOptions = {},
+): void {
+  const heartbeatIntervalMs = timing.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+  const identifyTimeoutMs = timing.identifyTimeoutMs ?? DEFAULT_IDENTIFY_TIMEOUT_MS;
+  const { db, config, gateway } = deps;
+
+  app.get("/gateway", { websocket: true }, (rawSocket) => {
+    const socket = rawSocket as unknown as GatewaySocket & {
+      on(event: "message", listener: (data: Buffer | string) => void): void;
+      on(event: "close", listener: () => void): void;
+      on(event: "error", listener: (error: Error) => void): void;
+    };
+
+    const state: ConnectionState = {
+      sessionId: null,
+      identifyTimer: null,
+      heartbeatTimer: null,
+      messageTimestamps: [],
+      closed: false,
+    };
+
+    function send(op: number, d?: unknown, extra?: Record<string, unknown>): void {
+      if (state.closed) {
+        return;
+      }
+      socket.send(JSON.stringify({ op, d, ...extra }));
+    }
+
+    function closeConnection(code: number, reason: string): void {
+      if (state.closed) {
+        return;
+      }
+      state.closed = true;
+      if (state.identifyTimer) {
+        clearTimeout(state.identifyTimer);
+      }
+      if (state.heartbeatTimer) {
+        clearTimeout(state.heartbeatTimer);
+      }
+      if (state.sessionId) {
+        gateway.disconnectSession(state.sessionId);
+        const info = gateway.getSession(state.sessionId);
+        if (info) {
+          gateway.notifyConnectionCountChanged(info.userId);
+        }
+      }
+      socket.close(code, reason);
+    }
+
+    function scheduleHeartbeatTimeout(): void {
+      if (state.heartbeatTimer) {
+        clearTimeout(state.heartbeatTimer);
+      }
+      state.heartbeatTimer = setTimeout(() => {
+        closeConnection(GatewayCloseCode.SESSION_TIMED_OUT, "No heartbeat received in time.");
+      }, heartbeatIntervalMs * HEARTBEAT_TIMEOUT_FACTOR);
+      state.heartbeatTimer.unref?.();
+    }
+
+    state.identifyTimer = setTimeout(() => {
+      closeConnection(GatewayCloseCode.NOT_AUTHENTICATED, "No IDENTIFY or RESUME received in time.");
+    }, identifyTimeoutMs);
+    state.identifyTimer.unref?.();
+
+    send(GatewayOpcode.HELLO, { heartbeatIntervalMs });
+
+    async function handleIdentify(payload: unknown): Promise<void> {
+      if (state.sessionId) {
+        closeConnection(GatewayCloseCode.ALREADY_AUTHENTICATED, "This connection already identified.");
+        return;
+      }
+      const parsed = identifyPayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        closeConnection(GatewayCloseCode.DECODE_ERROR, "The IDENTIFY payload is not valid.");
+        return;
+      }
+      let claims;
+      try {
+        claims = await verifyAccessToken(config.jwtSecret, parsed.data.accessToken);
+      } catch {
+        closeConnection(GatewayCloseCode.AUTH_FAILED, "The access token is not valid or has expired.");
+        return;
+      }
+      if (claims.deviceId !== parsed.data.deviceId) {
+        closeConnection(GatewayCloseCode.AUTH_FAILED, "The device id does not match the access token.");
+        return;
+      }
+
+      if (state.identifyTimer) {
+        clearTimeout(state.identifyTimer);
+        state.identifyTimer = null;
+      }
+
+      const session = gateway.createSession(socket, claims.userId, claims.deviceId);
+      state.sessionId = session.id;
+      gateway.notifyConnectionCountChanged(claims.userId);
+
+      const ready = await buildReadyPayload(db, gateway, claims.userId, session.id);
+      send(GatewayOpcode.DISPATCH, ready, { t: "READY" });
+      scheduleHeartbeatTimeout();
+    }
+
+    function handleResume(payload: unknown): void {
+      const parsed = resumePayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        closeConnection(GatewayCloseCode.DECODE_ERROR, "The RESUME payload is not valid.");
+        return;
+      }
+      verifyAccessToken(config.jwtSecret, parsed.data.accessToken)
+        .then((claims) => {
+          const result = gateway.resumeSession(
+            parsed.data.sessionId,
+            claims.userId,
+            claims.deviceId,
+            parsed.data.lastSequence,
+            socket,
+          );
+          if (!result) {
+            send(GatewayOpcode.INVALID_SESSION, { canResume: false });
+            return;
+          }
+          if (state.identifyTimer) {
+            clearTimeout(state.identifyTimer);
+            state.identifyTimer = null;
+          }
+          state.sessionId = parsed.data.sessionId;
+          gateway.notifyConnectionCountChanged(claims.userId);
+          for (const entry of result.replay) {
+            send(GatewayOpcode.DISPATCH, entry.d, { t: entry.t, s: entry.seq });
+          }
+          send(GatewayOpcode.DISPATCH, {}, { t: "RESUMED" });
+          scheduleHeartbeatTimeout();
+        })
+        .catch(() => {
+          closeConnection(GatewayCloseCode.AUTH_FAILED, "The access token is not valid or has expired.");
+        });
+    }
+
+    function handleHeartbeat(payload: unknown): void {
+      const parsed = heartbeatPayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        closeConnection(GatewayCloseCode.DECODE_ERROR, "The HEARTBEAT payload is not valid.");
+        return;
+      }
+      scheduleHeartbeatTimeout();
+      send(GatewayOpcode.HEARTBEAT_ACK);
+    }
+
+    function handlePresenceSet(payload: unknown): void {
+      if (!state.sessionId) {
+        closeConnection(GatewayCloseCode.NOT_AUTHENTICATED, "Identify before setting presence.");
+        return;
+      }
+      const parsed = presenceSetPayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        closeConnection(GatewayCloseCode.DECODE_ERROR, "The PRESENCE_SET payload is not valid.");
+        return;
+      }
+      const info = gateway.getSession(state.sessionId);
+      if (info) {
+        gateway.setPresence(info.userId, parsed.data.status);
+      }
+    }
+
+    socket.on("message", (raw) => {
+      if (state.closed) {
+        return;
+      }
+
+      const now = Date.now();
+      state.messageTimestamps = state.messageTimestamps.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+      state.messageTimestamps.push(now);
+      if (state.messageTimestamps.length > RATE_LIMIT_MAX_MESSAGES) {
+        closeConnection(GatewayCloseCode.RATE_LIMITED, "Too many messages.");
+        return;
+      }
+
+      let envelope;
+      try {
+        const text = typeof raw === "string" ? raw : raw.toString("utf8");
+        envelope = gatewayEnvelopeSchema.parse(JSON.parse(text));
+      } catch {
+        closeConnection(GatewayCloseCode.DECODE_ERROR, "The message is not a valid gateway envelope.");
+        return;
+      }
+
+      if (!state.sessionId && envelope.op !== GatewayOpcode.IDENTIFY && envelope.op !== GatewayOpcode.RESUME) {
+        closeConnection(GatewayCloseCode.NOT_AUTHENTICATED, "Identify before sending other messages.");
+        return;
+      }
+
+      switch (envelope.op) {
+        case GatewayOpcode.IDENTIFY:
+          void handleIdentify(envelope.d);
+          break;
+        case GatewayOpcode.RESUME:
+          handleResume(envelope.d);
+          break;
+        case GatewayOpcode.HEARTBEAT:
+          handleHeartbeat(envelope.d);
+          break;
+        case GatewayOpcode.PRESENCE_SET:
+          handlePresenceSet(envelope.d);
+          break;
+        default:
+          closeConnection(GatewayCloseCode.UNKNOWN_OPCODE, "Unknown opcode.");
+      }
+    });
+
+    socket.on("close", () => {
+      state.closed = true;
+      if (state.identifyTimer) {
+        clearTimeout(state.identifyTimer);
+      }
+      if (state.heartbeatTimer) {
+        clearTimeout(state.heartbeatTimer);
+      }
+      if (state.sessionId) {
+        const info = gateway.getSession(state.sessionId);
+        gateway.disconnectSession(state.sessionId);
+        if (info) {
+          gateway.notifyConnectionCountChanged(info.userId);
+        }
+      }
+    });
+
+    socket.on("error", () => {
+      closeConnection(GatewayCloseCode.UNKNOWN_ERROR, "Connection error.");
+    });
+  });
+}
+
+export { GatewayService, MAX_PAYLOAD_BYTES };
+
+export type { DispatchEventName };
