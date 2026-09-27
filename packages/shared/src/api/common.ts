@@ -10,6 +10,8 @@ export const errorResponseSchema = z.object({
     code: z.string(),
     message: z.string(),
     issues: z.array(z.record(z.string(), z.unknown())).optional(),
+    /** Set on a 429 response: how long to wait before trying again, in milliseconds. */
+    retryAfterMs: z.number().int().nonnegative().optional(),
   }),
 });
 export type ErrorResponse = z.infer<typeof errorResponseSchema>;

@@ -66,6 +66,8 @@ export const channelSchema = z.object({
   parentId: idSchema.nullable(),
   /** Every overwrite on this channel, so a client can compute permissions locally. */
   permissionOverwrites: z.array(permissionOverwriteSchema),
+  /** The newest timeline event (a message or a reply) in this channel, for cheap unread state. */
+  lastEventId: idSchema.nullable(),
 });
 export type ChannelJson = z.infer<typeof channelSchema>;
 
