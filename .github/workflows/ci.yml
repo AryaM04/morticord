@@ -57,6 +57,25 @@ jobs:
   # a real Chromium engine, and it is slower than a unit test run.
   e2e:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: discord_clone
+          POSTGRES_PASSWORD: change-me
+          POSTGRES_DB: discord_clone
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U discord_clone"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mailpit:
+        image: axllent/mailpit:latest
+        ports:
+          - 1025:1025
+          - 8025:8025
     steps:
       - name: Check out the code
         uses: actions/checkout@v5
