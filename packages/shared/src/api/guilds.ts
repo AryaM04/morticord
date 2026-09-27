@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { idSchema } from "./common.js";
 import { displayNameSchema, userSchema } from "./auth.js";
+import { voiceStateSchema } from "./voice.js";
 
 export const guildNameSchema = z
   .string()
@@ -117,6 +118,8 @@ export type GuildJson = z.infer<typeof guildSchema>;
 export const guildViewSchema = guildSchema.extend({
   roles: z.array(roleSchema),
   channels: z.array(channelSchema),
+  /** The current voice state of every peer in a voice channel of this guild that the caller can view. */
+  voiceStates: z.array(voiceStateSchema),
   member: guildMemberSchema,
 });
 export type GuildView = z.infer<typeof guildViewSchema>;

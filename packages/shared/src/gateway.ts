@@ -9,6 +9,7 @@ import { z } from "zod";
 import { guildViewSchema } from "./api/guilds.js";
 import { eventSchema, readStateSchema } from "./api/messages.js";
 import { idSchema } from "./api/common.js";
+import { voiceStateSchema } from "./api/voice.js";
 
 export const GatewayOpcode = {
   DISPATCH: 0,
@@ -25,6 +26,7 @@ export const GatewayOpcode = {
   PRESENCE_SET: 11,
   INVALID_SESSION: 12,
   RECONNECT: 13,
+  VOICE_SIGNAL: 14,
 } as const;
 
 export type GatewayOpcodeValue = (typeof GatewayOpcode)[keyof typeof GatewayOpcode];
@@ -143,6 +145,66 @@ export const typingStartPayloadSchema = z.object({
 /** Sent by the server to a user's other sessions once one session marks a channel read. */
 export const readStateUpdatePayloadSchema = readStateSchema;
 
+/** Sent by the client to join a voice channel, or to move to a new one. */
+export const voiceJoinPayloadSchema = z.object({
+  channelId: idSchema,
+  selfMute: z.boolean(),
+  selfDeaf: z.boolean(),
+});
+
+/** Sent by the client to leave voice. It carries no fields. */
+export const voiceLeavePayloadSchema = z.object({});
+
+/** Sent by the client to change its own mute, deafen, video or stream state. */
+export const voiceStatePayloadSchema = z.object({
+  selfMute: z.boolean().optional(),
+  selfDeaf: z.boolean().optional(),
+  selfVideo: z.boolean().optional(),
+  selfStream: z.boolean().optional(),
+});
+
+/**
+ * Sent by the client to relay one WebRTC signaling message (an offer, an
+ * answer, or an ICE candidate) to one other peer in the same voice
+ * channel. The server never reads `payload`; it only checks its size and
+ * that both peers are in `channelId`.
+ */
+export const voiceSignalPayloadSchema = z.object({
+  channelId: idSchema,
+  targetUserId: idSchema,
+  targetDeviceId: z.string().min(1),
+  payload: z.unknown(),
+});
+
+/** Sent by the server: the current voice state of one peer, to guild members who can view the channel. */
+export const voiceStateUpdatePayloadSchema = voiceStateSchema;
+
+/** Sent by the server: one relayed signaling message, with the sender's identity attached. */
+export const voiceSignalDispatchPayloadSchema = z.object({
+  channelId: idSchema,
+  fromUserId: idSchema,
+  fromDeviceId: z.string().min(1),
+  payload: z.unknown(),
+});
+
+/** The stable codes the server uses to reject a voice op. */
+export const voiceErrorCodeSchema = z.enum([
+  "CHANNEL_FULL",
+  "NO_PERMISSION",
+  "NOT_A_VOICE_CHANNEL",
+  "STREAM_IN_USE",
+  "NOT_IN_VOICE",
+  "TARGET_NOT_IN_CHANNEL",
+  "PAYLOAD_TOO_LARGE",
+]);
+export type VoiceErrorCode = z.infer<typeof voiceErrorCodeSchema>;
+
+/** Sent by the server when a voice op is rejected. */
+export const voiceErrorPayloadSchema = z.object({
+  code: voiceErrorCodeSchema,
+  message: z.string(),
+});
+
 export type HelloPayload = z.infer<typeof helloPayloadSchema>;
 export type IdentifyPayload = z.infer<typeof identifyPayloadSchema>;
 export type ResumePayload = z.infer<typeof resumePayloadSchema>;
@@ -162,6 +224,13 @@ export type EventRedactPayload = z.infer<typeof eventRedactPayloadSchema>;
 export type TypingPayload = z.infer<typeof typingPayloadSchema>;
 export type TypingStartPayload = z.infer<typeof typingStartPayloadSchema>;
 export type ReadStateUpdatePayload = z.infer<typeof readStateUpdatePayloadSchema>;
+export type VoiceJoinPayload = z.infer<typeof voiceJoinPayloadSchema>;
+export type VoiceLeavePayload = z.infer<typeof voiceLeavePayloadSchema>;
+export type VoiceStatePayload = z.infer<typeof voiceStatePayloadSchema>;
+export type VoiceSignalPayload = z.infer<typeof voiceSignalPayloadSchema>;
+export type VoiceStateUpdatePayload = z.infer<typeof voiceStateUpdatePayloadSchema>;
+export type VoiceSignalDispatchPayload = z.infer<typeof voiceSignalDispatchPayloadSchema>;
+export type VoiceErrorPayload = z.infer<typeof voiceErrorPayloadSchema>;
 
 /** Names of every dispatch event ("t" field), for the fan-out code and tests. */
 export const DispatchEvent = {
@@ -179,6 +248,7 @@ export const DispatchEvent = {
   EVENT_REDACT: "EVENT_REDACT",
   TYPING_START: "TYPING_START",
   READ_STATE_UPDATE: "READ_STATE_UPDATE",
+  VOICE_STATE_UPDATE: "VOICE_STATE_UPDATE",
 } as const;
 
 export type DispatchEventName = (typeof DispatchEvent)[keyof typeof DispatchEvent];
