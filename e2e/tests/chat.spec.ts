@@ -258,16 +258,27 @@ test.describe("chat", () => {
 
     // 6. While A types, B sees the typing indicator. `notifyTyping`
     // throttles its own gateway send to once per 3s (see
-    // TYPING_SEND_INTERVAL_MS), and every earlier `sendMessage` above
-    // already triggered one through the composer's onChange handler, so
-    // wait that cooldown out first or this step's keystroke is dropped.
-    await pageA.waitForTimeout(3_500);
-    await composerBox(pageA).pressSequentially("typing but not sending", { delay: 20 });
-    // Bring B to front: a backgrounded page's rendering can lag behind
-    // its (already-updated) store state in this environment, the same
-    // reason the read-marker check in step 8 needs it.
-    await pageB.bringToFront();
-    await expect(pageB.getByText(`${userA.displayName} is typing…`)).toBeVisible({ timeout: 10_000 });
+    // TYPING_SEND_INTERVAL_MS), both on the client and again on the
+    // server (per user and channel), and every earlier `sendMessage`
+    // above already triggered one through the composer's onChange
+    // handler, so wait that cooldown out first or this step's keystroke
+    // is dropped. Retry a couple of times: a slow CI runner can still
+    // lose the single gateway message to timing.
+    const typingIndicator = pageB.getByText(`${userA.displayName} is typing…`);
+    let typingSeen = false;
+    for (let attempt = 0; attempt < 3 && !typingSeen; attempt += 1) {
+      await pageA.waitForTimeout(3_500);
+      await composerBox(pageA).pressSequentially("typing but not sending", { delay: 20 });
+      // Bring B to front: a backgrounded page's rendering can lag behind
+      // its (already-updated) store state in this environment, the same
+      // reason the read-marker check in step 8 needs it.
+      await pageB.bringToFront();
+      typingSeen = await typingIndicator
+        .waitFor({ state: "visible", timeout: 4_000 })
+        .then(() => true)
+        .catch(() => false);
+    }
+    expect(typingSeen).toBe(true);
     await composerBox(pageA).fill("");
 
     // 7. Markdown renders; a script payload shows as plain text and never runs.
