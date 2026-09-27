@@ -127,6 +127,17 @@ export const listMembersQuerySchema = z.object({
 });
 export type ListMembersQuery = z.infer<typeof listMembersQuerySchema>;
 
+export const searchMembersQuerySchema = z.object({
+  q: z.string().trim().min(1).max(32),
+  limit: z.coerce.number().int().min(1).max(10).default(10),
+});
+export type SearchMembersQuery = z.infer<typeof searchMembersQuerySchema>;
+
+export const searchMembersResponseSchema = z.object({
+  members: z.array(guildMemberSchema),
+});
+export type SearchMembersResponse = z.infer<typeof searchMembersResponseSchema>;
+
 export const nicknameSchema = displayNameSchema;
 
 // 0 means "no limit" for maxUses, and 0 means "never expires" for maxAgeSeconds.

@@ -13,6 +13,7 @@ import {
   guildViewSchema,
   inviteSchema,
   invitePreviewSchema,
+  searchMembersResponseSchema,
   updateChannelRequestSchema,
   updateGuildRequestSchema,
   type AcceptInviteResult,
@@ -25,6 +26,7 @@ import {
   type GuildView,
   type InviteJson,
   type InvitePreview,
+  type SearchMembersResponse,
   type UpdateChannelRequest,
   type UpdateGuildRequest,
 } from "@discord-clone/shared";
@@ -87,6 +89,19 @@ export function listGuildMembers(
   }
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
   return api.request("GET", `/guilds/${guildId}/members${suffix}`, { schema: membersPageSchema });
+}
+
+/** Case-insensitive prefix search over a guild's members, for the mention autocomplete. */
+export function searchGuildMembers(
+  api: ApiClient,
+  guildId: string,
+  q: string,
+  limit = 10,
+): Promise<SearchMembersResponse> {
+  const query = new URLSearchParams({ q, limit: String(limit) });
+  return api.request("GET", `/guilds/${guildId}/members/search?${query.toString()}`, {
+    schema: searchMembersResponseSchema,
+  });
 }
 
 export function createChannel(

@@ -7,6 +7,7 @@ import {
   createGuildRequestSchema,
   createInviteRequestSchema,
   listMembersQuerySchema,
+  searchMembersQuerySchema,
   updateChannelRequestSchema,
   updateGuildRequestSchema,
   channelOrderRequestSchema,
@@ -36,6 +37,7 @@ import {
   leaveGuild,
   listMembers,
   removeGuildIcon,
+  searchMembers,
   setGuildIcon,
   updateGuild,
 } from "./service.js";
@@ -128,6 +130,13 @@ export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): 
       after: query.after ? BigInt(query.after) : undefined,
       limit: query.limit,
     });
+    return reply.send({ members: rows.map((row) => toMemberJson(row, row.roleIds)) });
+  });
+
+  app.get("/guilds/:id/members/search", { preHandler: app.authenticate }, async (request, reply) => {
+    const guildId = parseId((request.params as { id: string }).id);
+    const query = searchMembersQuerySchema.parse(request.query);
+    const rows = await searchMembers(deps.db, guildId, request.auth!.userId, { q: query.q, limit: query.limit });
     return reply.send({ members: rows.map((row) => toMemberJson(row, row.roleIds)) });
   });
 

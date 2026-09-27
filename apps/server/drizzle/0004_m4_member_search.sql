@@ -1,0 +1,3 @@
+CREATE INDEX IF NOT EXISTS "guild_members_nickname_lower_idx" ON "guild_members" USING btree (lower("nickname") text_pattern_ops);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "users_username_lower_idx" ON "users" USING btree (lower("username") text_pattern_ops);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "users_display_name_lower_idx" ON "users" USING btree (lower("display_name") text_pattern_ops);

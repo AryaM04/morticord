@@ -233,6 +233,38 @@ export interface ListedMember extends MemberRow {
   roleIds: bigint[];
 }
 
+const memberSelectColumns = {
+  guildId: guildMembers.guildId,
+  userId: guildMembers.userId,
+  nickname: guildMembers.nickname,
+  joinedAt: guildMembers.joinedAt,
+  username: users.username,
+  displayName: users.displayName,
+  avatarKey: users.avatarKey,
+  statusText: users.statusText,
+  userCreatedAt: users.createdAt,
+};
+
+/** Attach each row's role ids, loaded in one query for the whole page. */
+async function attachRoleIds(db: DbClient, guildId: bigint, rows: MemberRow[]): Promise<ListedMember[]> {
+  const userIds = rows.map((row) => row.userId);
+  const roleRows =
+    userIds.length > 0
+      ? await db
+          .select({ userId: memberRoles.userId, roleId: memberRoles.roleId })
+          .from(memberRoles)
+          .where(and(eq(memberRoles.guildId, guildId), inArray(memberRoles.userId, userIds)))
+      : [];
+  const roleIdsByUser = new Map<string, bigint[]>();
+  for (const row of roleRows) {
+    const key = row.userId.toString();
+    const list = roleIdsByUser.get(key) ?? [];
+    list.push(row.roleId);
+    roleIdsByUser.set(key, list);
+  }
+  return rows.map((row) => ({ ...row, roleIds: roleIdsByUser.get(row.userId.toString()) ?? [] }));
+}
+
 /**
  * One keyset page of a guild's members, ordered by user id, each with the
  * user's own profile (name, avatar) and role ids, so the client can show
@@ -255,40 +287,63 @@ export async function listMembers(
   }
 
   const rows = await db
-    .select({
-      guildId: guildMembers.guildId,
-      userId: guildMembers.userId,
-      nickname: guildMembers.nickname,
-      joinedAt: guildMembers.joinedAt,
-      username: users.username,
-      displayName: users.displayName,
-      avatarKey: users.avatarKey,
-      statusText: users.statusText,
-      userCreatedAt: users.createdAt,
-    })
+    .select(memberSelectColumns)
     .from(guildMembers)
     .innerJoin(users, eq(users.id, guildMembers.userId))
     .where(and(...conditions))
     .orderBy(asc(guildMembers.userId))
     .limit(input.limit);
 
-  const userIds = rows.map((row) => row.userId);
-  const roleRows =
-    userIds.length > 0
-      ? await db
-          .select({ userId: memberRoles.userId, roleId: memberRoles.roleId })
-          .from(memberRoles)
-          .where(and(eq(memberRoles.guildId, guildId), inArray(memberRoles.userId, userIds)))
-      : [];
-  const roleIdsByUser = new Map<string, bigint[]>();
-  for (const row of roleRows) {
-    const key = row.userId.toString();
-    const list = roleIdsByUser.get(key) ?? [];
-    list.push(row.roleId);
-    roleIdsByUser.set(key, list);
+  return attachRoleIds(db, guildId, rows);
+}
+
+export interface SearchMembersInput {
+  q: string;
+  limit: number;
+}
+
+/**
+ * Escape the LIKE wildcards `%`, `_` and the escape character itself, so a
+ * search term is always matched as literal text, never as a pattern.
+ */
+export function escapeLikePattern(input: string): string {
+  return input.replace(/[\\%_]/g, "\\$&");
+}
+
+/**
+ * Case-insensitive prefix search over a guild's members, by username,
+ * display name or nickname. Returns the same shape as `listMembers`, so
+ * the client can render either list with one component.
+ */
+export async function searchMembers(
+  db: DbClient,
+  guildId: bigint,
+  userId: bigint,
+  input: SearchMembersInput,
+): Promise<ListedMember[]> {
+  const context = await loadMemberContext(db, guildId, userId);
+  if (!context) {
+    throw new AppError(404, "NOT_FOUND", "This guild does not exist.");
   }
 
-  return rows.map((row) => ({ ...row, roleIds: roleIdsByUser.get(row.userId.toString()) ?? [] }));
+  const pattern = `${escapeLikePattern(input.q.toLowerCase())}%`;
+
+  const rows = await db
+    .select(memberSelectColumns)
+    .from(guildMembers)
+    .innerJoin(users, eq(users.id, guildMembers.userId))
+    .where(
+      and(
+        eq(guildMembers.guildId, guildId),
+        sql`(lower(${users.username}) LIKE ${pattern} ESCAPE '\\'
+          OR lower(${users.displayName}) LIKE ${pattern} ESCAPE '\\'
+          OR lower(${guildMembers.nickname}) LIKE ${pattern} ESCAPE '\\')`,
+      ),
+    )
+    .orderBy(asc(users.username))
+    .limit(input.limit);
+
+  return attachRoleIds(db, guildId, rows);
 }
 
 /** Throw 403 when the caller lacks the given guild-level permission. Call after a membership check. */

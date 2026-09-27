@@ -1,20 +1,65 @@
 // The message composer: an autosize textarea, plus the reply/edit banner
-// above it. Enter sends. Shift+Enter starts a new line. Escape cancels a
-// reply or an edit. ArrowUp in an empty box edits the sender's last
-// message.
-import { useEffect, useRef, useState } from "react";
+// above it and the @-mention suggestion listbox. Enter sends. Shift+Enter
+// starts a new line. Escape cancels a reply, an edit, or the mention
+// listbox. ArrowUp in an empty box edits the sender's last message.
+import { useEffect, useId, useRef, useState } from "react";
+import type { GuildMemberJson } from "@discord-clone/shared";
+import { searchGuildMembers } from "@discord-clone/client-core";
 import { messagesStore } from "../lib/messages.js";
+import { session } from "../lib/session.js";
+import { Avatar } from "./Avatar.js";
 
 const MAX_BODY_LENGTH = 4000;
 const COUNTER_THRESHOLD = MAX_BODY_LENGTH - 200;
 const MENTION_RE = /<@(\d+)>/g;
+const MAX_MENTIONS = 50;
+const MENTION_SEARCH_DEBOUNCE_MS = 150;
+const MENTION_SEARCH_LIMIT = 10;
 
+/** Extract every `<@id>` token from a message body, in order, with no duplicate and at most 50. */
 export function extractMentions(text: string): string[] {
-  const ids = new Set<string>();
+  const ids: string[] = [];
+  const seen = new Set<string>();
   for (const match of text.matchAll(MENTION_RE)) {
-    ids.add(match[1]!);
+    const id = match[1]!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    if (ids.length >= MAX_MENTIONS) break;
   }
-  return [...ids];
+  return ids;
+}
+
+export interface MentionQuery {
+  /** The index of the "@" that starts the query, inside the full text. */
+  start: number;
+  /** The name text typed after the "@", up to the caret. */
+  query: string;
+}
+
+/**
+ * Find an open `@` mention query ending at the caret, or null when there
+ * is none. A query starts at the beginning of the text or after
+ * whitespace, and its text has no whitespace and no second "@".
+ */
+export function detectMentionQueryAt(text: string, caret: number): MentionQuery | null {
+  if (caret < 0 || caret > text.length) {
+    return null;
+  }
+  const upToCaret = text.slice(0, caret);
+  const atIndex = upToCaret.lastIndexOf("@");
+  if (atIndex === -1) {
+    return null;
+  }
+  const before = atIndex === 0 ? "" : upToCaret[atIndex - 1]!;
+  if (before !== "" && !/\s/.test(before)) {
+    return null;
+  }
+  const query = upToCaret.slice(atIndex + 1);
+  if (query.length > 32 || /\s/.test(query) || query.includes("@")) {
+    return null;
+  }
+  return { start: atIndex, query };
 }
 
 export interface ReplyTarget {
@@ -30,6 +75,7 @@ export interface EditTarget {
 
 export interface ComposerProps {
   channelId: string;
+  guildId: string;
   canSend: boolean;
   disabledReason?: string;
   replyTarget: ReplyTarget | null;
@@ -39,10 +85,21 @@ export interface ComposerProps {
   onRequestEditLast: () => void;
 }
 
+function memberLabel(member: GuildMemberJson): string {
+  return member.nickname ?? member.user?.displayName ?? member.userId;
+}
+
 export function Composer(props: ComposerProps) {
-  const { channelId, editTarget } = props;
+  const { channelId, guildId, editTarget } = props;
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const listboxId = useId();
+
+  const [mentionQuery, setMentionQuery] = useState<MentionQuery | null>(null);
+  const [suggestions, setSuggestions] = useState<GuildMemberJson[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchGenerationRef = useRef(0);
 
   useEffect(() => {
     if (editTarget) {
@@ -58,6 +115,79 @@ export function Composer(props: ComposerProps) {
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
   }, [text]);
 
+  // Close the mention listbox and cancel any pending search when the
+  // channel changes, so a stale query from another channel never shows.
+  useEffect(() => {
+    closeMentionMenu();
+  }, [channelId]);
+
+  function closeMentionMenu(): void {
+    setMentionQuery(null);
+    setSuggestions([]);
+    setActiveIndex(0);
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+  }
+
+  function scheduleMentionSearch(query: string): void {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    if (query.length === 0) {
+      setSuggestions([]);
+      return;
+    }
+    const generation = ++searchGenerationRef.current;
+    debounceRef.current = setTimeout(() => {
+      void searchGuildMembers(session.apiClient, guildId, query, MENTION_SEARCH_LIMIT)
+        .then((result) => {
+          if (searchGenerationRef.current === generation) {
+            setSuggestions(result.members);
+            setActiveIndex(0);
+          }
+        })
+        .catch(() => {
+          if (searchGenerationRef.current === generation) {
+            setSuggestions([]);
+          }
+        });
+    }, MENTION_SEARCH_DEBOUNCE_MS);
+  }
+
+  /** Recompute the mention query from the textarea's current text and caret. */
+  function syncMentionQuery(el: HTMLTextAreaElement, value: string): void {
+    const caret = el.selectionStart ?? value.length;
+    const query = detectMentionQueryAt(value, caret);
+    setMentionQuery(query);
+    if (query) {
+      scheduleMentionSearch(query.query);
+    } else {
+      closeMentionMenu();
+    }
+  }
+
+  function pickMention(member: GuildMemberJson): void {
+    if (!mentionQuery) return;
+    const before = text.slice(0, mentionQuery.start);
+    const afterQueryIndex = mentionQuery.start + 1 + mentionQuery.query.length;
+    const after = text.slice(afterQueryIndex);
+    const inserted = `<@${member.userId}> `;
+    const nextText = `${before}${inserted}${after}`;
+    setText(nextText);
+    closeMentionMenu();
+    const caret = before.length + inserted.length;
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(caret, caret);
+      }
+    });
+  }
+
   function submit(): void {
     const body = text.trim();
     if (body.length === 0 || body.length > MAX_BODY_LENGTH) {
@@ -72,9 +202,32 @@ export function Composer(props: ComposerProps) {
       props.onCancelReply();
     }
     setText("");
+    closeMentionMenu();
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>): void {
+    if (mentionQuery && suggestions.length > 0) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setActiveIndex((i) => (i + 1) % suggestions.length);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setActiveIndex((i) => (i - 1 + suggestions.length) % suggestions.length);
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        pickMention(suggestions[activeIndex]!);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMentionMenu();
+        return;
+      }
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
@@ -95,6 +248,8 @@ export function Composer(props: ComposerProps) {
   }
 
   const remaining = MAX_BODY_LENGTH - text.length;
+  const mentionOpen = mentionQuery !== null && suggestions.length > 0;
+  const activeOptionId = mentionOpen ? `${listboxId}-option-${activeIndex}` : undefined;
 
   return (
     <div className="px-4 pb-4">
@@ -122,6 +277,36 @@ export function Composer(props: ComposerProps) {
           </button>
         </div>
       )}
+      {mentionOpen && (
+        <div
+          id={listboxId}
+          role="listbox"
+          aria-label="Members"
+          className="mb-1 max-h-56 overflow-y-auto rounded border py-1 shadow-lg"
+          style={{ backgroundColor: "var(--color-bg-main)", borderColor: "var(--color-border)" }}
+        >
+          {suggestions.map((member, index) => (
+            <div
+              key={member.userId}
+              id={`${listboxId}-option-${index}`}
+              role="option"
+              aria-selected={index === activeIndex}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                pickMention(member);
+              }}
+              className="flex items-center gap-2 px-3 py-1 text-sm"
+              style={{ backgroundColor: index === activeIndex ? "var(--color-bg-sidebar)" : "transparent" }}
+            >
+              {member.user && <Avatar user={member.user} size={20} />}
+              <span>{memberLabel(member)}</span>
+              {member.user && (
+                <span style={{ color: "var(--color-text-muted)" }}>@{member.user.username}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       <div
         className="flex items-end gap-2 rounded px-3 py-2"
         style={{ backgroundColor: "var(--color-bg-sidebar)" }}
@@ -132,12 +317,21 @@ export function Composer(props: ComposerProps) {
           value={text}
           disabled={!props.canSend}
           placeholder={props.canSend ? "Write a message." : props.disabledReason ?? "You cannot send a message here."}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-haspopup="listbox"
+          aria-expanded={mentionOpen}
+          aria-controls={mentionOpen ? listboxId : undefined}
+          aria-activedescendant={activeOptionId}
           onChange={(event) => {
-            setText(event.target.value);
-            if (event.target.value.length > 0) {
+            const value = event.target.value;
+            setText(value);
+            if (value.length > 0) {
               messagesStore.getState().notifyTyping(channelId);
             }
+            syncMentionQuery(event.target, value);
           }}
+          onSelect={(event) => syncMentionQuery(event.currentTarget, event.currentTarget.value)}
           onKeyDown={handleKeyDown}
           className="max-h-60 flex-1 resize-none bg-transparent py-1 text-sm outline-none"
           style={{ color: "var(--color-text-primary)" }}
