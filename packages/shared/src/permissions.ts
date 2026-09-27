@@ -118,5 +118,11 @@ export function computePermissions(input: ComputePermissionsInput): bigint {
     permissions |= memberOverwrite.allow;
   }
 
+  // A member that cannot see the channel has no permissions in it.
+  // The E2EE code uses this result to decide who gets channel keys.
+  if (!hasPermission(permissions, Permission.VIEW_CHANNEL)) {
+    return 0n;
+  }
+
   return permissions;
 }
