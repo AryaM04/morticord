@@ -3,10 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { Permission, hasPermission, type ChannelJson, type ChannelOrderRequest } from "@discord-clone/shared";
-import { leaveGuild, reorderChannels, selfGuildPermissions } from "@discord-clone/client-core";
+import {
+  countMentions,
+  formatBadgeCount,
+  isChannelUnread,
+  leaveGuild,
+  reorderChannels,
+  selfGuildPermissions,
+} from "@discord-clone/client-core";
 import { session } from "../lib/session.js";
 import { realtimeStore } from "../lib/realtime.js";
 import { useRealtime } from "../lib/useRealtime.js";
+import { useMessages } from "../lib/useMessages.js";
 import { readCollapsedCategories, writeCollapsedCategories } from "../lib/lastLocation.js";
 import { UserPanel } from "./UserPanel.js";
 import { InviteDialog } from "./InviteDialog.js";
@@ -107,6 +115,8 @@ function GuildMenu({
 function ChannelRow({
   channel,
   active,
+  unread,
+  mentionCount,
   href,
   draggable,
   onDragStartId,
@@ -115,6 +125,8 @@ function ChannelRow({
 }: {
   channel: ChannelJson;
   active: boolean;
+  unread: boolean;
+  mentionCount: number;
   href: string;
   draggable: boolean;
   onDragStartId: (id: string) => void;
@@ -122,6 +134,7 @@ function ChannelRow({
   onOpenSettings: () => void;
 }) {
   const [, navigate] = useLocation();
+  const bright = active || unread;
   return (
     <div
       draggable={draggable}
@@ -139,10 +152,24 @@ function ChannelRow({
         type="button"
         onClick={() => navigate(href)}
         className="flex-1 truncate text-left text-sm"
-        style={{ color: active ? "var(--color-text-primary)" : "var(--color-text-muted)" }}
+        style={{
+          color: bright ? "var(--color-text-primary)" : "var(--color-text-muted)",
+          fontWeight: unread ? 600 : 400,
+        }}
       >
         {channel.type === "voice" ? "\u{1F50A}" : "#"} {channel.name}
       </button>
+      {mentionCount > 0 && (
+        <span
+          className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none"
+          style={{ backgroundColor: "#e05252", color: "white" }}
+        >
+          <span aria-hidden="true">{formatBadgeCount(mentionCount)}</span>
+          <span className="sr-only">
+            {mentionCount} {mentionCount === 1 ? "mention" : "mentions"}
+          </span>
+        </span>
+      )}
       <button
         type="button"
         aria-label={`${channel.name} settings`}
@@ -161,6 +188,8 @@ export function ChannelColumn({ guildId, activeChannelId }: { guildId: string; a
   const guild = state.guilds[guildId];
   const channels = state.channels;
   const channelIds = state.channelIdsByGuild[guildId] ?? [];
+  const messageChannels = useMessages((s) => s.channels);
+  const selfUserId = useMessages((s) => s.selfUserId);
   const [, navigate] = useLocation();
 
   const [collapsed, setCollapsed] = useState<Set<string>>(() => readCollapsedCategories(guildId));
@@ -280,11 +309,17 @@ export function ChannelColumn({ guildId, activeChannelId }: { guildId: string; a
   function renderChannel(id: string) {
     const channel = channels[id];
     if (!channel) return null;
+    const messageChannel = messageChannels[id];
+    const unread =
+      channel.type === "text" && isChannelUnread(messageChannel?.lastEventId ?? null, messageChannel?.lastReadEventId ?? null);
+    const mentionCount = messageChannel ? countMentions(messageChannel, selfUserId) : 0;
     return (
       <ChannelRow
         key={id}
         channel={channel}
         active={id === activeChannelId}
+        unread={unread}
+        mentionCount={mentionCount}
         href={`/app/${guildId}/${id}`}
         draggable={canManageChannels}
         onDragStartId={(dragId) => {

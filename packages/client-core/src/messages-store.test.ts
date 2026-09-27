@@ -8,9 +8,11 @@ import {
   applyEventRedact,
   clearTypingForSender,
   compareIds,
+  aggregateGuildUnread,
   countMentions,
   createChannelMessagesState,
   expireTyping,
+  formatBadgeCount,
   isChannelUnread,
   loadPage,
   markAllStale,
@@ -366,6 +368,50 @@ describe("unread and mentions", () => {
     channel = withEvent(channel, event({ id: "2" }));
     channel = setPayload(channel, "2", { type: "message", body: "hey @self", mentions: ["self"], attachments: [], embeds: [] });
     expect(countMentions(channel, "self")).toBe(0);
+  });
+});
+
+describe("aggregateGuildUnread", () => {
+  it("is unread when any given channel is unread, and sums mentions across them", () => {
+    let read = createChannelMessagesState();
+    read = { ...read, lastEventId: "1", lastReadEventId: "1" };
+
+    let unread = createChannelMessagesState();
+    unread = { ...unread, lastEventId: "2", lastReadEventId: "1" };
+    unread = withEvent(unread, event({ id: "2" }));
+    unread = setPayload(unread, "2", { type: "message", body: "hey @self", mentions: ["self"], attachments: [], embeds: [] });
+
+    const channels = { "10": read, "11": unread };
+    const summary = aggregateGuildUnread(channels, ["10", "11"], "self");
+    expect(summary.hasUnread).toBe(true);
+    expect(summary.mentionCount).toBe(1);
+  });
+
+  it("is not unread and has no mentions when every given channel is caught up", () => {
+    let read = createChannelMessagesState();
+    read = { ...read, lastEventId: "1", lastReadEventId: "1" };
+    const summary = aggregateGuildUnread({ "10": read }, ["10"], "self");
+    expect(summary.hasUnread).toBe(false);
+    expect(summary.mentionCount).toBe(0);
+  });
+
+  it("ignores a channel id that has no loaded state", () => {
+    const summary = aggregateGuildUnread({}, ["never-opened"], "self");
+    expect(summary.hasUnread).toBe(false);
+    expect(summary.mentionCount).toBe(0);
+  });
+});
+
+describe("formatBadgeCount", () => {
+  it("shows the exact count up to 99", () => {
+    expect(formatBadgeCount(0)).toBe("0");
+    expect(formatBadgeCount(3)).toBe("3");
+    expect(formatBadgeCount(99)).toBe("99");
+  });
+
+  it("caps display at 99+", () => {
+    expect(formatBadgeCount(100)).toBe("99+");
+    expect(formatBadgeCount(1000)).toBe("99+");
   });
 });
 
