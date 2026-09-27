@@ -43,6 +43,14 @@ export function MessageList({
   const [atBottom, setAtBottom] = useState(true);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Whether this channel has shown at least one row since it was opened.
+  // Virtuoso is keyed on this (see below): mounting it fresh, already
+  // holding data, is what a reverse-chat list needs for its first paint.
+  // Handing an already-mounted Virtuoso an empty-to-full data jump (the
+  // window loads asynchronously, so the first render always has zero
+  // rows) can leave it showing nothing at all, because there is no prior
+  // item position for it to scroll from or measure against.
+  const [hasLoaded, setHasLoaded] = useState(false);
 
   function highlightFor2s(id: string): void {
     setHighlightId(id);
@@ -105,6 +113,16 @@ export function MessageList({
     return out;
   }, [channel, selfUserId]);
 
+  useEffect(() => {
+    setHasLoaded(false);
+  }, [channelId]);
+
+  useEffect(() => {
+    if (rows.length > 0) {
+      setHasLoaded(true);
+    }
+  }, [rows.length]);
+
   if (!channel) {
     return null;
   }
@@ -125,6 +143,7 @@ export function MessageList({
   return (
     <div className="relative flex-1">
       <Virtuoso
+        key={`${channelId}:${hasLoaded}`}
         ref={virtuosoRef}
         style={{ height: "100%" }}
         data={rows}
