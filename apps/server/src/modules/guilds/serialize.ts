@@ -6,6 +6,7 @@ import type {
   GuildView,
   InviteJson,
   InvitePreview,
+  OverwriteInput,
   RoleJson,
 } from "@discord-clone/shared";
 import type { ChannelRow, GuildRow, RoleRow } from "./member-context.js";
@@ -42,7 +43,7 @@ export function toRoleJson(role: RoleRow): RoleJson {
   };
 }
 
-export function toChannelJson(channel: ChannelRow): ChannelJson {
+export function toChannelJson(channel: ChannelRow, overwrites: OverwriteInput[] = []): ChannelJson {
   return {
     id: channel.id.toString(),
     guildId: (channel.guildId ?? 0n).toString(),
@@ -51,6 +52,12 @@ export function toChannelJson(channel: ChannelRow): ChannelJson {
     topic: channel.topic,
     position: channel.position,
     parentId: channel.parentId?.toString() ?? null,
+    permissionOverwrites: overwrites.map((overwrite) => ({
+      targetId: overwrite.targetId.toString(),
+      targetType: overwrite.targetType,
+      allow: overwrite.allow.toString(),
+      deny: overwrite.deny.toString(),
+    })),
   };
 }
 
@@ -59,6 +66,12 @@ export interface MemberRow {
   userId: bigint;
   nickname: string | null;
   joinedAt: Date;
+  /** Set when the row came from a join with `users`, e.g. a member list page. */
+  username?: string;
+  displayName?: string;
+  avatarKey?: string | null;
+  statusText?: string | null;
+  userCreatedAt?: Date;
 }
 
 export function toMemberJson(member: MemberRow, roleIds: bigint[]): GuildMemberJson {
@@ -68,6 +81,17 @@ export function toMemberJson(member: MemberRow, roleIds: bigint[]): GuildMemberJ
     nickname: member.nickname,
     joinedAt: member.joinedAt.toISOString(),
     roles: roleIds.map((id) => id.toString()),
+    user:
+      member.username !== undefined && member.displayName !== undefined && member.userCreatedAt !== undefined
+        ? {
+            id: member.userId.toString(),
+            username: member.username,
+            displayName: member.displayName,
+            avatarKey: member.avatarKey ?? null,
+            statusText: member.statusText ?? null,
+            createdAt: member.userCreatedAt.toISOString(),
+          }
+        : undefined,
   };
 }
 
@@ -114,11 +138,12 @@ export function toGuildView(
   channelsList: ChannelRow[],
   member: MemberRow,
   memberRoleIds: bigint[],
+  overwritesByChannel: Map<bigint, OverwriteInput[]> = new Map(),
 ): GuildView {
   return {
     ...toGuildJson(guild),
     roles: roles.map(toRoleJson),
-    channels: channelsList.map(toChannelJson),
+    channels: channelsList.map((channel) => toChannelJson(channel, overwritesByChannel.get(channel.id) ?? [])),
     member: toMemberJson(member, memberRoleIds),
   };
 }

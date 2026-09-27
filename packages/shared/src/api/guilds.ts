@@ -44,6 +44,18 @@ export const channelTopicSchema = z
   .trim()
   .max(1024, "The topic must have at most 1024 characters.");
 
+export const overwriteTargetTypeSchema = z.enum(["role", "member"]);
+export type OverwriteTargetType = z.infer<typeof overwriteTargetTypeSchema>;
+
+/** One permission overwrite on a channel, for a role or a member. */
+export const permissionOverwriteSchema = z.object({
+  targetId: idSchema,
+  targetType: overwriteTargetTypeSchema,
+  allow: z.string(),
+  deny: z.string(),
+});
+export type PermissionOverwriteJson = z.infer<typeof permissionOverwriteSchema>;
+
 export const channelSchema = z.object({
   id: idSchema,
   guildId: idSchema,
@@ -52,6 +64,8 @@ export const channelSchema = z.object({
   topic: z.string().nullable(),
   position: z.number().int(),
   parentId: idSchema.nullable(),
+  /** Every overwrite on this channel, so a client can compute permissions locally. */
+  permissionOverwrites: z.array(permissionOverwriteSchema),
 });
 export type ChannelJson = z.infer<typeof channelSchema>;
 

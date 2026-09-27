@@ -1,10 +1,10 @@
 // Guild logic and database access. Routes stay thin and call these functions.
-import { and, asc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import { hasPermission, Permission } from "@discord-clone/shared";
 import { DispatchEvent } from "@discord-clone/shared";
 import type { AppConfig } from "../../config.js";
 import type { DbClient } from "../../db/client.js";
-import { channels, guildMembers, guilds, roles } from "../../db/schema.js";
+import { channels, guildMembers, guilds, memberRoles, roles, users } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
 import type { GatewayService } from "../gateway/service.js";
@@ -12,6 +12,7 @@ import { deleteIconFile, generateIconKey, saveIconFile } from "./icon.js";
 import {
   guildPermissions,
   loadMemberContext,
+  loadOverwrites,
   loadViewableChannels,
   type ChannelRow,
   type MemberContext,
@@ -61,9 +62,15 @@ export async function buildGuildView(db: DbClient, guildId: bigint, userId: bigi
   }
   const viewableChannels = await loadViewableChannels(db, context);
   const member = await loadOwnMemberRow(db, guildId, userId);
-  return toGuildView(context.guild, context.allRoles, viewableChannels, member, [
-    ...context.memberRoles.map((role) => role.id),
-  ]);
+  const overwritesByChannel = await loadOverwrites(db, viewableChannels.map((channel) => channel.id));
+  return toGuildView(
+    context.guild,
+    context.allRoles,
+    viewableChannels,
+    member,
+    [...context.memberRoles.map((role) => role.id)],
+    overwritesByChannel,
+  );
 }
 
 export async function createGuild(deps: GuildsDeps, userId: bigint, name: string) {
@@ -222,7 +229,21 @@ export interface ListMembersInput {
   limit: number;
 }
 
-export async function listMembers(db: DbClient, guildId: bigint, userId: bigint, input: ListMembersInput) {
+export interface ListedMember extends MemberRow {
+  roleIds: bigint[];
+}
+
+/**
+ * One keyset page of a guild's members, ordered by user id, each with the
+ * user's own profile (name, avatar) and role ids, so the client can show
+ * and permission-check members without a second request per member.
+ */
+export async function listMembers(
+  db: DbClient,
+  guildId: bigint,
+  userId: bigint,
+  input: ListMembersInput,
+): Promise<ListedMember[]> {
   const context = await loadMemberContext(db, guildId, userId);
   if (!context) {
     throw new AppError(404, "NOT_FOUND", "This guild does not exist.");
@@ -234,13 +255,40 @@ export async function listMembers(db: DbClient, guildId: bigint, userId: bigint,
   }
 
   const rows = await db
-    .select()
+    .select({
+      guildId: guildMembers.guildId,
+      userId: guildMembers.userId,
+      nickname: guildMembers.nickname,
+      joinedAt: guildMembers.joinedAt,
+      username: users.username,
+      displayName: users.displayName,
+      avatarKey: users.avatarKey,
+      statusText: users.statusText,
+      userCreatedAt: users.createdAt,
+    })
     .from(guildMembers)
+    .innerJoin(users, eq(users.id, guildMembers.userId))
     .where(and(...conditions))
     .orderBy(asc(guildMembers.userId))
     .limit(input.limit);
 
-  return rows;
+  const userIds = rows.map((row) => row.userId);
+  const roleRows =
+    userIds.length > 0
+      ? await db
+          .select({ userId: memberRoles.userId, roleId: memberRoles.roleId })
+          .from(memberRoles)
+          .where(and(eq(memberRoles.guildId, guildId), inArray(memberRoles.userId, userIds)))
+      : [];
+  const roleIdsByUser = new Map<string, bigint[]>();
+  for (const row of roleRows) {
+    const key = row.userId.toString();
+    const list = roleIdsByUser.get(key) ?? [];
+    list.push(row.roleId);
+    roleIdsByUser.set(key, list);
+  }
+
+  return rows.map((row) => ({ ...row, roleIds: roleIdsByUser.get(row.userId.toString()) ?? [] }));
 }
 
 /** Throw 403 when the caller lacks the given guild-level permission. Call after a membership check. */

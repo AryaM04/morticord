@@ -196,8 +196,30 @@ export async function acceptInvite(db: DbClient, code: string, userId: bigint, g
 
   if (gateway && memberRow) {
     gateway.addUserToGuild(invite.guildId, userId);
-    gateway.toGuild(invite.guildId, DispatchEvent.GUILD_MEMBER_ADD, toMemberJson(memberRow, []), userId);
+    // Existing members get the new member's profile too, so they can show
+    // a name and an avatar without a second request.
+    const userRows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const joinedUser = userRows[0];
+    gateway.toGuild(
+      invite.guildId,
+      DispatchEvent.GUILD_MEMBER_ADD,
+      toMemberJson(
+        {
+          ...memberRow,
+          username: joinedUser?.username,
+          displayName: joinedUser?.displayName,
+          avatarKey: joinedUser?.avatarKey,
+          statusText: joinedUser?.statusText,
+          userCreatedAt: joinedUser?.createdAt,
+        },
+        [],
+      ),
+      userId,
+    );
     gateway.toUser(userId, DispatchEvent.GUILD_CREATE, view);
+    // The new guild is now a shared guild too: tell the other members the
+    // joining user's current presence, since they never got it before.
+    gateway.notifyConnectionCountChanged(userId);
   }
 
   return view;
