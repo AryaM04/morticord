@@ -5,6 +5,7 @@ import { updateMeRequestSchema } from "@discord-clone/shared";
 import type { AppDeps } from "../../app.js";
 import { users } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
+import { deleteDevice, listDevices } from "../auth/service.js";
 import { toUserJson } from "./serialize.js";
 import { detectImageContentType, readAvatarFile } from "./avatar.js";
 import { getUserOrThrow, removeAvatar, setAvatar, updateMe } from "./service.js";
@@ -41,6 +42,19 @@ export async function registerUserRoutes(app: FastifyInstance, deps: AppDeps): P
   app.delete("/users/@me/avatar", { preHandler: app.authenticate }, async (request, reply) => {
     const user = await removeAvatar(usersDeps, request.auth!.userId);
     return reply.send(toUserJson(user, { includePrivate: true }));
+  });
+
+  app.get("/users/@me/devices", { preHandler: app.authenticate }, async (request, reply) => {
+    const authDeps = { db: deps.db, config: deps.config, mailer: deps.mailer };
+    const result = await listDevices(authDeps, request.auth!.userId, request.auth!.deviceId);
+    return reply.send({ devices: result });
+  });
+
+  app.delete("/users/@me/devices/:id", { preHandler: app.authenticate }, async (request, reply) => {
+    const authDeps = { db: deps.db, config: deps.config, mailer: deps.mailer };
+    const { id } = request.params as { id: string };
+    await deleteDevice(authDeps, request.auth!.userId, id);
+    return reply.status(204).send();
   });
 
   app.get("/avatars/:userId/:avatarKey", async (request, reply) => {

@@ -19,7 +19,17 @@ async function registerUser(email: string, username: string) {
     url: "/api/v1/auth/register",
     payload: { email, username, password: "correct-password" },
   });
-  return response.json() as { accessToken: string; user: { id: string } };
+  return response.json() as { accessToken: string; deviceId: string; user: { id: string } };
+}
+
+async function loginUser(email: string, userAgent?: string) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/auth/login",
+    headers: userAgent ? { "user-agent": userAgent } : {},
+    payload: { email, password: "correct-password" },
+  });
+  return response.json() as { accessToken: string; deviceId: string; user: { id: string } };
 }
 
 describeWithDb("users routes", () => {
@@ -168,6 +178,75 @@ describeWithDb("users routes", () => {
     const response = await app.inject({
       method: "GET",
       url: `/api/v1/avatars/${uploaded.id}/wrong-key`,
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("lists the signed-in user's devices, marking the current one", async () => {
+    const email = "xena@example.com";
+    await registerUser(email, "xena");
+    const second = await loginUser(email, "Mozilla/5.0 (Windows NT 10.0) Chrome/120.0 Safari/537.36");
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/users/@me/devices",
+      headers: { authorization: `Bearer ${second.accessToken}` },
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as {
+      devices: { id: string; name: string; createdAt: string; lastSeen: string; current: boolean }[];
+    };
+    expect(body.devices).toHaveLength(2);
+    const current = body.devices.find((device) => device.id === second.deviceId);
+    expect(current?.current).toBe(true);
+    expect(current?.name).toContain("Chrome");
+    const other = body.devices.find((device) => device.id !== second.deviceId);
+    expect(other?.current).toBe(false);
+  });
+
+  it("does not list another user's devices", async () => {
+    const owner = await registerUser("yara@example.com", "yara");
+    const stranger = await registerUser("zack@example.com", "zack");
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/users/@me/devices",
+      headers: { authorization: `Bearer ${stranger.accessToken}` },
+    });
+    const body = response.json() as { devices: { id: string }[] };
+    expect(body.devices.some((device) => device.id === owner.deviceId)).toBe(false);
+  });
+
+  it("deletes a device: its refresh token stops working and the device is gone from the list", async () => {
+    const email = "amir@example.com";
+    const first = await registerUser(email, "amir");
+    const second = await loginUser(email);
+
+    const deleteResponse = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/users/@me/devices/${second.deviceId}`,
+      headers: { authorization: `Bearer ${first.accessToken}` },
+    });
+    expect(deleteResponse.statusCode).toBe(204);
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/api/v1/users/@me/devices",
+      headers: { authorization: `Bearer ${first.accessToken}` },
+    });
+    const body = listResponse.json() as { devices: { id: string }[] };
+    expect(body.devices.some((device) => device.id === second.deviceId)).toBe(false);
+    expect(body.devices.some((device) => device.id === first.deviceId)).toBe(true);
+  });
+
+  it("returns 404 when deleting a device that is not the caller's own", async () => {
+    const owner = await registerUser("bella@example.com", "bella");
+    const stranger = await registerUser("carl@example.com", "carl");
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/users/@me/devices/${owner.deviceId}`,
+      headers: { authorization: `Bearer ${stranger.accessToken}` },
     });
     expect(response.statusCode).toBe(404);
   });
