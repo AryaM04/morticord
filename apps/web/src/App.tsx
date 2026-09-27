@@ -1,83 +1,55 @@
-// Skeleton of the main 4-column layout: server rail, channel list, chat
-// pane and member list. There is no routing yet. Later milestones will
-// add real data and navigation.
+// Top-level router. See docs/architecture.md section 7 and the M1 build
+// notes: /app is protected (redirect to /login when signed out), every
+// other auth page is public.
+import { useEffect } from "react";
+import { Redirect, Route, Switch } from "wouter";
+import { AuthCallbackPage } from "./pages/AuthCallbackPage.js";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage.js";
+import { LoginPage } from "./pages/LoginPage.js";
+import { RegisterPage } from "./pages/RegisterPage.js";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage.js";
+import { VerifyEmailPage } from "./pages/VerifyEmailPage.js";
+import { AppShell } from "./pages/AppShell.js";
+import { session } from "./lib/session.js";
+import { useSession } from "./lib/useSession.js";
 
-import { Suspense, lazy } from "react";
+function FullPageSpinner() {
+  return (
+    <div className="flex h-full w-full items-center justify-center" style={{ backgroundColor: "var(--color-bg-main)" }}>
+      <span style={{ color: "var(--color-text-muted)" }}>Loading...</span>
+    </div>
+  );
+}
 
-// Load the diagnostics panel only when a person opens the page with
-// "?diag" in a dev build. The lazy import keeps it out of the normal
-// app bundle, per the resource rules in CLAUDE.md.
-const DiagPanel = lazy(() => import("./diag/DiagPanel.js"));
+function ProtectedApp() {
+  const status = useSession((s) => s.status);
 
-function shouldShowDiagPanel(): boolean {
-  if (!import.meta.env.DEV) {
-    return false;
+  if (status === "loading") {
+    return <FullPageSpinner />;
   }
-  return new URLSearchParams(window.location.search).has("diag");
-}
-
-function ServerRail() {
-  return (
-    <div
-      className="flex w-[72px] flex-col items-center gap-2 py-3"
-      style={{ backgroundColor: "var(--color-bg-rail)" }}
-    >
-      <div
-        className="flex h-12 w-12 items-center justify-center rounded-full"
-        style={{ backgroundColor: "var(--color-accent)" }}
-      >
-        DC
-      </div>
-    </div>
-  );
-}
-
-function ChannelList() {
-  return (
-    <div
-      className="flex w-60 flex-col p-3"
-      style={{ backgroundColor: "var(--color-bg-sidebar)" }}
-    >
-      <div className="mb-2 font-semibold">Guild name</div>
-      <div style={{ color: "var(--color-text-muted)" }}># general</div>
-    </div>
-  );
-}
-
-function ChatPane() {
-  return (
-    <div className="flex flex-1 flex-col p-3" style={{ backgroundColor: "var(--color-bg-main)" }}>
-      <div className="mb-2 font-semibold"># general</div>
-      <div className="flex-1" style={{ color: "var(--color-text-muted)" }}>
-        No messages yet.
-      </div>
-    </div>
-  );
-}
-
-function MemberList() {
-  return (
-    <div
-      className="flex w-60 flex-col p-3"
-      style={{ backgroundColor: "var(--color-bg-members)" }}
-    >
-      <div style={{ color: "var(--color-text-muted)" }}>Members</div>
-    </div>
-  );
+  if (status === "signedOut") {
+    return <Redirect to="/login" />;
+  }
+  return <AppShell />;
 }
 
 export function App() {
+  useEffect(() => {
+    void session.store.getState().init();
+  }, []);
+
   return (
-    <div className="flex h-full w-full">
-      <ServerRail />
-      <ChannelList />
-      <ChatPane />
-      <MemberList />
-      {shouldShowDiagPanel() && (
-        <Suspense fallback={null}>
-          <DiagPanel />
-        </Suspense>
-      )}
-    </div>
+    <Switch>
+      <Route path="/login" component={LoginPage} />
+      <Route path="/register" component={RegisterPage} />
+      <Route path="/forgot-password" component={ForgotPasswordPage} />
+      <Route path="/reset-password" component={ResetPasswordPage} />
+      <Route path="/verify-email" component={VerifyEmailPage} />
+      <Route path="/auth/callback" component={AuthCallbackPage} />
+      <Route path="/app" component={ProtectedApp} />
+      <Route>
+        <Redirect to="/app" />
+      </Route>
+    </Switch>
   );
 }

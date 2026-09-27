@@ -1,0 +1,88 @@
+// The sign-in page.
+import { useState, type FormEvent } from "react";
+import { Link, useLocation } from "wouter";
+import { loginRequestSchema } from "@discord-clone/shared";
+import { AuthLayout } from "../components/AuthLayout.js";
+import { FormField } from "../components/FormField.js";
+import { OAuthButtons } from "../components/OAuthButtons.js";
+import { describeError } from "../lib/errors.js";
+import { session } from "../lib/session.js";
+
+export function LoginPage() {
+  const [, navigate] = useLocation();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setFormError(null);
+
+    const parsed = loginRequestSchema.safeParse({ email, password });
+    if (!parsed.success) {
+      const errors: Record<string, string> = {};
+      for (const issue of parsed.error.issues) {
+        const key = issue.path[0];
+        if (typeof key === "string") errors[key] = issue.message;
+      }
+      setFieldErrors(errors);
+      return;
+    }
+    setFieldErrors({});
+
+    setPending(true);
+    try {
+      await session.store.getState().login(parsed.data);
+      navigate("/app");
+    } catch (error) {
+      setFormError(describeError(error));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <AuthLayout title="Sign in">
+      <OAuthButtons />
+      <form onSubmit={handleSubmit} noValidate>
+        <FormField
+          label="Email"
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          error={fieldErrors.email}
+        />
+        <FormField
+          label="Password"
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          error={fieldErrors.password}
+        />
+        {formError && (
+          <p role="alert" className="mb-4 text-sm" style={{ color: "#e05252" }}>
+            {formError}
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={pending}
+          className="w-full rounded px-3 py-2 text-sm font-medium"
+          style={{ backgroundColor: "var(--color-accent)", color: "white" }}
+        >
+          {pending ? "Signing in..." : "Sign in"}
+        </button>
+      </form>
+      <div className="mt-4 flex flex-col gap-1 text-sm" style={{ color: "var(--color-text-muted)" }}>
+        <Link href="/forgot-password">Forgot your password?</Link>
+        <span>
+          No account yet? <Link href="/register">Register</Link>
+        </span>
+      </div>
+    </AuthLayout>
+  );
+}
