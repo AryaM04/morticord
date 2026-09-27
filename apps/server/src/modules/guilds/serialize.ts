@@ -8,6 +8,7 @@ import type {
   InvitePreview,
   OverwriteInput,
   RoleJson,
+  VoiceStateJson,
 } from "@discord-clone/shared";
 import type { ChannelRow, GuildRow, RoleRow } from "./member-context.js";
 
@@ -140,11 +141,13 @@ export function toGuildView(
   member: MemberRow,
   memberRoleIds: bigint[],
   overwritesByChannel: Map<bigint, OverwriteInput[]> = new Map(),
+  voiceStates: VoiceStateJson[] = [],
 ): GuildView {
   return {
     ...toGuildJson(guild),
     roles: roles.map(toRoleJson),
     channels: channelsList.map((channel) => toChannelJson(channel, overwritesByChannel.get(channel.id) ?? [])),
+    voiceStates,
     member: toMemberJson(member, memberRoleIds),
   };
 }

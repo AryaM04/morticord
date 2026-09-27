@@ -8,6 +8,8 @@ import { channels, guildMembers, guilds, memberRoles, roles, users } from "../..
 import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
 import type { GatewayService } from "../gateway/service.js";
+import { revalidateGuildVoice } from "../voice/gateway-ops.js";
+import type { VoiceService } from "../voice/service.js";
 import { deleteIconFile, generateIconKey, saveIconFile } from "./icon.js";
 import {
   guildPermissions,
@@ -39,6 +41,7 @@ export interface GuildsDeps {
   db: DbClient;
   config: AppConfig;
   gateway?: GatewayService;
+  voice?: VoiceService;
 }
 
 async function loadOwnMemberRow(db: DbClient, guildId: bigint, userId: bigint): Promise<MemberRow> {
@@ -54,8 +57,13 @@ async function loadOwnMemberRow(db: DbClient, guildId: bigint, userId: bigint): 
   return row;
 }
 
-/** Build the full guild view (guild, roles, viewable channels, own member) for one caller. */
-export async function buildGuildView(db: DbClient, guildId: bigint, userId: bigint) {
+/**
+ * Build the full guild view (guild, roles, viewable channels, own member,
+ * and the live voice states of the caller's viewable voice channels) for
+ * one caller. `voice` is left out for a caller that does not need voice
+ * state, such as a plain REST guild fetch; READY and GUILD_CREATE pass it.
+ */
+export async function buildGuildView(db: DbClient, guildId: bigint, userId: bigint, voice?: VoiceService) {
   const context = await loadMemberContext(db, guildId, userId);
   if (!context) {
     throw new AppError(404, "NOT_FOUND", "This guild does not exist.");
@@ -63,6 +71,23 @@ export async function buildGuildView(db: DbClient, guildId: bigint, userId: bigi
   const viewableChannels = await loadViewableChannels(db, context);
   const member = await loadOwnMemberRow(db, guildId, userId);
   const overwritesByChannel = await loadOverwrites(db, viewableChannels.map((channel) => channel.id));
+  const voiceStates = voice
+    ? viewableChannels
+        .filter((channel) => channel.type === "voice")
+        .flatMap((channel) =>
+          voice.channelStates(channel.id).map((peerState) => ({
+            guildId: peerState.guildId.toString(),
+            channelId: peerState.channelId.toString(),
+            userId: peerState.userId.toString(),
+            deviceId: peerState.deviceId,
+            selfMute: peerState.selfMute,
+            selfDeaf: peerState.selfDeaf,
+            selfVideo: peerState.selfVideo,
+            selfStream: peerState.selfStream,
+            joinedAt: peerState.joinedAt,
+          })),
+        )
+    : [];
   return toGuildView(
     context.guild,
     context.allRoles,
@@ -70,11 +95,12 @@ export async function buildGuildView(db: DbClient, guildId: bigint, userId: bigi
     member,
     [...context.memberRoles.map((role) => role.id)],
     overwritesByChannel,
+    voiceStates,
   );
 }
 
 export async function createGuild(deps: GuildsDeps, userId: bigint, name: string) {
-  const { db, gateway } = deps;
+  const { db, gateway, voice } = deps;
 
   const ownedCount = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -119,7 +145,7 @@ export async function createGuild(deps: GuildsDeps, userId: bigint, name: string
   });
 
   gateway?.addUserToGuild(guildId, userId);
-  const view = await buildGuildView(db, guildId, userId);
+  const view = await buildGuildView(db, guildId, userId, voice);
   gateway?.toUser(userId, DispatchEvent.GUILD_CREATE, view);
   return view;
 }
@@ -156,7 +182,7 @@ export async function updateGuild(
 }
 
 export async function deleteGuild(deps: GuildsDeps, guildId: bigint, userId: bigint): Promise<void> {
-  const { db, config, gateway } = deps;
+  const { db, config, gateway, voice } = deps;
   const context = await loadMemberContext(db, guildId, userId);
   if (!context) {
     throw new AppError(404, "NOT_FOUND", "This guild does not exist.");
@@ -179,6 +205,9 @@ export async function deleteGuild(deps: GuildsDeps, guildId: bigint, userId: big
     gateway.toUsers(memberRows.map((row) => row.userId), DispatchEvent.GUILD_DELETE, { id: guildId.toString() });
     gateway.removeGuild(guildId);
   }
+  // GUILD_DELETE above already tells every client to tear down this
+  // guild's voice UI, so no separate leave broadcast is needed here.
+  await voice?.revalidate(guildId, async () => false);
 }
 
 export async function setGuildIcon(deps: GuildsDeps, guildId: bigint, userId: bigint, buffer: Buffer) {
@@ -209,7 +238,7 @@ export async function removeGuildIcon(deps: GuildsDeps, guildId: bigint, userId:
 }
 
 export async function leaveGuild(deps: GuildsDeps, guildId: bigint, userId: bigint): Promise<void> {
-  const { db, gateway } = deps;
+  const { db, gateway, voice } = deps;
   const context = await loadMemberContext(db, guildId, userId);
   if (!context) {
     throw new AppError(404, "NOT_FOUND", "This guild does not exist.");
@@ -222,6 +251,11 @@ export async function leaveGuild(deps: GuildsDeps, guildId: bigint, userId: bigi
   gateway?.toGuild(guildId, DispatchEvent.GUILD_MEMBER_REMOVE, { guildId: guildId.toString(), userId: userId.toString() });
   gateway?.toUser(userId, DispatchEvent.GUILD_DELETE, { id: guildId.toString() });
   gateway?.removeUserFromGuild(guildId, userId);
+  // The member row is already gone, so this also removes a voice peer this
+  // user left behind, and tells the rest of that channel they left.
+  if (gateway && voice) {
+    await revalidateGuildVoice({ db, gateway, voice }, guildId);
+  }
 }
 
 export interface ListMembersInput {

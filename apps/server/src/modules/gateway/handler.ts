@@ -11,6 +11,9 @@ import {
   presenceSetPayloadSchema,
   resumePayloadSchema,
   typingPayloadSchema,
+  voiceJoinPayloadSchema,
+  voiceSignalPayloadSchema,
+  voiceStatePayloadSchema,
   type DispatchEventName,
   type ReadyPayload,
 } from "@discord-clone/shared";
@@ -22,6 +25,14 @@ import { verifyAccessToken } from "../auth/tokens.js";
 import { buildGuildView } from "../guilds/service.js";
 import { handleTyping } from "../messages/typing.js";
 import { loadReadStates } from "../messages/service.js";
+import {
+  broadcastVoiceLeave,
+  handleVoiceJoin,
+  handleVoiceLeave,
+  handleVoiceSignal,
+  handleVoiceState,
+} from "../voice/gateway-ops.js";
+import { VoiceError, type VoiceService } from "../voice/service.js";
 import { GatewayService, loadGuildIdsForUser, type GatewaySocket } from "./service.js";
 
 export interface GatewayTimingOptions {
@@ -49,13 +60,14 @@ interface ConnectionState {
 async function buildReadyPayload(
   db: DbClient,
   gateway: GatewayService,
+  voice: VoiceService,
   userId: bigint,
   sessionId: string,
 ): Promise<ReadyPayload> {
   const userRows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   const user = userRows[0];
   const guildIds = await loadGuildIdsForUser(db, userId);
-  const guilds = await Promise.all(guildIds.map((guildId) => buildGuildView(db, guildId, userId)));
+  const guilds = await Promise.all(guildIds.map((guildId) => buildGuildView(db, guildId, userId, voice)));
   const readStateRows = await loadReadStates(db, userId);
 
   return {
@@ -72,17 +84,18 @@ async function buildReadyPayload(
 
 export function registerGatewayRoute(
   app: FastifyInstance,
-  deps: { db: DbClient; config: AppConfig; gateway: GatewayService },
+  deps: { db: DbClient; config: AppConfig; gateway: GatewayService; voice: VoiceService },
   timing: GatewayTimingOptions = {},
 ): void {
   const heartbeatIntervalMs = timing.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
   const identifyTimeoutMs = timing.identifyTimeoutMs ?? DEFAULT_IDENTIFY_TIMEOUT_MS;
-  const { db, config, gateway } = deps;
+  const { db, config, gateway, voice } = deps;
+  const voiceOpsDeps = { db, gateway, voice };
 
   app.get("/gateway", { websocket: true }, (rawSocket) => {
     const socket = rawSocket as unknown as GatewaySocket & {
       on(event: "message", listener: (data: Buffer | string) => void): void;
-      on(event: "close", listener: () => void): void;
+      on(event: "close", listener: (code: number, reason: Buffer) => void): void;
       on(event: "error", listener: (error: Error) => void): void;
     };
 
@@ -170,7 +183,7 @@ export function registerGatewayRoute(
       state.sessionId = session.id;
       gateway.notifyConnectionCountChanged(claims.userId);
 
-      const ready = await buildReadyPayload(db, gateway, claims.userId, session.id);
+      const ready = await buildReadyPayload(db, gateway, voice, claims.userId, session.id);
       send(GatewayOpcode.DISPATCH, ready, { t: "READY" });
       scheduleHeartbeatTimeout();
     }
@@ -200,6 +213,7 @@ export function registerGatewayRoute(
           }
           state.sessionId = parsed.data.sessionId;
           gateway.notifyConnectionCountChanged(claims.userId);
+          voice.cancelGrace(claims.userId, claims.deviceId);
           for (const entry of result.replay) {
             send(GatewayOpcode.DISPATCH, entry.d, { t: entry.t, s: entry.seq });
           }
@@ -253,6 +267,82 @@ export function registerGatewayRoute(
       }
     }
 
+    function sendVoiceError(error: unknown): void {
+      if (error instanceof VoiceError) {
+        send(GatewayOpcode.DISPATCH, { code: error.code, message: error.message }, { t: "VOICE_ERROR" });
+        return;
+      }
+      app.log.error(error, "A voice op failed for a reason that is not a VoiceError.");
+      closeConnection(GatewayCloseCode.UNKNOWN_ERROR, "A voice op failed unexpectedly.");
+    }
+
+    function handleVoiceJoinOp(payload: unknown): void {
+      if (!state.sessionId) {
+        closeConnection(GatewayCloseCode.NOT_AUTHENTICATED, "Identify before joining voice.");
+        return;
+      }
+      const parsed = voiceJoinPayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        closeConnection(GatewayCloseCode.DECODE_ERROR, "The VOICE_JOIN payload is not valid.");
+        return;
+      }
+      const info = gateway.getSession(state.sessionId);
+      if (!info) {
+        return;
+      }
+      handleVoiceJoin(voiceOpsDeps, info.userId, info.deviceId, parsed.data).catch(sendVoiceError);
+    }
+
+    function handleVoiceLeaveOp(): void {
+      if (!state.sessionId) {
+        closeConnection(GatewayCloseCode.NOT_AUTHENTICATED, "Identify before leaving voice.");
+        return;
+      }
+      const info = gateway.getSession(state.sessionId);
+      if (!info) {
+        return;
+      }
+      handleVoiceLeave(voiceOpsDeps, info.userId, info.deviceId).catch(sendVoiceError);
+    }
+
+    function handleVoiceStateOp(payload: unknown): void {
+      if (!state.sessionId) {
+        closeConnection(GatewayCloseCode.NOT_AUTHENTICATED, "Identify before changing voice state.");
+        return;
+      }
+      const parsed = voiceStatePayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        closeConnection(GatewayCloseCode.DECODE_ERROR, "The VOICE_STATE payload is not valid.");
+        return;
+      }
+      const info = gateway.getSession(state.sessionId);
+      if (!info) {
+        return;
+      }
+      handleVoiceState(voiceOpsDeps, info.userId, info.deviceId, parsed.data).catch(sendVoiceError);
+    }
+
+    function handleVoiceSignalOp(payload: unknown): void {
+      if (!state.sessionId) {
+        closeConnection(GatewayCloseCode.NOT_AUTHENTICATED, "Identify before sending a voice signal.");
+        return;
+      }
+      const parsed = voiceSignalPayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        closeConnection(GatewayCloseCode.DECODE_ERROR, "The VOICE_SIGNAL payload is not valid.");
+        return;
+      }
+      const info = gateway.getSession(state.sessionId);
+      if (!info) {
+        return;
+      }
+      try {
+        handleVoiceSignal({ gateway, voice }, info.userId, info.deviceId, parsed.data);
+      } catch (error) {
+        sendVoiceError(error);
+      }
+    }
+
     socket.on("message", (raw) => {
       if (state.closed) {
         return;
@@ -296,12 +386,24 @@ export function registerGatewayRoute(
         case GatewayOpcode.TYPING:
           handleTypingOp(envelope.d);
           break;
+        case GatewayOpcode.VOICE_JOIN:
+          handleVoiceJoinOp(envelope.d);
+          break;
+        case GatewayOpcode.VOICE_LEAVE:
+          handleVoiceLeaveOp();
+          break;
+        case GatewayOpcode.VOICE_STATE:
+          handleVoiceStateOp(envelope.d);
+          break;
+        case GatewayOpcode.VOICE_SIGNAL:
+          handleVoiceSignalOp(envelope.d);
+          break;
         default:
           closeConnection(GatewayCloseCode.UNKNOWN_OPCODE, "Unknown opcode.");
       }
     });
 
-    socket.on("close", () => {
+    socket.on("close", (code: number) => {
       state.closed = true;
       if (state.identifyTimer) {
         clearTimeout(state.identifyTimer);
@@ -314,6 +416,22 @@ export function registerGatewayRoute(
         gateway.disconnectSession(state.sessionId);
         if (info) {
           gateway.notifyConnectionCountChanged(info.userId);
+
+          // The device was signed out, removed, or its password was reset:
+          // its voice state must go at once, with no grace period. Any
+          // other disconnect (a network drop, a heartbeat timeout, a
+          // normal client close) gets the usual grace, so a short drop
+          // does not knock the user out of the call.
+          if (code === GatewayCloseCode.DEVICE_REVOKED) {
+            const removed = voice.removeImmediate(info.userId, info.deviceId);
+            if (removed) {
+              void broadcastVoiceLeave({ db, gateway }, removed);
+            }
+          } else {
+            voice.scheduleGrace(info.userId, info.deviceId, (removedState) => {
+              void broadcastVoiceLeave({ db, gateway }, removedState);
+            });
+          }
         }
       }
     });
