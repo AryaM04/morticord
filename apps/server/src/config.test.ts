@@ -7,9 +7,11 @@ const validEnv = {
   POSTGRES_DB: "discord_clone",
   POSTGRES_USER: "discord_clone",
   POSTGRES_PASSWORD: "secret",
-  JWT_SECRET: "jwt-secret-value",
+  JWT_SECRET: "jwt-secret-value-that-is-at-least-32-chars",
   TURN_SECRET: "turn-secret-value",
   TURN_DOMAIN: "localhost",
+  SMTP_HOST: "localhost",
+  SMTP_FROM: "Discord Clone <no-reply@example.com>",
 };
 
 describe("loadConfig", () => {
@@ -33,5 +35,32 @@ describe("loadConfig", () => {
   it("throws a clear error when a required value is missing", () => {
     const { POSTGRES_PASSWORD: _unused, ...rest } = validEnv;
     expect(() => loadConfig(rest)).toThrow(/POSTGRES_PASSWORD/);
+  });
+
+  it("throws a clear error when JWT_SECRET is too short", () => {
+    expect(() => loadConfig({ ...validEnv, JWT_SECRET: "too-short" })).toThrow(/JWT_SECRET/);
+  });
+
+  it("applies default values for WEB_ORIGIN, DATA_DIR and PUBLIC_API_URL", () => {
+    const config = loadConfig(validEnv);
+    expect(config.webOrigin).toBe("http://localhost:5173");
+    expect(config.dataDir).toBe("./data");
+    expect(config.publicApiUrl).toBe("http://localhost:5173");
+  });
+
+  it("leaves OAuth providers off when their credentials are not set", () => {
+    const config = loadConfig(validEnv);
+    expect(config.oauth.github).toBeUndefined();
+    expect(config.oauth.google).toBeUndefined();
+  });
+
+  it("turns on an OAuth provider once both its credentials are set", () => {
+    const config = loadConfig({
+      ...validEnv,
+      GITHUB_CLIENT_ID: "id",
+      GITHUB_CLIENT_SECRET: "secret",
+    });
+    expect(config.oauth.github).toEqual({ clientId: "id", clientSecret: "secret" });
+    expect(config.oauth.google).toBeUndefined();
   });
 });
