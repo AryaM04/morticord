@@ -1,0 +1,16 @@
+{
+  "name": "@discord-clone/desktop-tauri",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "typecheck": "echo \"no typescript in this package\"",
+    "lint": "echo \"no lint target in this package\"",
+    "test": "echo \"no tests yet\""
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  }
+}

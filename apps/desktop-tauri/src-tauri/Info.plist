@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Extra Info.plist entries for macOS. Tauri merges this file into the
+  generated app bundle Info.plist at build time. These two strings are the
+  text macOS shows when it asks the user for camera and microphone access,
+  needed for voice and video calls.
+-->
+<plist version="1.0">
+<dict>
+  <key>NSCameraUsageDescription</key>
+  <string>Discord Clone needs the camera for video calls that you start.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Discord Clone needs the microphone for voice calls that you start.</string>
+</dict>
+</plist>

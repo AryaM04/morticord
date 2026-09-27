@@ -2,6 +2,20 @@
 // pane and member list. There is no routing yet. Later milestones will
 // add real data and navigation.
 
+import { Suspense, lazy } from "react";
+
+// Load the diagnostics panel only when a person opens the page with
+// "?diag" in a dev build. The lazy import keeps it out of the normal
+// app bundle, per the resource rules in CLAUDE.md.
+const DiagPanel = lazy(() => import("./diag/DiagPanel.js"));
+
+function shouldShowDiagPanel(): boolean {
+  if (!import.meta.env.DEV) {
+    return false;
+  }
+  return new URLSearchParams(window.location.search).has("diag");
+}
+
 function ServerRail() {
   return (
     <div
@@ -59,6 +73,11 @@ export function App() {
       <ChannelList />
       <ChatPane />
       <MemberList />
+      {shouldShowDiagPanel() && (
+        <Suspense fallback={null}>
+          <DiagPanel />
+        </Suspense>
+      )}
     </div>
   );
 }
