@@ -19,4 +19,15 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Plain Node.js scripts (not TypeScript), so they need the Node
+    // globals declared by hand.
+    files: ["**/*.mjs", "**/*.cjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        console: "readonly",
+      },
+    },
+  },
 );

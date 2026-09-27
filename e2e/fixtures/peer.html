@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>WebRTC TURN test fixture</title>
+  </head>
+  <body>
+    <script>
+      // Test fixture for the WebRTC-over-TURN relay test.
+      //
+      // This page holds one RTCPeerConnection. The test script, running
+      // in Node, drives it through these window functions. There is no
+      // signaling server: the test script reads the offer, the answer
+      // and the ICE candidates here, and passes each one to the other
+      // browser page by itself.
+      window.candidateQueue = [];
+
+      window.createPeer = function (iceServers) {
+        const pc = new RTCPeerConnection({
+          iceServers: iceServers,
+          iceTransportPolicy: "relay",
+        });
+        pc.onicecandidate = function (event) {
+          if (event.candidate) {
+            window.candidateQueue.push(event.candidate.toJSON());
+          }
+        };
+        window.pc = pc;
+        return true;
+      };
+
+      window.drainCandidates = function () {
+        const drained = window.candidateQueue;
+        window.candidateQueue = [];
+        return drained;
+      };
+
+      window.addMicTrack = async function () {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        for (const track of stream.getTracks()) {
+          window.pc.addTrack(track, stream);
+        }
+        return true;
+      };
+
+      window.addRecvOnlyAudio = function () {
+        window.pc.addTransceiver("audio", { direction: "recvonly" });
+        return true;
+      };
+
+      window.createOffer = async function () {
+        const offer = await window.pc.createOffer();
+        await window.pc.setLocalDescription(offer);
+        return offer;
+      };
+
+      window.createAnswer = async function (offer) {
+        await window.pc.setRemoteDescription(offer);
+        const answer = await window.pc.createAnswer();
+        await window.pc.setLocalDescription(answer);
+        return answer;
+      };
+
+      window.acceptAnswer = async function (answer) {
+        await window.pc.setRemoteDescription(answer);
+        return true;
+      };
+
+      window.addRemoteCandidate = async function (candidate) {
+        await window.pc.addIceCandidate(candidate);
+        return true;
+      };
+
+      window.getConnectionState = function () {
+        return window.pc.connectionState;
+      };
+
+      // Read the type of the candidate pair the peer connection picked.
+      // It returns "relay" only when media goes through the TURN server.
+      window.getSelectedCandidateType = async function () {
+        const stats = await window.pc.getStats();
+        let selectedPairId = null;
+        stats.forEach(function (report) {
+          if (report.type === "transport" && report.selectedCandidatePairId) {
+            selectedPairId = report.selectedCandidatePairId;
+          }
+        });
+        if (!selectedPairId) {
+          return null;
+        }
+        const pair = stats.get(selectedPairId);
+        if (!pair) {
+          return null;
+        }
+        const localCandidate = stats.get(pair.localCandidateId);
+        return localCandidate ? localCandidate.candidateType : null;
+      };
+
+      window.getInboundBytesReceived = async function () {
+        const stats = await window.pc.getStats();
+        let bytesReceived = 0;
+        stats.forEach(function (report) {
+          if (report.type === "inbound-rtp" && report.kind === "audio") {
+            bytesReceived = report.bytesReceived;
+          }
+        });
+        return bytesReceived;
+      };
+    </script>
+  </body>
+</html>

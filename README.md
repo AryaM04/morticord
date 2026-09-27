@@ -36,6 +36,40 @@ See `docs/adr` for the main design decisions, and the plan referenced from
    pnpm dev
    ```
 
+## End-to-end tests
+
+The `e2e` package holds browser tests that need a real WebRTC engine. One
+test proves that two browser peers can connect through the local coturn
+TURN relay. See `docs/concepts/nat-turn.md` for what a TURN relay is.
+
+1. Install the Playwright browser (once per machine).
+
+   ```sh
+   pnpm --filter @discord-clone/e2e exec playwright install chromium
+   ```
+
+2. Start coturn.
+
+   ```sh
+   docker compose --env-file .env -f infra/docker-compose.dev.yml up -d coturn
+   ```
+
+3. Run the end-to-end tests.
+
+   ```sh
+   pnpm e2e
+   ```
+
+4. Stop coturn when you are done.
+
+   ```sh
+   docker compose --env-file .env -f infra/docker-compose.dev.yml down
+   ```
+
+The end-to-end tests are not part of the default `pnpm test` run. A
+separate CI job runs them on Linux, with coturn started through Docker
+Compose.
+
 ## Project status
 
 This repository is at milestone M0: monorepo setup, tooling and risk
