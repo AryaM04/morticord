@@ -1,29 +1,40 @@
-// Server entry point. Starts the Fastify app and the health check route.
-import Fastify from "fastify";
-import { sql } from "drizzle-orm";
+// Server entry point: load config, run migrations, build the app, listen.
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createDbClient } from "./db/client.js";
+import { createSmtpMailer } from "./mailer.js";
 
-const config = loadConfig();
-const db = createDbClient(config);
-const app = Fastify({ logger: true });
+// Resolve the migrations folder next to this module, so it works both from
+// src (run with tsx) and from dist (run with node after a build).
+const migrationsFolder = path.join(fileURLToPath(new URL(".", import.meta.url)), "../drizzle");
 
-app.get("/api/v1/health", async (_request, reply) => {
-  try {
-    await db.execute(sql`select 1`);
-    return reply.send({ status: "ok" });
-  } catch (error) {
-    app.log.error(error, "Health check failed: the database is not reachable.");
-    return reply.status(503).send({ status: "error" });
-  }
+async function main() {
+  const config = loadConfig();
+  const db = createDbClient(config);
+
+  await migrate(db, { migrationsFolder });
+
+  const mailer = createSmtpMailer(config);
+  const app = await buildApp({ config, db, mailer });
+
+  await app.listen({ port: config.apiPort, host: "0.0.0.0" });
+  app.log.info(`Server is ready. It listens on port ${config.apiPort}.`);
+
+  const shutdown = async (signal: string) => {
+    app.log.info(`Got ${signal}. The server is shutting down.`);
+    await app.close();
+    await db.$client.end();
+    process.exit(0);
+  };
+
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+}
+
+main().catch((error: unknown) => {
+  console.error("Server failed to start.", error);
+  process.exit(1);
 });
-
-app
-  .listen({ port: config.apiPort, host: "0.0.0.0" })
-  .then(() => {
-    app.log.info(`Server is ready. It listens on port ${config.apiPort}.`);
-  })
-  .catch((error: unknown) => {
-    app.log.error(error, "Server failed to start.");
-    process.exit(1);
-  });
