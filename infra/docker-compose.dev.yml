@@ -39,6 +39,8 @@ services:
       - "/etc/coturn/turnserver.conf"
       - "--static-auth-secret=${TURN_SECRET}"
       - "--external-ip=${TURN_EXTERNAL_IP}"
+      # TURN credentials need a realm. Without it, coturn takes the realm from the host name, which can be empty.
+      - "--realm=${TURN_DOMAIN}"
       - "--min-port=${TURN_RELAY_MIN_PORT}"
       - "--max-port=${TURN_RELAY_MAX_PORT}"
     ports:
