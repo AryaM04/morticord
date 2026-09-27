@@ -1,8 +1,16 @@
 // The main 4-column layout: server rail, channel list, chat pane and
-// member list. Later milestones add real data and navigation.
-import { Suspense, lazy } from "react";
+// member list.
+import { Suspense, lazy, useEffect } from "react";
+import { Redirect, useParams } from "wouter";
+import { ServerRail } from "../components/ServerRail.js";
+import { ChannelColumn } from "../components/ChannelColumn.js";
+import { ChatPane } from "../components/ChatPane.js";
+import { MemberList } from "../components/MemberList.js";
 import { UserPanel } from "../components/UserPanel.js";
 import { VerifyBanner } from "../components/VerifyBanner.js";
+import { HomePage } from "./HomePage.js";
+import { useRealtime } from "../lib/useRealtime.js";
+import { readLastLocation, rememberLastLocation } from "../lib/lastLocation.js";
 
 // Load the diagnostics panel only when a person opens the page with
 // "?diag" in a dev build. The lazy import keeps it out of the normal
@@ -16,74 +24,55 @@ function shouldShowDiagPanel(): boolean {
   return new URLSearchParams(window.location.search).has("diag");
 }
 
-function ServerRail() {
+function AppHome() {
+  const lastLocation = readLastLocation();
+  if (lastLocation) {
+    return <Redirect to={`/app/${lastLocation.guildId}/${lastLocation.channelId}`} />;
+  }
   return (
-    <div
-      className="flex w-[72px] flex-col items-center gap-2 py-3"
-      style={{ backgroundColor: "var(--color-bg-rail)" }}
-    >
-      <div
-        className="flex h-12 w-12 items-center justify-center rounded-full"
-        style={{ backgroundColor: "var(--color-accent)" }}
-      >
-        DC
+    <>
+      <div className="flex w-60 flex-col" style={{ backgroundColor: "var(--color-bg-sidebar)" }}>
+        <div className="flex-1" />
+        <UserPanel />
       </div>
-    </div>
+      <HomePage />
+    </>
   );
 }
 
-function ChannelList() {
-  return (
-    <div
-      className="flex w-60 flex-col"
-      style={{ backgroundColor: "var(--color-bg-sidebar)" }}
-    >
-      <div className="flex-1 p-3">
-        <div className="mb-2 font-semibold">Guild name</div>
-        <div style={{ color: "var(--color-text-muted)" }}># general</div>
-      </div>
-      <UserPanel />
-    </div>
-  );
-}
+function GuildView({ guildId, channelId }: { guildId: string; channelId: string | null }) {
+  const guildLoaded = useRealtime((s) => Boolean(s.guilds[guildId]));
 
-function ChatPane() {
-  return (
-    <div className="flex flex-1 flex-col" style={{ backgroundColor: "var(--color-bg-main)" }}>
-      <VerifyBanner />
-      <div className="flex flex-1 flex-col p-3">
-        <div className="mb-2 font-semibold"># general</div>
-        <div className="flex-1" style={{ color: "var(--color-text-muted)" }}>
-          No messages yet.
-        </div>
-      </div>
-    </div>
-  );
-}
+  useEffect(() => {
+    if (guildLoaded && channelId) {
+      rememberLastLocation(guildId, channelId);
+    }
+  }, [guildLoaded, guildId, channelId]);
 
-function MemberList() {
   return (
-    <div
-      className="flex w-60 flex-col p-3"
-      style={{ backgroundColor: "var(--color-bg-members)" }}
-    >
-      <div style={{ color: "var(--color-text-muted)" }}>Members</div>
-    </div>
+    <>
+      <ChannelColumn guildId={guildId} activeChannelId={channelId} />
+      <ChatPane channelId={channelId} />
+      <MemberList guildId={guildId} />
+    </>
   );
 }
 
 export function AppShell() {
+  const params = useParams<{ guildId?: string; channelId?: string }>();
+
   return (
-    <div className="flex h-full w-full">
-      <ServerRail />
-      <ChannelList />
-      <ChatPane />
-      <MemberList />
-      {shouldShowDiagPanel() && (
-        <Suspense fallback={null}>
-          <DiagPanel />
-        </Suspense>
-      )}
+    <div className="flex h-full w-full flex-col">
+      <VerifyBanner />
+      <div className="flex flex-1">
+        <ServerRail activeGuildId={params.guildId} />
+        {params.guildId ? <GuildView guildId={params.guildId} channelId={params.channelId ?? null} /> : <AppHome />}
+        {shouldShowDiagPanel() && (
+          <Suspense fallback={null}>
+            <DiagPanel />
+          </Suspense>
+        )}
+      </div>
     </div>
   );
 }

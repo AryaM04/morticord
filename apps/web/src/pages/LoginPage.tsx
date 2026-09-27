@@ -35,7 +35,8 @@ export function LoginPage() {
     setPending(true);
     try {
       await session.store.getState().login(parsed.data);
-      navigate("/app");
+      const redirect = new URLSearchParams(window.location.search).get("redirect");
+      navigate(redirect && redirect.startsWith("/") ? redirect : "/app");
     } catch (error) {
       setFormError(describeError(error));
     } finally {
