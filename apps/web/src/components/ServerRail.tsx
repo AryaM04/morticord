@@ -2,7 +2,9 @@
 // and a plain pill to mark the active guild.
 import { useState } from "react";
 import { Link } from "wouter";
+import { aggregateGuildUnread, formatBadgeCount } from "@discord-clone/client-core";
 import { useRealtime } from "../lib/useRealtime.js";
+import { useMessages } from "../lib/useMessages.js";
 import { CreateOrJoinGuildDialog } from "./CreateOrJoinGuildDialog.js";
 import { readLastLocation } from "../lib/lastLocation.js";
 
@@ -17,12 +19,16 @@ function GuildIcon({
   iconKey,
   active,
   firstChannelId,
+  hasUnread,
+  mentionCount,
 }: {
   id: string;
   name: string;
   iconKey: string | null;
   active: boolean;
   firstChannelId: string | null;
+  hasUnread: boolean;
+  mentionCount: number;
 }) {
   const href = firstChannelId ? `/app/${id}/${firstChannelId}` : `/app/${id}`;
   return (
@@ -50,6 +56,26 @@ function GuildIcon({
           </div>
         )}
       </Link>
+      {mentionCount > 0 ? (
+        <span
+          className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none"
+          style={{ backgroundColor: "#e05252", color: "white" }}
+        >
+          <span aria-hidden="true">{formatBadgeCount(mentionCount)}</span>
+          <span className="sr-only">
+            {mentionCount} {mentionCount === 1 ? "mention" : "mentions"}
+          </span>
+        </span>
+      ) : (
+        hasUnread && (
+          <span
+            className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2"
+            style={{ backgroundColor: "white", borderColor: "var(--color-bg-rail)" }}
+          >
+            <span className="sr-only">Unread channels</span>
+          </span>
+        )
+      )}
     </div>
   );
 }
@@ -58,6 +84,8 @@ export function ServerRail({ activeGuildId }: { activeGuildId?: string }) {
   const guilds = useRealtime((s) => s.guilds);
   const channelIdsByGuild = useRealtime((s) => s.channelIdsByGuild);
   const channels = useRealtime((s) => s.channels);
+  const messageChannels = useMessages((s) => s.channels);
+  const selfUserId = useMessages((s) => s.selfUserId);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const guildList = Object.values(guilds).sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
@@ -70,6 +98,12 @@ export function ServerRail({ activeGuildId }: { activeGuildId?: string }) {
     }
     const firstText = ids.find((id) => channels[id]?.type !== "category");
     return firstText ?? null;
+  }
+
+  /** The server already sends only the channels this user can view. */
+  function viewableTextChannelIds(guildId: string): string[] {
+    const ids = channelIdsByGuild[guildId] ?? [];
+    return ids.filter((id) => channels[id]?.type === "text");
   }
 
   return (
@@ -87,16 +121,21 @@ export function ServerRail({ activeGuildId }: { activeGuildId?: string }) {
         DC
       </Link>
       <div className="my-1 h-px w-8" style={{ backgroundColor: "var(--color-border)" }} />
-      {guildList.map((guild) => (
-        <GuildIcon
-          key={guild.id}
-          id={guild.id}
-          name={guild.name}
-          iconKey={guild.iconKey}
-          active={guild.id === activeGuildId}
-          firstChannelId={firstTextChannel(guild.id)}
-        />
-      ))}
+      {guildList.map((guild) => {
+        const summary = aggregateGuildUnread(messageChannels, viewableTextChannelIds(guild.id), selfUserId);
+        return (
+          <GuildIcon
+            key={guild.id}
+            id={guild.id}
+            name={guild.name}
+            iconKey={guild.iconKey}
+            active={guild.id === activeGuildId}
+            firstChannelId={firstTextChannel(guild.id)}
+            hasUnread={summary.hasUnread}
+            mentionCount={summary.mentionCount}
+          />
+        );
+      })}
       <button
         type="button"
         title="Add a server"

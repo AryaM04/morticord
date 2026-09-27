@@ -530,6 +530,42 @@ export function countMentions(channel: ChannelMessagesState, selfUserId: string 
   return count;
 }
 
+export interface GuildUnreadSummary {
+  /** True when at least one of the given channels has unread messages. */
+  hasUnread: boolean;
+  /** The sum of mention counts across the given channels. */
+  mentionCount: number;
+}
+
+/**
+ * Roll up unread and mention state for one guild, from a list of its
+ * viewable text channel ids. The caller filters `channelIds` to the
+ * channels the user can view (the server already does this for the
+ * channels it sends), so this function only sums what it is given.
+ */
+export function aggregateGuildUnread(
+  channels: Record<string, ChannelMessagesState>,
+  channelIds: string[],
+  selfUserId: string | null,
+): GuildUnreadSummary {
+  let hasUnread = false;
+  let mentionCount = 0;
+  for (const id of channelIds) {
+    const channel = channels[id];
+    if (!channel) continue;
+    if (isChannelUnread(channel.lastEventId, channel.lastReadEventId)) {
+      hasUnread = true;
+    }
+    mentionCount += countMentions(channel, selfUserId);
+  }
+  return { hasUnread, mentionCount };
+}
+
+/** Format a badge count for display, capped at "99+" so the pill stays small. */
+export function formatBadgeCount(count: number): string {
+  return count > 99 ? "99+" : String(count);
+}
+
 // ---- read state ------------------------------------------------------------------
 
 /** Move the local read marker forward. Never moves it back (mirrors the server rule). */
