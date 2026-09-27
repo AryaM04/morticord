@@ -11,8 +11,12 @@
     "test": "echo \"no tests yet\""
   },
   "dependencies": {
+    "@discord-clone/client-core": "workspace:*",
+    "@discord-clone/shared": "workspace:*",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "wouter": "^3.3.5",
+    "zustand": "^5.0.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",

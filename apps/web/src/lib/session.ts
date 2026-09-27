@@ -1,0 +1,11 @@
+// The one session instance for this tab. Every page reads it through the
+// `useSession` hook in `useSession.ts`, and never calls `fetch` directly
+// (see docs/architecture.md section 7).
+import { createSession, webPlatform } from "@discord-clone/client-core";
+
+export const API_BASE_URL = "/api/v1";
+
+// The store moves itself to "signedOut" on a reused or invalid refresh
+// token. Protected routes react to that status and redirect on their own
+// (see App.tsx), so there is nothing extra to wire up here.
+export const session = createSession({ baseUrl: API_BASE_URL, platform: webPlatform });
