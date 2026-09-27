@@ -39,6 +39,8 @@ services:
       - "/etc/coturn/turnserver.conf"
       - "--static-auth-secret=${TURN_SECRET}"
       - "--external-ip=${TURN_EXTERNAL_IP}"
+      - "--min-port=${TURN_RELAY_MIN_PORT}"
+      - "--max-port=${TURN_RELAY_MAX_PORT}"
     ports:
       - "${TURN_PORT}:3478"
       - "${TURN_PORT}:3478/udp"

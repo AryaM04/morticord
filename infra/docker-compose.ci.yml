@@ -1,0 +1,7 @@
+# CI override for Linux runners. Use it on top of docker-compose.dev.yml.
+# Coturn uses the host network. Thus, no Docker NAT is between Chromium and coturn.
+# Do not use this file with Docker Desktop. Docker Desktop does not support the host network in the same way.
+services:
+  coturn:
+    network_mode: host
+    ports: !reset []
