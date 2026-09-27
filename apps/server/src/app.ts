@@ -10,6 +10,7 @@ import { registerErrorHandler } from "./errors.js";
 import type { Mailer } from "./mailer.js";
 import { authGuardPlugin } from "./plugins/auth-guard.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
+import { registerGuildRoutes } from "./modules/guilds/routes.js";
 import { registerUserRoutes } from "./modules/users/routes.js";
 
 export interface AppDeps {
@@ -52,6 +53,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   await app.register(async (instance) => registerAuthRoutes(instance, deps), { prefix: "/api/v1/auth" });
   await app.register(async (instance) => registerUserRoutes(instance, deps), { prefix: "/api/v1" });
+  await app.register(async (instance) => registerGuildRoutes(instance, deps), { prefix: "/api/v1" });
 
   return app;
 }
