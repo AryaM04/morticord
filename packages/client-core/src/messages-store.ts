@@ -576,6 +576,17 @@ export function advanceReadMarker(channel: ChannelMessagesState, eventId: string
   return channel;
 }
 
+/**
+ * The later (by id) of two read markers, treating `null` as earliest
+ * than any real id. Used where an incoming read marker was captured
+ * before an async fetch (`openChannel`), so it can be stale by the time
+ * it is applied: a `markRead` that ran in the meantime must not be
+ * undone by it.
+ */
+export function laterReadMarker(a: string | null, b: string | null): string | null {
+  return idGreaterThan(a, b) ? a : b;
+}
+
 // ---- typing ------------------------------------------------------------------
 
 export function setTypingStart(channel: ChannelMessagesState, userId: string, now: number): ChannelMessagesState {
@@ -730,7 +741,17 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
       set(touchChannel(get(), channelId));
       const page = await messagesApi.listEvents(api, channelId, { limit: 50 });
       updateChannel(get, set, channelId, (channel) => {
-        const withMeta: ChannelMessagesState = { ...channel, lastEventId, lastReadEventId, atLatest: true };
+        // `lastReadEventId` was captured before this fetch started, so a
+        // `markRead` call that ran in the meantime (for example, this
+        // same channel re-opening while already caught up) may have
+        // moved the marker further than it. Never move it backward.
+        const nextLastReadEventId = laterReadMarker(channel.lastReadEventId, lastReadEventId);
+        const withMeta: ChannelMessagesState = {
+          ...channel,
+          lastEventId,
+          lastReadEventId: nextLastReadEventId,
+          atLatest: true,
+        };
         return loadPage(withMeta, page, "initial");
       });
       await decodeAndStore(get, set, channelId, [...page.events, ...page.relations]);
