@@ -17,5 +17,8 @@ export default defineConfig(({ mode }) => {
         "/gateway": { target: `ws://localhost:${apiPort}`, ws: true },
       },
     },
+    test: {
+      environment: "node",
+    },
   };
 });
