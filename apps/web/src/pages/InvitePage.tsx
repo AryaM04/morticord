@@ -1,0 +1,115 @@
+// /invite/:code: a preview card with an Accept button. Signed-out
+// visitors go to sign in first, then come back here.
+import { useEffect, useState } from "react";
+import { Redirect, useLocation, useParams } from "wouter";
+import { acceptInvite, getInvitePreview } from "@discord-clone/client-core";
+import type { InvitePreview } from "@discord-clone/shared";
+import { session } from "../lib/session.js";
+import { useSession } from "../lib/useSession.js";
+import { describeError } from "../lib/errors.js";
+import { realtimeStore } from "../lib/realtime.js";
+import { rememberLastLocation } from "../lib/lastLocation.js";
+
+export function InvitePage() {
+  const { code } = useParams<{ code: string }>();
+  const status = useSession((s) => s.status);
+  const [, navigate] = useLocation();
+  const [preview, setPreview] = useState<InvitePreview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    if (status !== "signedIn") return;
+    let cancelled = false;
+    getInvitePreview(session.apiClient, code)
+      .then((result) => {
+        if (!cancelled) setPreview(result);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(describeError(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, code]);
+
+  if (status === "loading") {
+    return null;
+  }
+  if (status === "signedOut") {
+    return <Redirect to={`/login?redirect=${encodeURIComponent(`/invite/${code}`)}`} />;
+  }
+
+  async function handleAccept() {
+    setPending(true);
+    setError(null);
+    try {
+      const result = await acceptInvite(session.apiClient, code);
+      realtimeStore.getState().applyDispatch({ t: "GUILD_CREATE", d: result.guild });
+      const firstChannel = result.guild.channels.find((c) => c.type !== "category");
+      if (firstChannel) {
+        rememberLastLocation(result.guild.id, firstChannel.id);
+        navigate(`/app/${result.guild.id}/${firstChannel.id}`);
+      } else {
+        navigate(`/app/${result.guild.id}`);
+      }
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="flex h-full w-full items-center justify-center" style={{ backgroundColor: "var(--color-bg-main)" }}>
+      <div
+        className="w-full max-w-sm rounded-lg border p-6"
+        style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-bg-sidebar)", color: "var(--color-text-primary)" }}
+      >
+        {error && !preview && (
+          <p role="alert" className="text-sm" style={{ color: "#e05252" }}>
+            {error}
+          </p>
+        )}
+        {preview && (
+          <>
+            <p className="mb-1 text-sm" style={{ color: "var(--color-text-muted)" }}>
+              You have been invited to join
+            </p>
+            <div className="mb-4 flex items-center gap-3">
+              {preview.guild.iconKey ? (
+                <img
+                  src={`/api/v1/icons/${preview.guild.id}/${preview.guild.iconKey}`}
+                  alt=""
+                  className="h-12 w-12 rounded-full object-cover"
+                />
+              ) : (
+                <div className="h-12 w-12 rounded-full" style={{ backgroundColor: "var(--color-bg-main)" }} />
+              )}
+              <div>
+                <div className="font-semibold">{preview.guild.name}</div>
+                <div className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+                  {preview.memberCount} member{preview.memberCount === 1 ? "" : "s"}
+                </div>
+              </div>
+            </div>
+            {error && (
+              <p role="alert" className="mb-4 text-sm" style={{ color: "#e05252" }}>
+                {error}
+              </p>
+            )}
+            <button
+              type="button"
+              disabled={pending}
+              onClick={handleAccept}
+              className="w-full rounded px-3 py-2 text-sm font-medium"
+              style={{ backgroundColor: "var(--color-accent)", color: "white" }}
+            >
+              {pending ? "Joining..." : "Accept"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

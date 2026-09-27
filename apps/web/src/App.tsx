@@ -10,8 +10,13 @@ import { RegisterPage } from "./pages/RegisterPage.js";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage.js";
 import { VerifyEmailPage } from "./pages/VerifyEmailPage.js";
 import { AppShell } from "./pages/AppShell.js";
+import { InvitePage } from "./pages/InvitePage.js";
 import { session } from "./lib/session.js";
 import { useSession } from "./lib/useSession.js";
+import { startAutoIdle } from "./lib/presence.js";
+// Imported for its side effect: it wires the gateway connection to the
+// session store as soon as the app loads.
+import "./lib/realtime.js";
 
 function FullPageSpinner() {
   return (
@@ -36,6 +41,7 @@ function ProtectedApp() {
 export function App() {
   useEffect(() => {
     void session.store.getState().init();
+    startAutoIdle();
   }, []);
 
   return (
@@ -46,7 +52,8 @@ export function App() {
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/verify-email" component={VerifyEmailPage} />
       <Route path="/auth/callback" component={AuthCallbackPage} />
-      <Route path="/app" component={ProtectedApp} />
+      <Route path="/invite/:code" component={InvitePage} />
+      <Route path="/app/:guildId?/:channelId?" component={ProtectedApp} />
       <Route>
         <Redirect to="/app" />
       </Route>
