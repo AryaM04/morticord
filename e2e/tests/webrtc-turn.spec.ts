@@ -106,6 +106,12 @@ test("two peers connect over WebRTC through the TURN relay only", async ({ brows
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 
+  if (stateA !== "connected" || stateB !== "connected") {
+    // Show the ICE events. They tell why the relay did not work.
+    console.log("TURN server:", turnUrl);
+    console.log("Peer A ICE log:", await pageA.evaluate(() => window.iceLog));
+    console.log("Peer B ICE log:", await pageB.evaluate(() => window.iceLog));
+  }
   expect(stateA).toBe("connected");
   expect(stateB).toBe("connected");
 

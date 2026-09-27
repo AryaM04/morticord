@@ -3,6 +3,7 @@
 // through page.evaluate, so their types must match here by hand.
 declare global {
   interface Window {
+    iceLog: string[];
     createPeer(iceServers: RTCIceServer[]): boolean;
     drainCandidates(): RTCIceCandidateInit[];
     addMicTrack(): Promise<boolean>;
