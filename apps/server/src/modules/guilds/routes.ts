@@ -128,7 +128,7 @@ export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): 
       after: query.after ? BigInt(query.after) : undefined,
       limit: query.limit,
     });
-    return reply.send({ members: rows.map((row) => toMemberJson(row, [])) });
+    return reply.send({ members: rows.map((row) => toMemberJson(row, row.roleIds)) });
   });
 
   app.delete("/guilds/:id/members/@me", { preHandler: app.authenticate }, async (request, reply) => {

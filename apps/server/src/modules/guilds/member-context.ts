@@ -101,7 +101,7 @@ export async function channelPermissions(
   });
 }
 
-async function loadOverwrites(db: DbClient, channelIds: bigint[]): Promise<Map<bigint, OverwriteInput[]>> {
+export async function loadOverwrites(db: DbClient, channelIds: bigint[]): Promise<Map<bigint, OverwriteInput[]>> {
   if (channelIds.length === 0) {
     return new Map();
   }

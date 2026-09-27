@@ -6,7 +6,7 @@ import { channels } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
 import type { GatewayService } from "../gateway/service.js";
-import { loadMemberContext } from "./member-context.js";
+import { loadMemberContext, loadOverwrites } from "./member-context.js";
 import { requirePermission } from "./service.js";
 import { toChannelJson } from "./serialize.js";
 
@@ -105,7 +105,13 @@ export async function createChannel(
 
   const channel = await loadChannelOrThrow(db, channelId);
   if (gateway) {
-    await gateway.toChannelViewers(db, channelId, DispatchEvent.CHANNEL_CREATE, toChannelJson(channel));
+    const overwrites = await loadOverwrites(db, [channelId]);
+    await gateway.toChannelViewers(
+      db,
+      channelId,
+      DispatchEvent.CHANNEL_CREATE,
+      toChannelJson(channel, overwrites.get(channelId) ?? []),
+    );
   }
   return channel;
 }
@@ -150,7 +156,13 @@ export async function updateChannel(
     // A permission-affecting update (parent, and later overwrites in M5)
     // can change who may view the channel; a simple UPDATE is sent to
     // today's viewers, which is right whenever visibility did not change.
-    await gateway.toChannelViewers(db, channelId, DispatchEvent.CHANNEL_UPDATE, toChannelJson(updated));
+    const overwrites = await loadOverwrites(db, [channelId]);
+    await gateway.toChannelViewers(
+      db,
+      channelId,
+      DispatchEvent.CHANNEL_UPDATE,
+      toChannelJson(updated, overwrites.get(channelId) ?? []),
+    );
   }
   return updated;
 }

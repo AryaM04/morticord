@@ -78,6 +78,12 @@ describeWithDb("guild, channel and invite routes", () => {
       ]),
     );
     expect(guild.member.userId).toBe(owner.user.id);
+    // Every channel carries its permission overwrites, so a client can
+    // compute permissions locally without a second request.
+    for (const channel of guild.channels) {
+      expect(Array.isArray(channel.permissionOverwrites)).toBe(true);
+      expect(channel.permissionOverwrites).toEqual([]);
+    }
   });
 
   it("rejects an empty or too-long guild name", async () => {
@@ -347,6 +353,35 @@ describeWithDb("guild, channel and invite routes", () => {
     });
     expect(ownerLeave.statusCode).toBe(409);
     expect(ownerLeave.json().error.code).toBe("OWNER_CANNOT_LEAVE");
+  });
+
+  it("lists a guild's members with their user profile and roles", async () => {
+    const owner = await registerUser();
+    const member = await registerUser();
+    const guild = (await createGuild(owner.accessToken)).json();
+    const textChannel = guild.channels.find((c: { type: string }) => c.type === "text");
+    const inviteResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/channels/${textChannel.id}/invites`,
+      headers: authHeader(owner.accessToken),
+      payload: {},
+    });
+    const code = inviteResponse.json().code;
+    await app.inject({ method: "POST", url: `/api/v1/invites/${code}`, headers: authHeader(member.accessToken) });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/guilds/${guild.id}/members`,
+      headers: authHeader(owner.accessToken),
+    });
+    expect(response.statusCode).toBe(200);
+    const { members } = response.json();
+    expect(members).toHaveLength(2);
+    for (const memberJson of members) {
+      expect(memberJson.user).toBeDefined();
+      expect(typeof memberJson.user.username).toBe("string");
+      expect(Array.isArray(memberJson.roles)).toBe(true);
+    }
   });
 
   it("only the owner can delete the guild, and the deletion cascades", async () => {
