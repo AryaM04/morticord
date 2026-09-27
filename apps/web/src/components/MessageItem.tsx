@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AggregatedMessage } from "@discord-clone/client-core";
 import { Markdown, MarkdownInline } from "./Markdown.js";
 import { Avatar } from "./Avatar.js";
+import { EmojiPickerButton } from "./EmojiPickerButton.js";
 import type { User } from "@discord-clone/shared";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉"];
@@ -59,6 +60,16 @@ export function MessageItem(props: MessageItemProps) {
   const time = new Date(message.createdAt);
   const timeLabel = time.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   const fullDate = time.toLocaleString();
+
+  /** Toggle a reaction picked from the full emoji picker, the same way an existing reaction pill toggles. */
+  function togglePickedReaction(key: string): void {
+    const existing = message.reactions.find((r) => r.key === key);
+    if (existing?.ownEventId) {
+      props.onToggleReaction(key);
+    } else {
+      props.onAddReaction(key);
+    }
+  }
 
   function handleDeleteClick(event: React.MouseEvent): void {
     if (event.shiftKey) {
@@ -168,6 +179,16 @@ export function MessageItem(props: MessageItemProps) {
                     {key}
                   </button>
                 ))}
+                <EmojiPickerButton
+                  ariaLabel="More emoji"
+                  label="+"
+                  onPick={(emoji) => {
+                    togglePickedReaction(emoji);
+                    setPickerOpen(false);
+                  }}
+                  className="px-1 text-sm"
+                  style={{ color: "var(--color-text-muted)" }}
+                />
               </div>
             )}
           </div>

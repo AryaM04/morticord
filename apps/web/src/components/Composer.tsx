@@ -8,6 +8,7 @@ import { searchGuildMembers } from "@discord-clone/client-core";
 import { messagesStore } from "../lib/messages.js";
 import { session } from "../lib/session.js";
 import { Avatar } from "./Avatar.js";
+import { EmojiPickerButton } from "./EmojiPickerButton.js";
 
 const MAX_BODY_LENGTH = 4000;
 const COUNTER_THRESHOLD = MAX_BODY_LENGTH - 200;
@@ -188,6 +189,22 @@ export function Composer(props: ComposerProps) {
     });
   }
 
+  /** Insert `emoji` at the caret (or at the end of any selection), and put the caret after it. */
+  function insertEmoji(emoji: string): void {
+    const el = textareaRef.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? text.length;
+    const nextText = `${text.slice(0, start)}${emoji}${text.slice(end)}`;
+    setText(nextText);
+    const caret = start + emoji.length;
+    requestAnimationFrame(() => {
+      if (el) {
+        el.focus();
+        el.setSelectionRange(caret, caret);
+      }
+    });
+  }
+
   function submit(): void {
     const body = text.trim();
     if (body.length === 0 || body.length > MAX_BODY_LENGTH) {
@@ -343,6 +360,15 @@ export function Composer(props: ComposerProps) {
           >
             {remaining}
           </span>
+        )}
+        {props.canSend && (
+          <EmojiPickerButton
+            ariaLabel="Open the emoji picker"
+            label="🙂"
+            onPick={insertEmoji}
+            className="rounded px-1.5 py-1 text-base"
+            style={{ color: "var(--color-text-muted)" }}
+          />
         )}
         <button
           type="button"
