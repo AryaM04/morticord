@@ -258,6 +258,8 @@ export const channels = pgTable("channels", {
   parentId: snowflake("parent_id"),
   nsfw: boolean("nsfw").notNull().default(false),
   ownerId: snowflake("owner_id").references(() => users.id),
+  /** The newest timeline event (a message or a reply, not an edit or a reaction) in this channel. */
+  lastEventId: snowflake("last_event_id"),
 });
 
 export const channelRecipients = pgTable(
@@ -303,12 +305,21 @@ export const events = pgTable(
     type: text("type").notNull().default("m.encrypted"),
     relatesToId: snowflake("relates_to_id"),
     relType: text("rel_type", { enum: ["edit", "reaction", "reply"] }),
+    /** The payload codec: `plain-v1` (milestone M3) or `megolm-v1` (milestone M6). The server never reads through it. */
+    codec: text("codec").notNull().default("plain-v1"),
     megolmSessionId: text("megolm_session_id"),
     ciphertext: bytea("ciphertext").notNull(),
+    /** A client-generated dedupe key. The same (device, nonce) pair within 10 minutes returns the first event. */
+    nonce: text("nonce").notNull(),
     redactedAt: timestamp("redacted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("events_channel_created_idx").on(table.channelId, table.createdAt)],
+  (table) => [
+    index("events_channel_created_idx").on(table.channelId, table.createdAt),
+    index("events_channel_id_idx").on(table.channelId, table.id),
+    index("events_relates_to_idx").on(table.relatesToId),
+    unique("events_sender_device_nonce_key").on(table.senderDeviceId, table.nonce),
+  ],
 );
 
 export const attachments = pgTable("attachments", {
