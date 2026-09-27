@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+*.log
+.env
+.DS_Store
+.vscode/
+apps/web/dist/
+apps/server/dist/
+src-tauri/target/
