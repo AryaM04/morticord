@@ -26,6 +26,10 @@ import { describeError } from "../lib/errors.js";
 import { realtimeStore } from "../lib/realtime.js";
 import { useRealtime } from "../lib/useRealtime.js";
 
+// A stable fallback: a fresh `[]` on every render would break the store
+// subscription (it always looks "changed"), causing a render loop.
+const EMPTY_CHANNEL_IDS: string[] = [];
+
 export interface VoiceContext {
   channelId: string;
   serverMute: boolean;
@@ -53,7 +57,7 @@ export function MemberContextMenu({
   const selfMember = useRealtime((s) => s.selfMemberByGuild[guildId]);
   const selfUserId = useRealtime((s) => s.selfUserId);
   const roles = useRealtime((s) => s.rolesByGuild[guildId]);
-  const voiceChannelIds = useRealtime((s) => s.channelIdsByGuild[guildId] ?? []);
+  const voiceChannelIds = useRealtime((s) => s.channelIdsByGuild[guildId] ?? EMPTY_CHANNEL_IDS);
   const channels = useRealtime((s) => s.channels);
 
   const [error, setError] = useState<string | null>(null);

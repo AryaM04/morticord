@@ -146,7 +146,13 @@ export function GuildSettingsDialog({
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      className="flex w-full max-w-3xl flex-col rounded-lg border p-0"
+      // No "flex" (or other display-changing) class here: the browser's
+      // own `dialog:not([open]) { display: none }` rule only wins while
+      // an author style does not set `display` at all, so a display
+      // utility on the <dialog> itself would keep it visible, and
+      // clickable, even while closed. The flex layout lives on the
+      // wrapper div just inside instead.
+      className="w-full max-w-3xl rounded-lg border p-0"
       style={{
         borderColor: "var(--color-border)",
         backgroundColor: "var(--color-bg-sidebar)",

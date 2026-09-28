@@ -11,13 +11,17 @@ import { VerifyBanner } from "../components/VerifyBanner.js";
 import { NoticeBanner } from "../components/NoticeBanner.js";
 import { HomePage } from "./HomePage.js";
 import { useRealtime } from "../lib/useRealtime.js";
-import { readLastLocation, rememberLastLocation } from "../lib/lastLocation.js";
+import { clearLastLocation, readLastLocation, rememberLastLocation } from "../lib/lastLocation.js";
 import { showNotice } from "../lib/notice.js";
 
 // Load the diagnostics panel only when a person opens the page with
 // "?diag" in a dev build. The lazy import keeps it out of the normal
 // app bundle, per the resource rules in CLAUDE.md.
 const DiagPanel = lazy(() => import("../diag/DiagPanel.js"));
+
+// A stable fallback: a fresh `[]` on every render would break the store
+// subscription (it always looks "changed"), causing a render loop.
+const EMPTY_CHANNEL_IDS: string[] = [];
 
 function shouldShowDiagPanel(): boolean {
   if (!import.meta.env.DEV) {
@@ -44,7 +48,7 @@ function AppHome() {
 
 function GuildView({ guildId, channelId }: { guildId: string; channelId: string | null }) {
   const guildLoaded = useRealtime((s) => Boolean(s.guilds[guildId]));
-  const channelIds = useRealtime((s) => s.channelIdsByGuild[guildId] ?? []);
+  const channelIds = useRealtime((s) => s.channelIdsByGuild[guildId] ?? EMPTY_CHANNEL_IDS);
   const [, navigate] = useLocation();
   const wasLoadedRef = useRef(false);
 
@@ -64,6 +68,10 @@ function GuildView({ guildId, channelId }: { guildId: string; channelId: string 
     }
     if (wasLoadedRef.current) {
       wasLoadedRef.current = false;
+      // Forget this guild as "the last place you were": otherwise /app
+      // would read it right back and redirect straight into the guild
+      // this effect is trying to leave.
+      clearLastLocation();
       showNotice("You are no longer a member of this server.");
       navigate("/app");
     }

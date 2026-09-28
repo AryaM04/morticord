@@ -12,6 +12,15 @@ export function rememberLastLocation(guildId: string, channelId: string): void {
   }
 }
 
+/** Forget the last location, e.g. after the guild it points to stops being reachable. */
+export function clearLastLocation(): void {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    // Not fatal.
+  }
+}
+
 export function readLastLocation(): { guildId: string; channelId: string } | null {
   try {
     const raw = localStorage.getItem(KEY);

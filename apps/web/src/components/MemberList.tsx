@@ -100,16 +100,17 @@ function MemberRow({
 
 const EMPTY_MEMBERS: Record<string, GuildMemberJson> = {};
 const EMPTY_ROLES: RoleJson[] = [];
+const EMPTY_CHANNEL_IDS: string[] = [];
 
 export function MemberList({ guildId }: { guildId: string }) {
-  // A stable fallback object: a fresh `{}` on every render would break
-  // the store subscription (it always looks "changed"), causing a
+  // A stable fallback object: a fresh `{}` or `[]` on every render would
+  // break the store subscription (it always looks "changed"), causing a
   // render loop, so a module-level constant is used instead.
   const members = useRealtime((s) => s.membersByGuild[guildId] ?? EMPTY_MEMBERS);
   const roles = useRealtime((s) => s.rolesByGuild[guildId] ?? EMPTY_ROLES);
   const presences = useRealtime((s) => s.presences);
   const selfUserId = useRealtime((s) => s.selfUserId);
-  const channelIds = useRealtime((s) => s.channelIdsByGuild[guildId] ?? []);
+  const channelIds = useRealtime((s) => s.channelIdsByGuild[guildId] ?? EMPTY_CHANNEL_IDS);
   const voiceStatesByChannel = useRealtime((s) => s.voiceStatesByChannel);
   const guild = useRealtime((s) => s.guilds[guildId]);
   // The server never tells a user their own presence (there is no "you"

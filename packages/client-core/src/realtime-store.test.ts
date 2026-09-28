@@ -174,6 +174,40 @@ describe("applyDispatch", () => {
     expect(state.membersByGuild.g1!.u2).toBeUndefined();
   });
 
+  it("keeps a member's known user profile across a GUILD_MEMBER_UPDATE that omits it", () => {
+    // The server does not resend `user` on a role or nickname change
+    // (see roles.ts's dispatchMemberUpdate): the reducer must not let
+    // that revert a member's display name to their raw id.
+    let state = readyState([guildView("g1")]);
+    const withProfile = {
+      ...member("g1", "u2"),
+      user: { id: "u2", username: "u2name", displayName: "U2 Display", avatarKey: null },
+    };
+    state = applyDispatch(state, { t: "GUILD_MEMBER_ADD", d: withProfile });
+    expect(state.membersByGuild.g1!.u2!.user?.displayName).toBe("U2 Display");
+
+    // A role-change dispatch, with no `user` field at all.
+    state = applyDispatch(state, {
+      t: "GUILD_MEMBER_UPDATE",
+      d: { guildId: "g1", userId: "u2", nickname: null, joinedAt: "2024-01-01T00:00:00.000Z", roles: ["r1"] },
+    });
+    expect(state.membersByGuild.g1!.u2!.user?.displayName).toBe("U2 Display");
+    expect(state.membersByGuild.g1!.u2!.roles).toEqual(["r1"]);
+  });
+
+  it("updates the signed-in user's own member row on GUILD_MEMBER_UPDATE", () => {
+    // Granting the caller a role must take effect immediately (their own
+    // derived permissions read from selfMemberByGuild), with no reload.
+    let state = readyState([guildView("g1")]);
+    expect(state.selfMemberByGuild.g1!.roles).toEqual([]);
+
+    state = applyDispatch(state, {
+      t: "GUILD_MEMBER_UPDATE",
+      d: { guildId: "g1", userId: "self-1", nickname: null, joinedAt: "2024-01-01T00:00:00.000Z", roles: ["r1"] },
+    });
+    expect(state.selfMemberByGuild.g1!.roles).toEqual(["r1"]);
+  });
+
   it("ignores a member event for an unknown guild", () => {
     const state = readyState([guildView("g1")]);
     const untouched = applyDispatch(state, { t: "GUILD_MEMBER_ADD", d: member("ghost", "u2") });

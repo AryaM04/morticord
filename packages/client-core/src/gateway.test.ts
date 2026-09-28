@@ -171,6 +171,42 @@ describe("createGatewayClient", () => {
     client.close();
   });
 
+  it("forwards GUILD_ROLE_CREATE/UPDATE/DELETE and GUILD_BAN_ADD/REMOVE, not just logs them as unknown", async () => {
+    const client = makeClient();
+    await vi.advanceTimersByTimeAsync(0);
+    currentSocket().serverSend(hello());
+    currentSocket().serverSend(ready());
+    await vi.advanceTimersByTimeAsync(0);
+
+    const role = { id: "2", guildId: "1", name: "Mods", color: 0, position: 1, permissions: "0", mentionable: true, hoist: false };
+    currentSocket().serverSend({ op: GatewayOpcode.DISPATCH, t: "GUILD_ROLE_CREATE", s: 1, d: { guildId: "1", role } });
+    currentSocket().serverSend({ op: GatewayOpcode.DISPATCH, t: "GUILD_ROLE_UPDATE", s: 2, d: { guildId: "1", role } });
+    currentSocket().serverSend({ op: GatewayOpcode.DISPATCH, t: "GUILD_ROLE_DELETE", s: 3, d: { guildId: "1", roleId: "2" } });
+    currentSocket().serverSend({
+      op: GatewayOpcode.DISPATCH,
+      t: "GUILD_BAN_ADD",
+      s: 4,
+      d: { guildId: "1", userId: "3", reason: null, by: "9" },
+    });
+    currentSocket().serverSend({
+      op: GatewayOpcode.DISPATCH,
+      t: "GUILD_BAN_REMOVE",
+      s: 5,
+      d: { guildId: "1", userId: "3" },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(events.map((e) => e.t)).toEqual([
+      "READY",
+      "GUILD_ROLE_CREATE",
+      "GUILD_ROLE_UPDATE",
+      "GUILD_ROLE_DELETE",
+      "GUILD_BAN_ADD",
+      "GUILD_BAN_REMOVE",
+    ]);
+    client.close();
+  });
+
   it("waits 1-5s then identifies again on INVALID_SESSION", async () => {
     const client = makeClient();
     await vi.advanceTimersByTimeAsync(0);
