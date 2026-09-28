@@ -9,6 +9,7 @@ import type {
   GuildMemberJson,
   RoleJson,
   VisiblePresenceStatus,
+  VoiceStateJson,
 } from "@discord-clone/shared";
 import type { GatewayDispatch } from "./gateway.js";
 
@@ -24,6 +25,8 @@ export interface RealtimeState {
   /** Other members, loaded a page at a time over REST and kept live by events. */
   membersByGuild: Record<string, Record<string, GuildMemberJson>>;
   presences: Record<string, VisiblePresenceStatus>;
+  /** Who is in each voice channel right now: channel id -> user id -> voice state. */
+  voiceStatesByChannel: Record<string, Record<string, VoiceStateJson>>;
 }
 
 export function createInitialRealtimeState(): RealtimeState {
@@ -36,7 +39,51 @@ export function createInitialRealtimeState(): RealtimeState {
     selfMemberByGuild: {},
     membersByGuild: {},
     presences: {},
+    voiceStatesByChannel: {},
   };
+}
+
+/**
+ * Remove a user's voice state from every channel it may be tracked
+ * under. A user has at most one voice state, so this is a small scan,
+ * not an index: it keeps the reducer simple and still correct when a
+ * move event arrives out of the order the two dispatches were sent in.
+ */
+function withoutVoiceState(
+  voiceStatesByChannel: Record<string, Record<string, VoiceStateJson>>,
+  userId: string,
+): Record<string, Record<string, VoiceStateJson>> {
+  let changed = false;
+  const next: Record<string, Record<string, VoiceStateJson>> = {};
+  for (const [channelId, states] of Object.entries(voiceStatesByChannel)) {
+    if (userId in states) {
+      changed = true;
+      const remaining = without(states, userId);
+      if (Object.keys(remaining).length > 0) {
+        next[channelId] = remaining;
+      }
+    } else {
+      next[channelId] = states;
+    }
+  }
+  return changed ? next : voiceStatesByChannel;
+}
+
+function withVoiceStates(
+  voiceStatesByChannel: Record<string, Record<string, VoiceStateJson>>,
+  states: VoiceStateJson[] | undefined,
+): Record<string, Record<string, VoiceStateJson>> {
+  let next = voiceStatesByChannel;
+  for (const state of states ?? []) {
+    next = withoutVoiceState(next, state.userId);
+    if (state.channelId) {
+      next = {
+        ...next,
+        [state.channelId]: { ...(next[state.channelId] ?? {}), [state.userId]: state },
+      };
+    }
+  }
+  return next;
 }
 
 function compareChannelIds(channels: Record<string, ChannelJson>) {
@@ -77,7 +124,14 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
     case "READY": {
       const payload = event.d as {
         user: { id: string };
-        guilds: Array<GuildJson & { roles: RoleJson[]; channels: ChannelJson[]; member: GuildMemberJson }>;
+        guilds: Array<
+          GuildJson & {
+            roles: RoleJson[];
+            channels: ChannelJson[];
+            member: GuildMemberJson;
+            voiceStates?: VoiceStateJson[];
+          }
+        >;
         presences: Array<{ userId: string; status: VisiblePresenceStatus }>;
       };
       const next = createInitialRealtimeState();
@@ -92,6 +146,7 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
           ids.push(channel.id);
         }
         next.channelIdsByGuild[guild.id] = withSortedChannelIds(next.channels, ids);
+        next.voiceStatesByChannel = withVoiceStates(next.voiceStatesByChannel, guild.voiceStates);
       }
       for (const presence of payload.presences) {
         next.presences[presence.userId] = presence.status;
@@ -103,7 +158,12 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       return state;
 
     case "GUILD_CREATE": {
-      const guild = event.d as GuildJson & { roles: RoleJson[]; channels: ChannelJson[]; member: GuildMemberJson };
+      const guild = event.d as GuildJson & {
+        roles: RoleJson[];
+        channels: ChannelJson[];
+        member: GuildMemberJson;
+        voiceStates?: VoiceStateJson[];
+      };
       const channels = { ...state.channels };
       const ids: string[] = [];
       for (const channel of guild.channels) {
@@ -117,6 +177,7 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
         selfMemberByGuild: { ...state.selfMemberByGuild, [guild.id]: guild.member },
         channels,
         channelIdsByGuild: { ...state.channelIdsByGuild, [guild.id]: withSortedChannelIds(channels, ids) },
+        voiceStatesByChannel: withVoiceStates(state.voiceStatesByChannel, guild.voiceStates),
       };
     }
 
@@ -135,8 +196,10 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       }
       const channelIds = state.channelIdsByGuild[id] ?? [];
       const channels = { ...state.channels };
+      const voiceStatesByChannel = { ...state.voiceStatesByChannel };
       for (const channelId of channelIds) {
         delete channels[channelId];
+        delete voiceStatesByChannel[channelId];
       }
       return {
         ...state,
@@ -146,6 +209,7 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
         membersByGuild: without(state.membersByGuild, id),
         channelIdsByGuild: without(state.channelIdsByGuild, id),
         channels,
+        voiceStatesByChannel,
       };
     }
 
@@ -175,6 +239,7 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
         ...state,
         channels: without(state.channels, id),
         channelIdsByGuild: { ...state.channelIdsByGuild, [guildId]: ids },
+        voiceStatesByChannel: without(state.voiceStatesByChannel, id),
       };
     }
 
@@ -203,6 +268,14 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
     case "PRESENCE_UPDATE": {
       const { userId, status } = event.d as { userId: string; status: VisiblePresenceStatus };
       return { ...state, presences: { ...state.presences, [userId]: status } };
+    }
+
+    case "VOICE_STATE_UPDATE": {
+      const voiceState = event.d as VoiceStateJson;
+      return {
+        ...state,
+        voiceStatesByChannel: withVoiceStates(state.voiceStatesByChannel, [voiceState]),
+      };
     }
 
     default:

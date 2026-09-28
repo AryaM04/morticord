@@ -249,6 +249,8 @@ export const DispatchEvent = {
   TYPING_START: "TYPING_START",
   READ_STATE_UPDATE: "READ_STATE_UPDATE",
   VOICE_STATE_UPDATE: "VOICE_STATE_UPDATE",
+  VOICE_SIGNAL: "VOICE_SIGNAL",
+  VOICE_ERROR: "VOICE_ERROR",
 } as const;
 
 export type DispatchEventName = (typeof DispatchEvent)[keyof typeof DispatchEvent];

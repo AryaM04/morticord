@@ -20,6 +20,9 @@ import {
   eventRedactPayloadSchema,
   typingStartPayloadSchema,
   readStateUpdatePayloadSchema,
+  voiceStateUpdatePayloadSchema,
+  voiceSignalDispatchPayloadSchema,
+  voiceErrorPayloadSchema,
   type DispatchEventName,
 } from "@discord-clone/shared";
 import type { z } from "zod";
@@ -96,6 +99,9 @@ const DISPATCH_SCHEMAS: Record<string, z.ZodType> = {
   EVENT_REDACT: eventRedactPayloadSchema,
   TYPING_START: typingStartPayloadSchema,
   READ_STATE_UPDATE: readStateUpdatePayloadSchema,
+  VOICE_STATE_UPDATE: voiceStateUpdatePayloadSchema,
+  VOICE_SIGNAL: voiceSignalDispatchPayloadSchema,
+  VOICE_ERROR: voiceErrorPayloadSchema,
 };
 
 function defaultCreateSocket(url: string): WebSocketLike {
