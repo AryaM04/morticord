@@ -4,6 +4,7 @@
 // wraps it in a vanilla zustand store for the app to read and subscribe to.
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type {
+  BanJson,
   ChannelJson,
   GuildJson,
   GuildMemberJson,
@@ -24,6 +25,8 @@ export interface RealtimeState {
   selfMemberByGuild: Record<string, GuildMemberJson>;
   /** Other members, loaded a page at a time over REST and kept live by events. */
   membersByGuild: Record<string, Record<string, GuildMemberJson>>;
+  /** Bans, loaded over REST (BAN_MEMBERS required) and kept live for holders of that permission. */
+  bansByGuild: Record<string, Record<string, BanJson>>;
   presences: Record<string, VisiblePresenceStatus>;
   /** Who is in each voice channel right now: channel id -> user id -> voice state. */
   voiceStatesByChannel: Record<string, Record<string, VoiceStateJson>>;
@@ -38,6 +41,7 @@ export function createInitialRealtimeState(): RealtimeState {
     rolesByGuild: {},
     selfMemberByGuild: {},
     membersByGuild: {},
+    bansByGuild: {},
     presences: {},
     voiceStatesByChannel: {},
   };
@@ -207,6 +211,7 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
         rolesByGuild: without(state.rolesByGuild, id),
         selfMemberByGuild: without(state.selfMemberByGuild, id),
         membersByGuild: without(state.membersByGuild, id),
+        bansByGuild: without(state.bansByGuild, id),
         channelIdsByGuild: without(state.channelIdsByGuild, id),
         channels,
         voiceStatesByChannel,
@@ -265,6 +270,48 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       };
     }
 
+    case "GUILD_ROLE_CREATE":
+    case "GUILD_ROLE_UPDATE": {
+      const { guildId, role } = event.d as { guildId: string; role: RoleJson };
+      if (!(guildId in state.guilds)) {
+        return state;
+      }
+      const existing = state.rolesByGuild[guildId] ?? [];
+      const index = existing.findIndex((r) => r.id === role.id);
+      const nextRoles = index === -1 ? [...existing, role] : existing.map((r, i) => (i === index ? role : r));
+      return { ...state, rolesByGuild: { ...state.rolesByGuild, [guildId]: nextRoles } };
+    }
+
+    case "GUILD_ROLE_DELETE": {
+      const { guildId, roleId } = event.d as { guildId: string; roleId: string };
+      const existing = state.rolesByGuild[guildId];
+      if (!existing) {
+        return state;
+      }
+      return {
+        ...state,
+        rolesByGuild: { ...state.rolesByGuild, [guildId]: existing.filter((role) => role.id !== roleId) },
+      };
+    }
+
+    case "GUILD_BAN_ADD": {
+      const ban = event.d as BanJson;
+      const existing = state.bansByGuild[ban.guildId] ?? {};
+      return {
+        ...state,
+        bansByGuild: { ...state.bansByGuild, [ban.guildId]: { ...existing, [ban.userId]: ban } },
+      };
+    }
+
+    case "GUILD_BAN_REMOVE": {
+      const { guildId, userId } = event.d as { guildId: string; userId: string };
+      const existing = state.bansByGuild[guildId];
+      if (!existing || !(userId in existing)) {
+        return state;
+      }
+      return { ...state, bansByGuild: { ...state.bansByGuild, [guildId]: without(existing, userId) } };
+    }
+
     case "PRESENCE_UPDATE": {
       const { userId, status } = event.d as { userId: string; status: VisiblePresenceStatus };
       return { ...state, presences: { ...state.presences, [userId]: status } };
@@ -287,6 +334,8 @@ export interface RealtimeActions {
   applyDispatch(event: GatewayDispatch): void;
   /** Merge one REST-loaded page of members into the store. */
   addMemberPage(guildId: string, members: GuildMemberJson[]): void;
+  /** Replace the known ban list for a guild with one REST-loaded snapshot. */
+  setBans(guildId: string, bans: BanJson[]): void;
   reset(): void;
 }
 
@@ -311,6 +360,14 @@ export function createRealtimeStore(): StoreApi<RealtimeStore> {
         merged[member.userId] = member;
       }
       set({ membersByGuild: { ...get().membersByGuild, [guildId]: merged } });
+    },
+
+    setBans(guildId: string, bans: BanJson[]) {
+      const byUserId: Record<string, BanJson> = {};
+      for (const ban of bans) {
+        byUserId[ban.userId] = ban;
+      }
+      set({ bansByGuild: { ...get().bansByGuild, [guildId]: byUserId } });
     },
 
     reset() {
