@@ -3,7 +3,14 @@
 import { describe, expect, it } from "vitest";
 import { Permission } from "@discord-clone/shared";
 import { applyDispatch, createInitialRealtimeState } from "./realtime-store.js";
-import { selfChannelPermissions, selfGuildPermissions } from "./permissions.js";
+import {
+  buildSelfContext,
+  canActOnMember,
+  canManageRole,
+  grantablePermissions,
+  selfChannelPermissions,
+  selfGuildPermissions,
+} from "./permissions.js";
 
 function baseState() {
   return applyDispatch(createInitialRealtimeState(), {
@@ -70,5 +77,120 @@ describe("selfGuildPermissions / selfChannelPermissions", () => {
     const state = baseState();
     expect(selfGuildPermissions(state, "ghost")).toBe(0n);
     expect(selfChannelPermissions(state, "ghost")).toBe(0n);
+  });
+});
+
+// A hierarchy fixture mirroring apps/server/src/modules/guilds/roles.test.ts:
+// @everyone (position 0), Low (position 1, MANAGE_ROLES, held by "self"),
+// High (position 2, held by nobody). The target member "2001" holds Low too.
+function hierarchyState(selfIsOwner = false) {
+  return applyDispatch(createInitialRealtimeState(), {
+    t: "READY",
+    d: {
+      user: { id: "1003" },
+      guilds: [
+        {
+          id: "1001",
+          name: "Guild",
+          iconKey: null,
+          ownerId: selfIsOwner ? "1003" : "owner-1",
+          createdAt: "2024-01-01T00:00:00.000Z",
+          roles: [
+            { id: "1001", guildId: "1001", name: "@everyone", color: 0, position: 0, permissions: "0", mentionable: true, hoist: false },
+            {
+              id: "1002",
+              guildId: "1001",
+              name: "Low",
+              color: 0,
+              position: 1,
+              permissions: Permission.MANAGE_ROLES.toString(),
+              mentionable: true,
+              hoist: false,
+            },
+            { id: "1004", guildId: "1001", name: "High", color: 0, position: 2, permissions: "0", mentionable: true, hoist: false },
+          ],
+          channels: [],
+          member: { guildId: "1001", userId: "1003", nickname: null, joinedAt: "2024-01-01T00:00:00.000Z", roles: ["1002"] },
+        },
+      ],
+      presences: [],
+    },
+  });
+}
+
+describe("canManageRole / canActOnMember / grantablePermissions", () => {
+  it("lets the caller manage a role strictly below their highest role, not their own or above", () => {
+    const state = hierarchyState();
+    const context = buildSelfContext(state, "1001")!;
+    const roles = state.rolesByGuild["1001"]!;
+    const low = roles.find((r) => r.id === "1002")!;
+    const high = roles.find((r) => r.id === "1004")!;
+
+    expect(canManageRole(context, low)).toBe(false); // same position as the actor's highest: not strictly below
+    expect(canManageRole(context, high)).toBe(false); // above the actor's highest
+  });
+
+  it("lets the owner manage any role", () => {
+    const state = hierarchyState(true);
+    const context = buildSelfContext(state, "1001")!;
+    const high = state.rolesByGuild["1001"]!.find((r) => r.id === "1004")!;
+    expect(canManageRole(context, high)).toBe(true);
+  });
+
+  it("denies managing a role without MANAGE_ROLES even if it is below the actor", () => {
+    const state = applyDispatch(createInitialRealtimeState(), {
+      t: "READY",
+      d: {
+        user: { id: "1003" },
+        guilds: [
+          {
+            id: "1001",
+            name: "Guild",
+            iconKey: null,
+            ownerId: "owner-1",
+            createdAt: "2024-01-01T00:00:00.000Z",
+            roles: [
+              { id: "1001", guildId: "1001", name: "@everyone", color: 0, position: 0, permissions: "0", mentionable: true, hoist: false },
+              { id: "1002", guildId: "1001", name: "Low", color: 0, position: 1, permissions: "0", mentionable: true, hoist: false },
+            ],
+            channels: [],
+            member: { guildId: "1001", userId: "1003", nickname: null, joinedAt: "2024-01-01T00:00:00.000Z", roles: [] },
+          },
+        ],
+        presences: [],
+      },
+    });
+    const context = buildSelfContext(state, "1001")!;
+    const low = state.rolesByGuild["1001"]!.find((r) => r.id === "1002")!;
+    expect(canManageRole(context, low)).toBe(false);
+  });
+
+  it("lets the caller act on a member whose highest role is strictly below theirs, never the owner", () => {
+    const state = hierarchyState();
+    const context = buildSelfContext(state, "1001")!;
+    const belowMember = { guildId: "1001", userId: "2001", nickname: null, joinedAt: "2024-01-01T00:00:00.000Z", roles: [] };
+    const sameLevelMember = { guildId: "1001", userId: "2002", nickname: null, joinedAt: "2024-01-01T00:00:00.000Z", roles: ["1002"] };
+
+    expect(canActOnMember(context, belowMember, false)).toBe(true);
+    expect(canActOnMember(context, sameLevelMember, false)).toBe(false); // not strictly below
+    expect(canActOnMember(context, belowMember, true)).toBe(false); // nobody can act on the owner
+  });
+
+  it("the owner can act on anyone but the owner", () => {
+    const state = hierarchyState(true);
+    const context = buildSelfContext(state, "1001")!;
+    const anyMember = { guildId: "1001", userId: "2001", nickname: null, joinedAt: "2024-01-01T00:00:00.000Z", roles: ["1004"] };
+    expect(canActOnMember(context, anyMember, false)).toBe(true);
+    expect(canActOnMember(context, anyMember, true)).toBe(false);
+  });
+
+  it("grantablePermissions at guild scope equals the caller's own guild permissions", () => {
+    const state = hierarchyState();
+    expect(grantablePermissions(state, "1001")).toBe(selfGuildPermissions(state, "1001"));
+  });
+
+  it("returns null context for an unknown guild", () => {
+    const state = hierarchyState();
+    expect(buildSelfContext(state, "ghost")).toBeNull();
   });
 });

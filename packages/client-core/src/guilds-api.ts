@@ -4,36 +4,58 @@
 import { z } from "zod";
 import {
   acceptInviteResultSchema,
+  banSchema,
   channelOrderRequestSchema,
   channelSchema,
+  createBanRequestSchema,
   createChannelRequestSchema,
   createGuildRequestSchema,
   createInviteRequestSchema,
+  createRoleRequestSchema,
   guildMemberSchema,
   guildViewSchema,
   inviteSchema,
   invitePreviewSchema,
+  putOverwriteRequestSchema,
+  roleOrderRequestSchema,
+  roleSchema,
   searchMembersResponseSchema,
+  transferGuildRequestSchema,
   updateChannelRequestSchema,
   updateGuildRequestSchema,
+  updateMemberRequestSchema,
+  updateRoleRequestSchema,
+  voiceModerationRequestSchema,
   type AcceptInviteResult,
+  type BanJson,
   type ChannelJson,
   type ChannelOrderRequest,
+  type CreateBanRequest,
   type CreateChannelRequest,
   type CreateGuildRequest,
   type CreateInviteRequest,
+  type CreateRoleRequest,
   type GuildMemberJson,
   type GuildView,
   type InviteJson,
   type InvitePreview,
+  type PutOverwriteRequest,
+  type RoleJson,
+  type RoleOrderRequest,
   type SearchMembersResponse,
+  type TransferGuildRequest,
   type UpdateChannelRequest,
   type UpdateGuildRequest,
+  type UpdateMemberRequest,
+  type UpdateRoleRequest,
+  type VoiceModerationRequest,
 } from "@discord-clone/shared";
 import type { ApiClient } from "./api.js";
 
 const membersPageSchema = z.object({ members: z.array(guildMemberSchema) });
 const invitesListSchema = z.object({ invites: z.array(inviteSchema) });
+const rolesListSchema = z.object({ roles: z.array(roleSchema) });
+const bansListSchema = z.object({ bans: z.array(banSchema) });
 
 export function createGuild(api: ApiClient, input: CreateGuildRequest): Promise<GuildView> {
   createGuildRequestSchema.parse(input);
@@ -147,4 +169,115 @@ export function acceptInvite(api: ApiClient, code: string): Promise<AcceptInvite
 
 export function deleteInvite(api: ApiClient, code: string): Promise<void> {
   return api.request("DELETE", `/invites/${code}`);
+}
+
+// ---- roles ----------------------------------------------------------------
+
+export function listGuildRoles(api: ApiClient, guildId: string): Promise<{ roles: RoleJson[] }> {
+  return api.request("GET", `/guilds/${guildId}/roles`, { schema: rolesListSchema });
+}
+
+export function createRole(api: ApiClient, guildId: string, input: Partial<CreateRoleRequest>): Promise<RoleJson> {
+  const parsed = createRoleRequestSchema.parse(input);
+  return api.request<RoleJson>("POST", `/guilds/${guildId}/roles`, { body: parsed, schema: roleSchema });
+}
+
+export function updateRole(
+  api: ApiClient,
+  guildId: string,
+  roleId: string,
+  input: UpdateRoleRequest,
+): Promise<RoleJson> {
+  updateRoleRequestSchema.parse(input);
+  return api.request<RoleJson>("PATCH", `/guilds/${guildId}/roles/${roleId}`, { body: input, schema: roleSchema });
+}
+
+export function deleteRole(api: ApiClient, guildId: string, roleId: string): Promise<void> {
+  return api.request("DELETE", `/guilds/${guildId}/roles/${roleId}`);
+}
+
+/** Send one bulk order request for every role that moved in a drag-and-drop reorder. */
+export function reorderRoles(api: ApiClient, guildId: string, input: RoleOrderRequest): Promise<void> {
+  roleOrderRequestSchema.parse(input);
+  return api.request("PUT", `/guilds/${guildId}/roles/order`, { body: input });
+}
+
+// ---- member roles and nickname --------------------------------------------
+
+export function addMemberRole(api: ApiClient, guildId: string, userId: string, roleId: string): Promise<void> {
+  return api.request("PUT", `/guilds/${guildId}/members/${userId}/roles/${roleId}`);
+}
+
+export function removeMemberRole(api: ApiClient, guildId: string, userId: string, roleId: string): Promise<void> {
+  return api.request("DELETE", `/guilds/${guildId}/members/${userId}/roles/${roleId}`);
+}
+
+export function updateMember(
+  api: ApiClient,
+  guildId: string,
+  userId: string,
+  input: UpdateMemberRequest,
+): Promise<void> {
+  updateMemberRequestSchema.parse(input);
+  return api.request("PATCH", `/guilds/${guildId}/members/${userId}`, { body: input });
+}
+
+// ---- channel permission overwrites -----------------------------------------
+
+export function putChannelOverwrite(
+  api: ApiClient,
+  channelId: string,
+  targetId: string,
+  input: PutOverwriteRequest,
+): Promise<void> {
+  putOverwriteRequestSchema.parse(input);
+  return api.request("PUT", `/channels/${channelId}/overwrites/${targetId}`, { body: input });
+}
+
+export function deleteChannelOverwrite(
+  api: ApiClient,
+  channelId: string,
+  targetId: string,
+  targetType: "role" | "member",
+): Promise<void> {
+  return api.request("DELETE", `/channels/${channelId}/overwrites/${targetId}?type=${targetType}`);
+}
+
+// ---- moderation -------------------------------------------------------------
+
+export function kickMember(api: ApiClient, guildId: string, userId: string): Promise<void> {
+  return api.request("DELETE", `/guilds/${guildId}/members/${userId}`);
+}
+
+export function banMember(
+  api: ApiClient,
+  guildId: string,
+  userId: string,
+  input: Partial<CreateBanRequest> = {},
+): Promise<void> {
+  const parsed = createBanRequestSchema.parse(input);
+  return api.request("PUT", `/guilds/${guildId}/bans/${userId}`, { body: parsed });
+}
+
+export function unbanMember(api: ApiClient, guildId: string, userId: string): Promise<void> {
+  return api.request("DELETE", `/guilds/${guildId}/bans/${userId}`);
+}
+
+export function listBans(api: ApiClient, guildId: string): Promise<{ bans: BanJson[] }> {
+  return api.request("GET", `/guilds/${guildId}/bans`, { schema: bansListSchema });
+}
+
+export function applyVoiceModeration(
+  api: ApiClient,
+  guildId: string,
+  userId: string,
+  input: VoiceModerationRequest,
+): Promise<void> {
+  voiceModerationRequestSchema.parse(input);
+  return api.request("PATCH", `/guilds/${guildId}/members/${userId}/voice`, { body: input });
+}
+
+export function transferGuildOwnership(api: ApiClient, guildId: string, input: TransferGuildRequest): Promise<void> {
+  transferGuildRequestSchema.parse(input);
+  return api.request("POST", `/guilds/${guildId}/transfer`, { body: input });
 }

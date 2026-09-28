@@ -161,4 +161,42 @@ describe("applyDispatch", () => {
     applyDispatch(state, { t: "CHANNEL_CREATE", d: channel("c2", "g1", 1) });
     expect(state.channels).toEqual(snapshotChannels);
   });
+
+  it("creates, updates and deletes a role", () => {
+    let state = readyState([guildView("g1")]);
+    const mods = { id: "r1", guildId: "g1", name: "Mods", color: 0, position: 1, permissions: "0", mentionable: true, hoist: false };
+    state = applyDispatch(state, { t: "GUILD_ROLE_CREATE", d: { guildId: "g1", role: mods } });
+    expect(state.rolesByGuild.g1!.map((r) => r.id)).toEqual(["g1", "r1"]);
+
+    state = applyDispatch(state, { t: "GUILD_ROLE_UPDATE", d: { guildId: "g1", role: { ...mods, name: "Renamed" } } });
+    expect(state.rolesByGuild.g1!.find((r) => r.id === "r1")!.name).toBe("Renamed");
+
+    state = applyDispatch(state, { t: "GUILD_ROLE_DELETE", d: { guildId: "g1", roleId: "r1" } });
+    expect(state.rolesByGuild.g1!.map((r) => r.id)).toEqual(["g1"]);
+  });
+
+  it("ignores a role create for an unknown guild", () => {
+    const state = readyState([guildView("g1")]);
+    const untouched = applyDispatch(state, {
+      t: "GUILD_ROLE_CREATE",
+      d: { guildId: "ghost", role: { id: "r1", guildId: "ghost", name: "x", color: 0, position: 1, permissions: "0", mentionable: true, hoist: false } },
+    });
+    expect(untouched).toBe(state);
+  });
+
+  it("adds and removes a ban", () => {
+    let state = readyState([guildView("g1")]);
+    const ban = { guildId: "g1", userId: "u2", reason: "spam", by: "owner-1" };
+    state = applyDispatch(state, { t: "GUILD_BAN_ADD", d: ban });
+    expect(state.bansByGuild.g1!.u2).toEqual(ban);
+
+    state = applyDispatch(state, { t: "GUILD_BAN_REMOVE", d: { guildId: "g1", userId: "u2" } });
+    expect(state.bansByGuild.g1!.u2).toBeUndefined();
+  });
+
+  it("ignores a ban removal that is not tracked", () => {
+    const state = readyState([guildView("g1")]);
+    const untouched = applyDispatch(state, { t: "GUILD_BAN_REMOVE", d: { guildId: "g1", userId: "u2" } });
+    expect(untouched).toBe(state);
+  });
 });
