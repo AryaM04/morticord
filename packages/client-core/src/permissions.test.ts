@@ -45,11 +45,22 @@ function baseState() {
               position: 0,
               parentId: null,
               permissionOverwrites: [
-                { targetId: "1003", targetType: "member", allow: "0", deny: Permission.SEND_MESSAGES.toString() },
+                {
+                  targetId: "1003",
+                  targetType: "member",
+                  allow: "0",
+                  deny: Permission.SEND_MESSAGES.toString(),
+                },
               ],
             },
           ],
-          member: { guildId: "1001", userId: "1003", nickname: null, joinedAt: "2024-01-01T00:00:00.000Z", roles: [] },
+          member: {
+            guildId: "1001",
+            userId: "1003",
+            nickname: null,
+            joinedAt: "2024-01-01T00:00:00.000Z",
+            roles: [],
+          },
         },
       ],
       presences: [],
@@ -96,7 +107,16 @@ function hierarchyState(selfIsOwner = false) {
           ownerId: selfIsOwner ? "1003" : "owner-1",
           createdAt: "2024-01-01T00:00:00.000Z",
           roles: [
-            { id: "1001", guildId: "1001", name: "@everyone", color: 0, position: 0, permissions: "0", mentionable: true, hoist: false },
+            {
+              id: "1001",
+              guildId: "1001",
+              name: "@everyone",
+              color: 0,
+              position: 0,
+              permissions: "0",
+              mentionable: true,
+              hoist: false,
+            },
             {
               id: "1002",
               guildId: "1001",
@@ -107,10 +127,25 @@ function hierarchyState(selfIsOwner = false) {
               mentionable: true,
               hoist: false,
             },
-            { id: "1004", guildId: "1001", name: "High", color: 0, position: 2, permissions: "0", mentionable: true, hoist: false },
+            {
+              id: "1004",
+              guildId: "1001",
+              name: "High",
+              color: 0,
+              position: 2,
+              permissions: "0",
+              mentionable: true,
+              hoist: false,
+            },
           ],
           channels: [],
-          member: { guildId: "1001", userId: "1003", nickname: null, joinedAt: "2024-01-01T00:00:00.000Z", roles: ["1002"] },
+          member: {
+            guildId: "1001",
+            userId: "1003",
+            nickname: null,
+            joinedAt: "2024-01-01T00:00:00.000Z",
+            roles: ["1002"],
+          },
         },
       ],
       presences: [],
@@ -150,11 +185,35 @@ describe("canManageRole / canActOnMember / grantablePermissions", () => {
             ownerId: "owner-1",
             createdAt: "2024-01-01T00:00:00.000Z",
             roles: [
-              { id: "1001", guildId: "1001", name: "@everyone", color: 0, position: 0, permissions: "0", mentionable: true, hoist: false },
-              { id: "1002", guildId: "1001", name: "Low", color: 0, position: 1, permissions: "0", mentionable: true, hoist: false },
+              {
+                id: "1001",
+                guildId: "1001",
+                name: "@everyone",
+                color: 0,
+                position: 0,
+                permissions: "0",
+                mentionable: true,
+                hoist: false,
+              },
+              {
+                id: "1002",
+                guildId: "1001",
+                name: "Low",
+                color: 0,
+                position: 1,
+                permissions: "0",
+                mentionable: true,
+                hoist: false,
+              },
             ],
             channels: [],
-            member: { guildId: "1001", userId: "1003", nickname: null, joinedAt: "2024-01-01T00:00:00.000Z", roles: [] },
+            member: {
+              guildId: "1001",
+              userId: "1003",
+              nickname: null,
+              joinedAt: "2024-01-01T00:00:00.000Z",
+              roles: [],
+            },
           },
         ],
         presences: [],
@@ -168,8 +227,20 @@ describe("canManageRole / canActOnMember / grantablePermissions", () => {
   it("lets the caller act on a member whose highest role is strictly below theirs, never the owner", () => {
     const state = hierarchyState();
     const context = buildSelfContext(state, "1001")!;
-    const belowMember = { guildId: "1001", userId: "2001", nickname: null, joinedAt: "2024-01-01T00:00:00.000Z", roles: [] };
-    const sameLevelMember = { guildId: "1001", userId: "2002", nickname: null, joinedAt: "2024-01-01T00:00:00.000Z", roles: ["1002"] };
+    const belowMember = {
+      guildId: "1001",
+      userId: "2001",
+      nickname: null,
+      joinedAt: "2024-01-01T00:00:00.000Z",
+      roles: [],
+    };
+    const sameLevelMember = {
+      guildId: "1001",
+      userId: "2002",
+      nickname: null,
+      joinedAt: "2024-01-01T00:00:00.000Z",
+      roles: ["1002"],
+    };
 
     expect(canActOnMember(context, belowMember, false)).toBe(true);
     expect(canActOnMember(context, sameLevelMember, false)).toBe(false); // not strictly below
@@ -179,7 +250,13 @@ describe("canManageRole / canActOnMember / grantablePermissions", () => {
   it("the owner can act on anyone but the owner", () => {
     const state = hierarchyState(true);
     const context = buildSelfContext(state, "1001")!;
-    const anyMember = { guildId: "1001", userId: "2001", nickname: null, joinedAt: "2024-01-01T00:00:00.000Z", roles: ["1004"] };
+    const anyMember = {
+      guildId: "1001",
+      userId: "2001",
+      nickname: null,
+      joinedAt: "2024-01-01T00:00:00.000Z",
+      roles: ["1004"],
+    };
     expect(canActOnMember(context, anyMember, false)).toBe(true);
     expect(canActOnMember(context, anyMember, true)).toBe(false);
   });

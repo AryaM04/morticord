@@ -2,14 +2,18 @@
 // member/presence dispatch, unknown-guild events, deletes of selected
 // items, and channel ordering by position then id.
 import { describe, expect, it } from "vitest";
-import {
-  applyDispatch,
-  createInitialRealtimeState,
-  type RealtimeState,
-} from "./realtime-store.js";
+import { applyDispatch, createInitialRealtimeState, type RealtimeState } from "./realtime-store.js";
 
 function role(id: string, guildId: string) {
-  return { id, guildId, name: "@everyone", color: 0, position: 0, permissions: "0", mentionable: true };
+  return {
+    id,
+    guildId,
+    name: "@everyone",
+    color: 0,
+    position: 0,
+    permissions: "0",
+    mentionable: true,
+  };
 }
 
 function member(guildId: string, userId: string) {
@@ -42,7 +46,10 @@ function guildView(id: string, channels: ReturnType<typeof channel>[] = []) {
   };
 }
 
-function readyState(guilds: ReturnType<typeof guildView>[] = [], presences: Array<{ userId: string; status: string }> = []) {
+function readyState(
+  guilds: ReturnType<typeof guildView>[] = [],
+  presences: Array<{ userId: string; status: string }> = [],
+) {
   return applyDispatch(createInitialRealtimeState(), {
     t: "READY",
     d: { user: { id: "self-1" }, guilds, presences },
@@ -82,13 +89,25 @@ describe("applyDispatch", () => {
     const state = readyState([guildView("g1")]);
     const updated = applyDispatch(state, {
       t: "GUILD_UPDATE",
-      d: { id: "g1", name: "Renamed", iconKey: null, ownerId: "owner-1", createdAt: "2024-01-01T00:00:00.000Z" },
+      d: {
+        id: "g1",
+        name: "Renamed",
+        iconKey: null,
+        ownerId: "owner-1",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
     });
     expect(updated.guilds.g1!.name).toBe("Renamed");
 
     const untouched = applyDispatch(state, {
       t: "GUILD_UPDATE",
-      d: { id: "ghost", name: "X", iconKey: null, ownerId: "owner-1", createdAt: "2024-01-01T00:00:00.000Z" },
+      d: {
+        id: "ghost",
+        name: "X",
+        iconKey: null,
+        ownerId: "owner-1",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
     });
     expect(untouched).toBe(state);
   });
@@ -112,21 +131,30 @@ describe("applyDispatch", () => {
     const withNew = applyDispatch(state, { t: "CHANNEL_CREATE", d: channel("c0", "g1", -1) });
     expect(withNew.channelIdsByGuild.g1).toEqual(["c0", "c1"]);
 
-    const untouched = applyDispatch(state, { t: "CHANNEL_CREATE", d: channel("cX", "ghost-guild", 0) });
+    const untouched = applyDispatch(state, {
+      t: "CHANNEL_CREATE",
+      d: channel("cX", "ghost-guild", 0),
+    });
     expect(untouched).toBe(state);
     expect(untouched.channels.cX).toBeUndefined();
   });
 
   it("updates a channel in place on CHANNEL_UPDATE, including a position change", () => {
     const state = readyState([guildView("g1", [channel("c1", "g1", 0), channel("c2", "g1", 1)])]);
-    const renamed = applyDispatch(state, { t: "CHANNEL_UPDATE", d: { ...channel("c1", "g1", 5), name: "renamed" } });
+    const renamed = applyDispatch(state, {
+      t: "CHANNEL_UPDATE",
+      d: { ...channel("c1", "g1", 5), name: "renamed" },
+    });
     expect(renamed.channels.c1!.name).toBe("renamed");
     expect(renamed.channelIdsByGuild.g1).toEqual(["c2", "c1"]);
   });
 
   it("removes a channel on CHANNEL_DELETE, including a channel that was selected", () => {
     const state = readyState([guildView("g1", [channel("c1", "g1", 0), channel("c2", "g1", 1)])]);
-    const afterDelete = applyDispatch(state, { t: "CHANNEL_DELETE", d: { id: "c1", guildId: "g1" } });
+    const afterDelete = applyDispatch(state, {
+      t: "CHANNEL_DELETE",
+      d: { id: "c1", guildId: "g1" },
+    });
     expect(afterDelete.channels.c1).toBeUndefined();
     expect(afterDelete.channelIdsByGuild.g1).toEqual(["c2"]);
   });
@@ -136,7 +164,10 @@ describe("applyDispatch", () => {
     state = applyDispatch(state, { t: "GUILD_MEMBER_ADD", d: member("g1", "u2") });
     expect(state.membersByGuild.g1!.u2!.userId).toBe("u2");
 
-    state = applyDispatch(state, { t: "GUILD_MEMBER_UPDATE", d: { ...member("g1", "u2"), nickname: "Nick" } });
+    state = applyDispatch(state, {
+      t: "GUILD_MEMBER_UPDATE",
+      d: { ...member("g1", "u2"), nickname: "Nick" },
+    });
     expect(state.membersByGuild.g1!.u2!.nickname).toBe("Nick");
 
     state = applyDispatch(state, { t: "GUILD_MEMBER_REMOVE", d: { guildId: "g1", userId: "u2" } });
@@ -151,7 +182,10 @@ describe("applyDispatch", () => {
 
   it("sets presence by user id, independent of guild", () => {
     const state = readyState([guildView("g1")]);
-    const updated = applyDispatch(state, { t: "PRESENCE_UPDATE", d: { userId: "u9", status: "idle" } });
+    const updated = applyDispatch(state, {
+      t: "PRESENCE_UPDATE",
+      d: { userId: "u9", status: "idle" },
+    });
     expect(updated.presences.u9).toBe("idle");
   });
 
@@ -164,11 +198,23 @@ describe("applyDispatch", () => {
 
   it("creates, updates and deletes a role", () => {
     let state = readyState([guildView("g1")]);
-    const mods = { id: "r1", guildId: "g1", name: "Mods", color: 0, position: 1, permissions: "0", mentionable: true, hoist: false };
+    const mods = {
+      id: "r1",
+      guildId: "g1",
+      name: "Mods",
+      color: 0,
+      position: 1,
+      permissions: "0",
+      mentionable: true,
+      hoist: false,
+    };
     state = applyDispatch(state, { t: "GUILD_ROLE_CREATE", d: { guildId: "g1", role: mods } });
     expect(state.rolesByGuild.g1!.map((r) => r.id)).toEqual(["g1", "r1"]);
 
-    state = applyDispatch(state, { t: "GUILD_ROLE_UPDATE", d: { guildId: "g1", role: { ...mods, name: "Renamed" } } });
+    state = applyDispatch(state, {
+      t: "GUILD_ROLE_UPDATE",
+      d: { guildId: "g1", role: { ...mods, name: "Renamed" } },
+    });
     expect(state.rolesByGuild.g1!.find((r) => r.id === "r1")!.name).toBe("Renamed");
 
     state = applyDispatch(state, { t: "GUILD_ROLE_DELETE", d: { guildId: "g1", roleId: "r1" } });
@@ -179,7 +225,19 @@ describe("applyDispatch", () => {
     const state = readyState([guildView("g1")]);
     const untouched = applyDispatch(state, {
       t: "GUILD_ROLE_CREATE",
-      d: { guildId: "ghost", role: { id: "r1", guildId: "ghost", name: "x", color: 0, position: 1, permissions: "0", mentionable: true, hoist: false } },
+      d: {
+        guildId: "ghost",
+        role: {
+          id: "r1",
+          guildId: "ghost",
+          name: "x",
+          color: 0,
+          position: 1,
+          permissions: "0",
+          mentionable: true,
+          hoist: false,
+        },
+      },
     });
     expect(untouched).toBe(state);
   });
@@ -196,7 +254,10 @@ describe("applyDispatch", () => {
 
   it("ignores a ban removal that is not tracked", () => {
     const state = readyState([guildView("g1")]);
-    const untouched = applyDispatch(state, { t: "GUILD_BAN_REMOVE", d: { guildId: "g1", userId: "u2" } });
+    const untouched = applyDispatch(state, {
+      t: "GUILD_BAN_REMOVE",
+      d: { guildId: "g1", userId: "u2" },
+    });
     expect(untouched).toBe(state);
   });
 });
