@@ -246,6 +246,34 @@ interface PeerRuntime {
   /** Whether this engine is the polite side of negotiation with this peer. See `isPolite`. */
   polite: boolean;
   makingOffer: boolean;
+  /**
+   * True only when code has just asked for the next `onnegotiationneeded`
+   * event to start a real offer. Only `attemptIceRestart` sets this flag,
+   * right before it calls `restartIce()`. `restartIce()` makes the browser
+   * fire `onnegotiationneeded` to ask for a fresh offer with new ICE
+   * credentials.
+   *
+   * Every other negotiation calls `negotiate()` directly at its own call
+   * site, and does not rely on this event. Examples: the first offer to a
+   * peer already in the call (see the newcomer loop in `join()`), and the
+   * camera and screen share toggles (each calls `negotiate()` right after
+   * it adds the transceiver that makes the call needed).
+   *
+   * For a peer that joins after us, we wait for their offer. We do not
+   * send our own (see the comment on `onPeerVoiceState` below). But
+   * `addTrack` in `ensurePeer` still makes the browser fire
+   * `onnegotiationneeded` once on its own. Left unguarded, that fires an
+   * unwanted offer, which collides with the newcomer's real offer. On the
+   * polite side, that forces a rollback. On real Chromium, a connection
+   * can fail to gather ICE candidates after such a rollback: both sides
+   * reach signaling state "stable", but no candidates ever pass between
+   * them, so `connectionState` stays at "new" forever.
+   *
+   * The flag defaults to false, so `onnegotiationneeded` does nothing
+   * unless something just armed it. This stops the unwanted offer before
+   * it starts, instead of recovering from the stuck connection after.
+   */
+  negotiationArmed: boolean;
   candidateQueue: RTCIceCandidateInit[];
   restartsAttempted: number;
   restartTimer: ReturnType<typeof setTimeout> | null;
@@ -733,6 +761,12 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
         return; // Recovered on its own; nothing more to do.
       }
       try {
+        // restartIce() fires a real, legitimate onnegotiationneeded to
+        // ask for a fresh offer with new ICE credentials: arm the
+        // guard (see `negotiationArmed`'s comment) so
+        // `onnegotiationneeded` acts on that one firing instead of
+        // ignoring it like every other one.
+        runtime.negotiationArmed = true;
         runtime.pc.restartIce();
       } catch {
         // The next connectionstatechange (still "failed") drives the next attempt.
@@ -779,6 +813,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
         pc,
         polite: isPolite(selfKey, key),
         makingOffer: false,
+        negotiationArmed: false,
         candidateQueue: [],
         restartsAttempted: 0,
         restartTimer: null,
@@ -853,6 +888,16 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
         }
       };
       pc.onnegotiationneeded = () => {
+        if (!runtime.negotiationArmed) {
+          // See `negotiationArmed`'s own comment: every negotiation
+          // this engine needs is already started directly by its own
+          // call site, so an unarmed firing of this event is never a
+          // real, missed need — acting on it anyway is what used to
+          // send an unwanted offer to a newcomer we should be waiting
+          // on instead.
+          return;
+        }
+        runtime.negotiationArmed = false;
         void negotiate(runtime);
       };
 

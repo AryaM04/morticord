@@ -9,6 +9,7 @@ import type { VoiceStateJson } from "@discord-clone/shared";
 import {
   comparePeerKeys,
   createVoiceEngine,
+  ICE_RESTART_BACKOFFS_MS,
   isPolite,
   JOIN_CONFIRM_TIMEOUT_MS,
   NEWCOMER_TRACK_SHARE_DELAY_MS,
@@ -351,6 +352,72 @@ describe("glare handling", () => {
     expect(pc.answerCount).toBe(1); // and answered it
   });
 
+  it("never offers to a later peer on its own, even when the browser fires onnegotiationneeded", async () => {
+    // Regression test for the flaky voice e2e tests (see the debug
+    // trace that found this). We are already in the channel; a peer
+    // joins later, and `ensurePeer`'s `addTrack` makes the browser
+    // fire onnegotiationneeded for our connection to them regardless
+    // of which side we are — but we must NOT act on it: the design
+    // (see the comment on `onPeerVoiceState` in engine.ts) is that the
+    // later peer waits passively for the newcomer's own offer instead
+    // of sending one of our own. Sending one anyway collides with the
+    // newcomer's real offer moments later, forcing an unnecessary
+    // perfect-negotiation rollback on our (polite) side — and on real
+    // Chromium, a rollback like that can leave the connection's ICE
+    // candidate gathering broken for good: signaling completes (both
+    // sides reach "stable"), but connectionState sits at "new"
+    // forever, because no candidates are ever exchanged. Every
+    // negotiation this engine actually needs (the initial offer to an
+    // already-present peer, the camera and screen share toggles, and
+    // an ICE restart) already starts explicitly at its own call site
+    // (see `negotiationArmed`'s comment in engine.ts), so
+    // onnegotiationneeded firing here is never a real, missed need.
+    const peerB: PeerKey = { userId: "b", deviceId: "d1" };
+    const { deps, pcs, transport } = makeDeps({ selfUserId: "a", selfDeviceId: "d1" }); // no initial peers: b joins later
+    const engine = createVoiceEngine(deps);
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+
+    engine.onPeerVoiceState({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      userId: "b",
+      deviceId: "d1",
+      selfMute: false,
+      selfDeaf: false,
+      selfVideo: false,
+      selfStream: false,
+      joinedAt: new Date().toISOString(),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    const pc = pcs[0]!;
+    expect(pc.offerCount).toBe(0); // ensurePeer alone does not offer; see the "later peer" test
+
+    // The real addTrack-triggered onnegotiationneeded fires, but must
+    // be ignored: we are the later peer for this pair, not the
+    // newcomer.
+    pc.onnegotiationneeded?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pc.offerCount).toBe(0); // still no unprompted offer
+
+    // B's offer, sent because B is the newcomer here, arrives with no
+    // collision at all and is accepted plainly.
+    transport.emit(peerB, { kind: "description", description: { type: "offer", sdp: OPUS_SDP } });
+    await vi.waitFor(() => expect(pc.remoteDescription).not.toBeNull());
+    expect(pc.answerCount).toBe(1); // answered B's offer
+    expect(pc.offerCount).toBe(0); // never sent an offer of our own
+
+    // The browser can fire onnegotiationneeded again after that; it
+    // must still be ignored.
+    pc.onnegotiationneeded?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(pc.offerCount).toBe(0);
+  });
+
   it("the impolite side ignores an offer that collides with its own in-flight offer", async () => {
     // self = "b:d1", peer = "a:d1" -> self is impolite.
     const peerA: PeerKey = { userId: "a", deviceId: "d1" };
@@ -368,6 +435,55 @@ describe("glare handling", () => {
 
     expect(pc.remoteDescription).toBeNull(); // ignored, not applied
     expect(pc.answerCount).toBe(0);
+  });
+});
+
+// ---- ICE restart ------------------------------------------------------------
+
+describe("ICE restart", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("still renegotiates after restartIce(), even though onnegotiationneeded already fired once", async () => {
+    // restartIce() fires a real onnegotiationneeded of its own, to ask
+    // for a fresh offer with new ICE credentials. The fix above that
+    // ignores a SECOND onnegotiationneeded firing (see the "ignores a
+    // second onnegotiationneeded after a rollback" test) must not
+    // also swallow this legitimate one, or a connection that actually
+    // failed would never recover.
+    // Only the impolite side drives ICE recovery (see handlePeerFailed
+    // in engine.ts), so self must be impolite here: self = "b:d1",
+    // peer = "a:d1" -> self is impolite (see comparePeerKeys).
+    const peerA: PeerKey = { userId: "a", deviceId: "d1" };
+    const { deps, pcs } = makeDeps({ selfUserId: "b", selfDeviceId: "d1", getInitialPeers: () => [peerA] });
+    const engine = createVoiceEngine(deps);
+
+    const joinPromise = engine.join("guild-1", "channel-1");
+    await vi.advanceTimersByTimeAsync(JOIN_CONFIRM_TIMEOUT_MS + NEWCOMER_TRACK_SHARE_DELAY_MS);
+    await joinPromise;
+    const pc = pcs[0]!;
+    expect(pc.offerCount).toBe(1); // our own initial offer, in flight
+
+    // The peer's answer arrives, completing the first negotiation
+    // (ICE can still fail independently of signaling once connected).
+    pc.signalingState = "stable";
+    pc.connectionState = "failed";
+    pc.onconnectionstatechange?.();
+    await vi.advanceTimersByTimeAsync(ICE_RESTART_BACKOFFS_MS[0]!);
+
+    expect(pc.restartIceCalls).toBe(1);
+    // The real browser fires onnegotiationneeded right after
+    // restartIce(); the fake stands in for that here.
+    pc.onnegotiationneeded?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(pc.offerCount).toBe(2); // the restart's own offer went out
   });
 });
 
