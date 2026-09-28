@@ -8,6 +8,7 @@
 // this engine's signal transport rides on.
 import type { VoiceErrorCode, VoiceStateJson } from "@discord-clone/shared";
 import { applyOpusFec, capOpusBitrate } from "./sdp.js";
+import { chooseVideoEncoding, type VideoEncodingKind } from "./adaptive.js";
 import type { PeerKey, SignalPayload, SignalTransport } from "./signal-transport.js";
 
 /** The fixed outgoing audio bitrate cap, per docs/concepts/voice.md and the plan's audio section. */
@@ -41,6 +42,11 @@ export const STREAM_CONFIRM_TIMEOUT_MS = 5_000;
 export const CAMERA_IDEAL_WIDTH = 1280;
 export const CAMERA_IDEAL_HEIGHT = 720;
 export const CAMERA_IDEAL_FRAME_RATE = 30;
+
+/** How often the adaptive-quality timer samples stats and re-applies each video sender's encoding. */
+export const ADAPTIVE_TICK_MS = 2_000;
+/** The height assumed for a screen-share source when the captured track reports none. */
+const SCREEN_ASSUMED_HEIGHT = 1080;
 
 /**
  * Decide which side of a peer pair is "polite" for perfect negotiation.
@@ -156,6 +162,10 @@ export interface VoiceDebugPeerStats {
   outboundBytesSent: number;
   inboundVideoBytesReceived: number;
   outboundVideoBytesSent: number;
+  /** The adaptive-quality tier currently applied to the camera sender, or null when the camera is off for this peer. */
+  cameraTier: number | null;
+  /** The adaptive-quality tier currently applied to the screen-share sender, or null when not sharing to this peer. */
+  screenTier: number | null;
 }
 
 export interface VoiceEngine {
@@ -203,6 +213,18 @@ interface SpeakingState {
 
 function createSpeakingState(): SpeakingState {
   return { analyser: null, buffer: null, speaking: false, belowTicks: 0 };
+}
+
+/** One video sender's running adaptive-quality state, kept across ticks so the policy sees consecutive samples and step-up cooldowns. */
+interface AdaptiveSenderState {
+  limitedSamples: number;
+  tier: number | null;
+  lastStepUpAt: number | null;
+  lastApplied: { maxBitrate: number; scaleResolutionDownBy: number; maxFramerate: number } | null;
+}
+
+function createAdaptiveSenderState(): AdaptiveSenderState {
+  return { limitedSamples: 0, tier: null, lastStepUpAt: null, lastApplied: null };
 }
 
 /**
@@ -296,6 +318,10 @@ interface PeerRuntime {
   remoteCameraStream: MediaStream | null;
   /** The peer's remote screen-share stream, once `ontrack` and the media signal both identify it. */
   remoteScreenStream: MediaStream | null;
+  /** Adaptive-quality running state for this peer's camera sender. */
+  cameraAdaptive: AdaptiveSenderState;
+  /** Adaptive-quality running state for this peer's screen-share sender. */
+  screenAdaptive: AdaptiveSenderState;
   /** A video stream `ontrack` reported before the matching media signal arrived, keyed by stream id. */
   pendingRemoteStreams: Map<string, MediaStream>;
   /**
@@ -342,6 +368,8 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
   let localSourceNode: MediaStreamAudioSourceNode | null = null;
   const localSpeakingState = createSpeakingState();
   let speakingTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Runs only while at least one local camera or screen track is live; see `ensureAdaptiveTimer`/`stopAdaptiveTimer`. */
+  let adaptiveTimer: ReturnType<typeof setTimeout> | null = null;
   let turnCache: { iceServers: RTCIceServer[]; expiresAt: number } | null = null;
   // Resolves the moment our own VOICE_JOIN is confirmed by the server (its
   // VOICE_STATE_UPDATE echo for our own peer), so `join()` never starts
@@ -421,6 +449,21 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
 
   // ---- local mute/deafen ------------------------------------------------------
 
+  /** Mark the audio sender as high priority, once, right after it is created. Audio always wins uplink over video. */
+  async function setAudioSenderPriority(sender: RTCRtpSender): Promise<void> {
+    try {
+      const parameters = sender.getParameters();
+      if (!parameters.encodings || parameters.encodings.length === 0) {
+        parameters.encodings = [{}];
+      }
+      (parameters as RTCRtpSendParameters & { priority?: RTCPriorityType }).priority = "high";
+      (parameters.encodings[0] as RTCRtpEncodingParameters & { networkPriority?: RTCPriorityType }).networkPriority = "high";
+      await sender.setParameters(parameters);
+    } catch {
+      // Not every fake/browser supports sender priority; best-effort.
+    }
+  }
+
   function applyMuteToLocalTrack(): void {
     if (!localStream) {
       return;
@@ -479,6 +522,196 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
       return;
     }
     speakingTimer = setTimeoutFn(speakingTick, SPEAKING_TICK_MS);
+  }
+
+  // ---- adaptive video quality ---------------------------------------------------
+
+  /** One tick's read from a peer connection's `getStats()`: the uplink estimate and, per sender, whether it is limited. */
+  interface AdaptiveStatsSnapshot {
+    availableOutgoingBitrate?: number;
+    /** `qualityLimitationReason` keyed by the outbound-rtp stat's `mid`, when the browser reports one. */
+    reasonByMid: Map<string, string>;
+    /** The lone video outbound-rtp stat's reason, when exactly one exists and its `mid` is unknown: the unambiguous fallback. */
+    soleReason: string | null;
+  }
+
+  function readAdaptiveStats(report: RTCStatsReport): AdaptiveStatsSnapshot {
+    const statsById = new Map<string, RTCStats>();
+    report.forEach((stat) => {
+      statsById.set(stat.id, stat);
+    });
+
+    let selectedPairId: string | null = null;
+    for (const stat of statsById.values()) {
+      const loose = stat as unknown as Record<string, unknown>;
+      if (stat.type === "transport" && typeof loose.selectedCandidatePairId === "string") {
+        selectedPairId = loose.selectedCandidatePairId;
+      }
+    }
+
+    let availableOutgoingBitrate: number | undefined;
+    const reasonByMid = new Map<string, string>();
+    let videoOutboundCount = 0;
+    let lastReason: string | null = null;
+
+    for (const stat of statsById.values()) {
+      const loose = stat as unknown as Record<string, unknown>;
+      const isSelectedPair =
+        stat.type === "candidate-pair" && (stat.id === selectedPairId || (selectedPairId === null && loose.nominated === true));
+      if (isSelectedPair && typeof loose.availableOutgoingBitrate === "number") {
+        availableOutgoingBitrate = loose.availableOutgoingBitrate;
+      }
+      if (stat.type === "outbound-rtp" && loose.kind === "video") {
+        videoOutboundCount += 1;
+        const reason = typeof loose.qualityLimitationReason === "string" ? loose.qualityLimitationReason : "none";
+        lastReason = reason;
+        if (typeof loose.mid === "string") {
+          reasonByMid.set(loose.mid, reason);
+        }
+      }
+    }
+
+    return { availableOutgoingBitrate, reasonByMid, soleReason: videoOutboundCount === 1 ? lastReason : null };
+  }
+
+  /**
+   * Whether one transceiver's sender is CPU- or bandwidth-limited this
+   * tick. Matched by `mid` when the browser reports one on the
+   * outbound-rtp stat; when a peer sends only one video track (the
+   * common case: camera OR screen, not both, to most peers), the lone
+   * video outbound-rtp stat is used instead, since there is nothing else
+   * it could belong to.
+   */
+  function limitationReasonFor(stats: AdaptiveStatsSnapshot, transceiver: RTCRtpTransceiver | null): boolean {
+    if (!transceiver) {
+      return false;
+    }
+    const mid = transceiver.mid;
+    const reason = (mid && stats.reasonByMid.get(mid)) ?? stats.soleReason ?? "none";
+    return reason === "cpu" || reason === "bandwidth";
+  }
+
+  /** Apply the policy's result to one sender's parameters, only when it actually changed since the last tick. */
+  async function applyEncodingToSender(transceiver: RTCRtpTransceiver, state: AdaptiveSenderState, limited: boolean, kind: VideoEncodingKind, remotePeerCount: number, activeVideoSenders: number, sourceHeight: number, availableOutgoingBitrate: number | undefined): Promise<void> {
+    state.limitedSamples = limited ? state.limitedSamples + 1 : 0;
+
+    const result = chooseVideoEncoding({
+      kind,
+      remotePeerCount,
+      sourceHeight,
+      availableOutgoingBitrate,
+      activeVideoSenders,
+      limitedSamples: state.limitedSamples,
+      previousTier: state.tier ?? undefined,
+      msSinceLastStepUp: state.lastStepUpAt === null ? undefined : nowFn() - state.lastStepUpAt,
+    });
+
+    if (state.tier !== null && result.tier < state.tier) {
+      state.lastStepUpAt = nowFn();
+    }
+    state.tier = result.tier;
+
+    const applied = {
+      maxBitrate: result.maxBitrate,
+      scaleResolutionDownBy: result.scaleResolutionDownBy,
+      maxFramerate: result.maxFramerate,
+    };
+    const unchanged =
+      state.lastApplied !== null &&
+      state.lastApplied.maxBitrate === applied.maxBitrate &&
+      state.lastApplied.scaleResolutionDownBy === applied.scaleResolutionDownBy &&
+      state.lastApplied.maxFramerate === applied.maxFramerate;
+    if (unchanged) {
+      return;
+    }
+    state.lastApplied = applied;
+
+    try {
+      const parameters = transceiver.sender.getParameters();
+      if (!parameters.encodings || parameters.encodings.length === 0) {
+        parameters.encodings = [{}];
+      }
+      const encoding = parameters.encodings[0]!;
+      encoding.maxBitrate = applied.maxBitrate;
+      encoding.scaleResolutionDownBy = applied.scaleResolutionDownBy;
+      encoding.maxFramerate = applied.maxFramerate;
+      await transceiver.sender.setParameters(parameters);
+    } catch {
+      // Not every fake/browser accepts setParameters() for every state; best-effort.
+    }
+  }
+
+  async function applyAdaptiveForPeer(runtime: PeerRuntime, remotePeerCount: number, activeVideoSenders: number): Promise<void> {
+    if (!runtime.cameraTransceiver && !runtime.screenTransceiver) {
+      return;
+    }
+    let report: RTCStatsReport;
+    try {
+      report = await runtime.pc.getStats();
+    } catch {
+      return;
+    }
+    const stats = readAdaptiveStats(report);
+
+    if (runtime.cameraTransceiver && cameraOn) {
+      const sourceHeight = cameraStream?.getVideoTracks()[0]?.getSettings().height ?? CAMERA_IDEAL_HEIGHT;
+      await applyEncodingToSender(
+        runtime.cameraTransceiver,
+        runtime.cameraAdaptive,
+        limitationReasonFor(stats, runtime.cameraTransceiver),
+        "camera",
+        remotePeerCount,
+        activeVideoSenders,
+        sourceHeight,
+        stats.availableOutgoingBitrate,
+      );
+    }
+    if (runtime.screenTransceiver && screenOn) {
+      const sourceHeight = screenStream?.getVideoTracks()[0]?.getSettings().height ?? SCREEN_ASSUMED_HEIGHT;
+      await applyEncodingToSender(
+        runtime.screenTransceiver,
+        runtime.screenAdaptive,
+        limitationReasonFor(stats, runtime.screenTransceiver),
+        "screen",
+        remotePeerCount,
+        activeVideoSenders,
+        sourceHeight,
+        stats.availableOutgoingBitrate,
+      );
+    }
+  }
+
+  async function adaptiveTick(): Promise<void> {
+    adaptiveTimer = null;
+    if (!cameraOn && !screenOn) {
+      // The last video track stopped while this tick was already
+      // scheduled: do nothing, and do not reschedule.
+      return;
+    }
+    const remotePeerCount = peers.size;
+    const activeVideoSenders = (cameraOn ? 1 : 0) + (screenOn ? 1 : 0);
+    for (const runtime of peers.values()) {
+      await applyAdaptiveForPeer(runtime, remotePeerCount, activeVideoSenders);
+    }
+    if (cameraOn || screenOn) {
+      adaptiveTimer = setTimeoutFn(adaptiveTick, ADAPTIVE_TICK_MS);
+    }
+  }
+
+  /** Start the adaptive-quality timer, only while a local camera or screen track is live. A no-op if it is already running. */
+  function ensureAdaptiveTimer(): void {
+    if (adaptiveTimer || (!cameraOn && !screenOn)) {
+      return;
+    }
+    adaptiveTimer = setTimeoutFn(adaptiveTick, ADAPTIVE_TICK_MS);
+  }
+
+  /** Stop the adaptive-quality timer. Called once the last local video track goes off, and on leave. */
+  function stopAdaptiveTimer(): void {
+    if (adaptiveTimer) {
+      clearTimeoutFn(adaptiveTimer);
+      adaptiveTimer = null;
+    }
   }
 
   // ---- remote audio graph ------------------------------------------------------
@@ -829,6 +1062,8 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
         remoteScreenStreamId: null,
         remoteCameraStream: null,
         remoteScreenStream: null,
+        cameraAdaptive: createAdaptiveSenderState(),
+        screenAdaptive: createAdaptiveSenderState(),
         pendingRemoteStreams: new Map(),
         signalingQueue: Promise.resolve(),
       };
@@ -841,6 +1076,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
             void capOpusBitrate(sender, AUDIO_MAX_BITRATE_BPS).catch(() => {
               // Not every fake/browser supports setParameters(); the bitrate cap is best-effort.
             });
+            void setAudioSenderPriority(sender);
           }
         }
       }
@@ -976,6 +1212,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
       clearTimeoutFn(speakingTimer);
       speakingTimer = null;
     }
+    stopAdaptiveTimer();
 
     if (selfStreamConfirm) {
       selfStreamConfirm(false);
@@ -1172,6 +1409,12 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
         }
         cameraStream = null;
       }
+      for (const runtime of peers.values()) {
+        runtime.cameraAdaptive = createAdaptiveSenderState();
+      }
+      if (!screenOn) {
+        stopAdaptiveTimer();
+      }
       deps.sendVoiceState({ selfVideo: false });
       broadcastMediaSignal();
       emitLocalMedia();
@@ -1222,6 +1465,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
     deps.sendVoiceState({ selfVideo: true });
     broadcastMediaSignal();
     emitLocalMedia();
+    ensureAdaptiveTimer();
   }
 
   async function setScreenShare(on: boolean): Promise<void> {
@@ -1255,6 +1499,12 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
           track.stop();
         }
         screenStream = null;
+      }
+      for (const runtime of peers.values()) {
+        runtime.screenAdaptive = createAdaptiveSenderState();
+      }
+      if (!cameraOn) {
+        stopAdaptiveTimer();
       }
       deps.sendVoiceState({ selfStream: false });
       broadcastMediaSignal();
@@ -1330,6 +1580,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
 
     broadcastMediaSignal();
     emitLocalMedia();
+    ensureAdaptiveTimer();
   }
 
   // ---- public: mute/deafen/devices/volume ---------------------------------------
@@ -1471,6 +1722,8 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
         outboundBytesSent,
         inboundVideoBytesReceived,
         outboundVideoBytesSent,
+        cameraTier: cameraOn ? runtime.cameraAdaptive.tier : null,
+        screenTier: screenOn ? runtime.screenAdaptive.tier : null,
       });
     }
     return results;
