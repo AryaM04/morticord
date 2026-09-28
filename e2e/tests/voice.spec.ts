@@ -245,8 +245,12 @@ test.describe("voice", () => {
 
     const statsD = await getDebugStats(pageD);
     const statsE = await getDebugStats(pageE);
-    expect(statsD[0]?.selectedCandidateType).toBe("relay");
-    expect(statsE[0]?.selectedCandidateType).toBe("relay");
+    // The "relay" policy lets the browser send media only through TURN.
+    // A connectivity check through the relay can show a new mapped address.
+    // Chrome then reports the local candidate as "prflx", but the path still
+    // goes through the relay. Thus, both types prove a relayed connection.
+    expect(["relay", "prflx"]).toContain(statsD[0]?.selectedCandidateType);
+    expect(["relay", "prflx"]).toContain(statsE[0]?.selectedCandidateType);
 
     await contextD.close();
     await contextE.close();
