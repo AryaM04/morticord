@@ -48,6 +48,11 @@ const envSchema = z.object({
   // Browser-visible origin of the API. The server builds OAuth redirect
   // URIs from this value, so it must match what the OAuth app registers.
   PUBLIC_API_URL: z.string().min(1).default("http://localhost:5173"),
+
+  // Base rate limit for auth routes, in requests per minute per IP. Some
+  // routes scale this value up or down; see authRateLimit in app config.
+  // Raise this in a test environment to avoid 429s from repeated test runs.
+  AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(10),
 });
 
 export interface AppConfig {
@@ -74,6 +79,15 @@ export interface AppConfig {
     google?: { clientId: string; clientSecret: string };
   };
   publicApiUrl: string;
+  // Rate limits for auth routes, in requests per minute per IP. Each field
+  // scales from AUTH_RATE_LIMIT_PER_MINUTE, so one env var tunes all of them.
+  authRateLimit: {
+    register: number;
+    login: number;
+    refresh: number;
+    resendVerification: number;
+    forgotPassword: number;
+  };
 }
 
 /** Read and check the process environment. Throw a clear error on bad input. */
@@ -118,5 +132,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     oauth,
     publicApiUrl: data.PUBLIC_API_URL,
+    authRateLimit: {
+      register: data.AUTH_RATE_LIMIT_PER_MINUTE,
+      login: data.AUTH_RATE_LIMIT_PER_MINUTE,
+      refresh: data.AUTH_RATE_LIMIT_PER_MINUTE * 3,
+      resendVerification: Math.max(1, Math.round(data.AUTH_RATE_LIMIT_PER_MINUTE / 2)),
+      forgotPassword: data.AUTH_RATE_LIMIT_PER_MINUTE,
+    },
   };
 }
