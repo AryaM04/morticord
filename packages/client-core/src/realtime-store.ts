@@ -274,17 +274,32 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
 
     case "GUILD_MEMBER_ADD":
     case "GUILD_MEMBER_UPDATE": {
-      const member = event.d as GuildMemberJson;
-      if (!(member.guildId in state.guilds)) {
+      const incoming = event.d as GuildMemberJson;
+      if (!(incoming.guildId in state.guilds)) {
         return state;
       }
+      // GUILD_MEMBER_UPDATE (sent after a role or nickname change) does
+      // not carry `user`: the server does not re-look-up and re-send the
+      // profile on every such change. Keep the previously known profile
+      // in that case, so a role change never reverts a name to a raw id.
+      const existing = state.membersByGuild[incoming.guildId]?.[incoming.userId];
+      const member: GuildMemberJson = incoming.user ? incoming : { ...incoming, user: existing?.user };
       const guildMembers = {
         ...(state.membersByGuild[member.guildId] ?? {}),
         [member.userId]: member,
       };
+      // The signed-in user's own member row (roles, nickname) lives in
+      // `selfMemberByGuild`, separate from `membersByGuild`: keep it in
+      // sync too, so a role change takes effect for the caller's own
+      // derived permissions immediately, with no reload.
+      const selfMemberByGuild =
+        member.userId === state.selfUserId
+          ? { ...state.selfMemberByGuild, [member.guildId]: member }
+          : state.selfMemberByGuild;
       return {
         ...state,
         membersByGuild: { ...state.membersByGuild, [member.guildId]: guildMembers },
+        selfMemberByGuild,
       };
     }
 

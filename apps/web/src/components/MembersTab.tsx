@@ -371,6 +371,8 @@ export function MembersTab({ guildId }: { guildId: string }) {
           style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
         >
           <div
+            role="dialog"
+            aria-label={`Ban ${displayName(banTarget)}`}
             className="w-full max-w-sm rounded-lg border p-4"
             style={{
               backgroundColor: "var(--color-bg-sidebar)",
@@ -437,6 +439,8 @@ export function MembersTab({ guildId }: { guildId: string }) {
           style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
         >
           <div
+            role="dialog"
+            aria-label={`Transfer ownership to ${displayName(transferTarget)}`}
             className="w-full max-w-sm rounded-lg border p-4"
             style={{
               backgroundColor: "var(--color-bg-sidebar)",

@@ -101,7 +101,10 @@ export function ChannelSettingsDialog({
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      className="flex w-full max-w-2xl flex-col rounded-lg border p-0"
+      // No "flex" (or other display-changing) class here: see the note
+      // in GuildSettingsDialog.tsx. The flex layout lives on the wrapper
+      // div just inside instead.
+      className="w-full max-w-2xl rounded-lg border p-0"
       style={{
         borderColor: "var(--color-border)",
         backgroundColor: "var(--color-bg-sidebar)",
