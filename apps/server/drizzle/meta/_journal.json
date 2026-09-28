@@ -36,6 +36,13 @@
       "when": 1790488168936,
       "tag": "0004_m4_member_search",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790590838943,
+      "tag": "0005_m5_roles_hoist",
+      "breakpoints": true
     }
   ]
 }

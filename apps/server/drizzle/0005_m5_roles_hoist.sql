@@ -1,0 +1,1 @@
+ALTER TABLE "roles" ADD COLUMN "hoist" boolean DEFAULT false NOT NULL;

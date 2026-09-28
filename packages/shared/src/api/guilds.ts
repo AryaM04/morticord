@@ -28,8 +28,46 @@ export const roleSchema = z.object({
   position: z.number().int(),
   permissions: z.string(),
   mentionable: z.boolean(),
+  /** True when the role's members show as a separate group in the member list. */
+  hoist: z.boolean(),
 });
 export type RoleJson = z.infer<typeof roleSchema>;
+
+export const roleNameSchema = z
+  .string()
+  .trim()
+  .min(1, "The role name must have at least 1 character.")
+  .max(100, "The role name must have at most 100 characters.");
+
+/** A decimal-string bigint permission bitmask, as it goes on the wire. */
+export const permissionMaskSchema = z.string().regex(/^[0-9]+$/, "The permission mask must be a decimal number.");
+
+export const MAX_ROLES_PER_GUILD = 100;
+
+export const createRoleRequestSchema = z.object({
+  name: roleNameSchema.default("new role"),
+  color: z.number().int().min(0).max(0xffffff).default(0),
+  permissions: permissionMaskSchema.default("0"),
+  mentionable: z.boolean().default(true),
+  hoist: z.boolean().default(false),
+});
+export type CreateRoleRequest = z.infer<typeof createRoleRequestSchema>;
+
+export const updateRoleRequestSchema = z.object({
+  name: roleNameSchema.optional(),
+  color: z.number().int().min(0).max(0xffffff).optional(),
+  permissions: permissionMaskSchema.optional(),
+  mentionable: z.boolean().optional(),
+  hoist: z.boolean().optional(),
+});
+export type UpdateRoleRequest = z.infer<typeof updateRoleRequestSchema>;
+
+export const roleOrderEntrySchema = z.object({
+  id: idSchema,
+  position: z.number().int().min(0),
+});
+export const roleOrderRequestSchema = z.array(roleOrderEntrySchema).min(1).max(MAX_ROLES_PER_GUILD);
+export type RoleOrderRequest = z.infer<typeof roleOrderRequestSchema>;
 
 export const channelTypeSchema = z.enum(["text", "voice", "category"]);
 export type ChannelType = z.infer<typeof channelTypeSchema>;
@@ -142,6 +180,46 @@ export const searchMembersResponseSchema = z.object({
 export type SearchMembersResponse = z.infer<typeof searchMembersResponseSchema>;
 
 export const nicknameSchema = displayNameSchema;
+
+export const updateMemberRequestSchema = z.object({
+  nickname: nicknameSchema.nullable().optional(),
+});
+export type UpdateMemberRequest = z.infer<typeof updateMemberRequestSchema>;
+
+export const putOverwriteRequestSchema = z.object({
+  type: overwriteTargetTypeSchema,
+  allow: permissionMaskSchema,
+  deny: permissionMaskSchema,
+});
+export type PutOverwriteRequest = z.infer<typeof putOverwriteRequestSchema>;
+
+export const banSchema = z.object({
+  guildId: idSchema,
+  userId: idSchema,
+  reason: z.string().nullable(),
+  by: idSchema,
+});
+export type BanJson = z.infer<typeof banSchema>;
+
+export const MAX_DELETE_MESSAGE_SECONDS = 604800; // 7 days
+
+export const createBanRequestSchema = z.object({
+  reason: z.string().trim().max(512).optional(),
+  deleteMessageSeconds: z.number().int().min(0).max(MAX_DELETE_MESSAGE_SECONDS).default(0),
+});
+export type CreateBanRequest = z.infer<typeof createBanRequestSchema>;
+
+export const voiceModerationRequestSchema = z.object({
+  mute: z.boolean().optional(),
+  deaf: z.boolean().optional(),
+  channelId: idSchema.nullable().optional(),
+});
+export type VoiceModerationRequest = z.infer<typeof voiceModerationRequestSchema>;
+
+export const transferGuildRequestSchema = z.object({
+  userId: idSchema,
+});
+export type TransferGuildRequest = z.infer<typeof transferGuildRequestSchema>;
 
 // 0 means "no limit" for maxUses, and 0 means "never expires" for maxAgeSeconds.
 export const INVITE_MAX_AGE_SECONDS = [0, 1800, 3600, 21600, 43200, 86400, 604800] as const;

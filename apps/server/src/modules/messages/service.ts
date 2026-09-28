@@ -5,13 +5,13 @@
 // the plaintext routing metadata (channel, sender, relation, codec, times)
 // described in docs/concepts/messages.md.
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or } from "drizzle-orm";
-import { decodeBase64Url, DispatchEvent, hasPermission, Permission, type EventCodec, type EventRelType } from "@discord-clone/shared";
+import { decodeBase64Url, DispatchEvent, Permission, type EventCodec, type EventRelType } from "@discord-clone/shared";
 import type { DbClient } from "../../db/client.js";
 import { channels, events, readStates } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
 import type { GatewayService } from "../gateway/service.js";
-import { channelPermissions, loadMemberContext } from "../guilds/member-context.js";
+import { channelPermissions, loadMemberContext, requireChannelPermission } from "../guilds/member-context.js";
 import { toEventJson, type EventRow } from "./serialize.js";
 
 /** Timeline events are the ones that advance a channel's `lastEventId`: a plain message or a reply. */
@@ -29,12 +29,6 @@ async function loadTextChannelOrThrow(db: DbClient, channelId: bigint) {
     throw new AppError(400, "CHANNEL_NOT_TEXT", "Only a text channel can hold events.");
   }
   return channel;
-}
-
-function requireChannelPermission(permissions: bigint, permission: bigint): void {
-  if (!hasPermission(permissions, permission)) {
-    throw new AppError(403, "MISSING_PERMISSION", "You do not have permission to do this.");
-  }
 }
 
 async function loadEventInChannel(db: DbClient, channelId: bigint, eventId: bigint): Promise<EventRow> {

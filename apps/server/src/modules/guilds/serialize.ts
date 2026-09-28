@@ -1,5 +1,6 @@
 // Turn database rows into the JSON shapes the guild API sends.
 import type {
+  BanJson,
   ChannelJson,
   GuildJson,
   GuildMemberJson,
@@ -41,6 +42,23 @@ export function toRoleJson(role: RoleRow): RoleJson {
     position: role.position,
     permissions: role.permissions.toString(),
     mentionable: role.mentionable,
+    hoist: role.hoist,
+  };
+}
+
+export interface BanRow {
+  guildId: bigint;
+  userId: bigint;
+  reason: string | null;
+  by: bigint;
+}
+
+export function toBanJson(ban: BanRow): BanJson {
+  return {
+    guildId: ban.guildId.toString(),
+    userId: ban.userId.toString(),
+    reason: ban.reason,
+    by: ban.by.toString(),
   };
 }
 

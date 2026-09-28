@@ -224,6 +224,7 @@ export const roles = pgTable("roles", {
   position: integer("position").notNull().default(0),
   permissions: bigint("permissions", { mode: "bigint" }).notNull().default(sql`0`),
   mentionable: boolean("mentionable").notNull().default(true),
+  hoist: boolean("hoist").notNull().default(false),
 });
 
 export const memberRoles = pgTable(

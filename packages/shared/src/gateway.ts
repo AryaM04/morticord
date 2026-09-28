@@ -6,7 +6,7 @@
 // "d" is the payload, and its shape depends on "op" and "t".
 
 import { z } from "zod";
-import { guildViewSchema } from "./api/guilds.js";
+import { banSchema, guildMemberSchema, guildViewSchema, roleSchema } from "./api/guilds.js";
 import { eventSchema, readStateSchema } from "./api/messages.js";
 import { idSchema } from "./api/common.js";
 import { voiceStateSchema } from "./api/voice.js";
@@ -114,6 +114,20 @@ export const invalidSessionPayloadSchema = z.object({
   canResume: z.literal(false),
 });
 
+/** Sent by the server to guild members after a role is created. */
+export const guildRoleCreatePayloadSchema = z.object({ guildId: idSchema, role: roleSchema });
+/** Sent by the server to guild members after a role is edited. */
+export const guildRoleUpdatePayloadSchema = z.object({ guildId: idSchema, role: roleSchema });
+/** Sent by the server to guild members after a role is deleted. */
+export const guildRoleDeletePayloadSchema = z.object({ guildId: idSchema, roleId: idSchema });
+
+/** Sent to members with BAN_MEMBERS after a ban is added or removed. */
+export const guildBanAddPayloadSchema = banSchema;
+export const guildBanRemovePayloadSchema = z.object({ guildId: idSchema, userId: idSchema });
+
+/** Sent by the server after a member's roles or nickname change. */
+export const guildMemberUpdatePayloadSchema = guildMemberSchema;
+
 export const guildDeletePayloadSchema = z.object({ id: z.string().min(1) });
 export const channelDeletePayloadSchema = z.object({ id: z.string().min(1), guildId: z.string().min(1) });
 export const guildMemberRemovePayloadSchema = z.object({
@@ -215,6 +229,12 @@ export type VisiblePresenceStatus = z.infer<typeof visiblePresenceStatusSchema>;
 export type PresenceEntry = z.infer<typeof presenceEntrySchema>;
 export type ReadyPayload = z.infer<typeof readyPayloadSchema>;
 export type InvalidSessionPayload = z.infer<typeof invalidSessionPayloadSchema>;
+export type GuildRoleCreatePayload = z.infer<typeof guildRoleCreatePayloadSchema>;
+export type GuildRoleUpdatePayload = z.infer<typeof guildRoleUpdatePayloadSchema>;
+export type GuildRoleDeletePayload = z.infer<typeof guildRoleDeletePayloadSchema>;
+export type GuildBanAddPayload = z.infer<typeof guildBanAddPayloadSchema>;
+export type GuildBanRemovePayload = z.infer<typeof guildBanRemovePayloadSchema>;
+export type GuildMemberUpdatePayload = z.infer<typeof guildMemberUpdatePayloadSchema>;
 export type GuildDeletePayload = z.infer<typeof guildDeletePayloadSchema>;
 export type ChannelDeletePayload = z.infer<typeof channelDeletePayloadSchema>;
 export type GuildMemberRemovePayload = z.infer<typeof guildMemberRemovePayloadSchema>;
@@ -243,6 +263,11 @@ export const DispatchEvent = {
   GUILD_MEMBER_ADD: "GUILD_MEMBER_ADD",
   GUILD_MEMBER_UPDATE: "GUILD_MEMBER_UPDATE",
   GUILD_MEMBER_REMOVE: "GUILD_MEMBER_REMOVE",
+  GUILD_ROLE_CREATE: "GUILD_ROLE_CREATE",
+  GUILD_ROLE_UPDATE: "GUILD_ROLE_UPDATE",
+  GUILD_ROLE_DELETE: "GUILD_ROLE_DELETE",
+  GUILD_BAN_ADD: "GUILD_BAN_ADD",
+  GUILD_BAN_REMOVE: "GUILD_BAN_REMOVE",
   PRESENCE_UPDATE: "PRESENCE_UPDATE",
   EVENT_CREATE: "EVENT_CREATE",
   EVENT_REDACT: "EVENT_REDACT",

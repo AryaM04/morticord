@@ -31,6 +31,10 @@ export const voiceStateSchema = z.object({
   selfDeaf: z.boolean(),
   selfVideo: z.boolean(),
   selfStream: z.boolean(),
+  /** Set by a moderator with MUTE_MEMBERS. A server-muted peer cannot self-unmute. */
+  serverMute: z.boolean(),
+  /** Set by a moderator with DEAFEN_MEMBERS. */
+  serverDeaf: z.boolean(),
   joinedAt: z.string(),
 });
 export type VoiceStateJson = z.infer<typeof voiceStateSchema>;

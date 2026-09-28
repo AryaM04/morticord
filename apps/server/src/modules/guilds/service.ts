@@ -35,7 +35,8 @@ const DEFAULT_EVERYONE_PERMISSIONS =
   Permission.CONNECT |
   Permission.SPEAK |
   Permission.VIDEO |
-  Permission.STREAM;
+  Permission.STREAM |
+  Permission.CHANGE_NICKNAME;
 
 export interface GuildsDeps {
   db: DbClient;
@@ -84,6 +85,8 @@ export async function buildGuildView(db: DbClient, guildId: bigint, userId: bigi
             selfDeaf: peerState.selfDeaf,
             selfVideo: peerState.selfVideo,
             selfStream: peerState.selfStream,
+            serverMute: peerState.serverMute,
+            serverDeaf: peerState.serverDeaf,
             joinedAt: peerState.joinedAt,
           })),
         )
