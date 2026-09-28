@@ -1,6 +1,8 @@
 // The main pane: a channel header and its content. A text channel shows
-// its message list and composer; a voice channel shows a placeholder
-// (voice itself arrives in M4).
+// its message list and composer; a voice channel shows a short notice
+// here, since a voice channel is joined from the channel list, not from
+// this pane (see ChannelColumn and the voice status panel above the
+// user panel).
 import { useEffect, useMemo, useState } from "react";
 import { needsStaleRefetch, type AggregatedMessage } from "@discord-clone/client-core";
 import { Permission, hasPermission } from "@discord-clone/shared";
@@ -114,7 +116,9 @@ export function ChatPane({ channelId }: { channelId: string | null }) {
 
       {channel.type === "voice" ? (
         <div className="flex flex-1 flex-col items-center justify-center p-3 text-center">
-          <p style={{ color: "var(--color-text-muted)" }}>Voice is not available yet.</p>
+          <p style={{ color: "var(--color-text-muted)" }}>
+            Click this channel in the list on the left to join the voice call.
+          </p>
         </div>
       ) : (
         <>

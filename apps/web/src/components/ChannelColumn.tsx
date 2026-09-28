@@ -11,12 +11,16 @@ import {
   reorderChannels,
   selfGuildPermissions,
 } from "@discord-clone/client-core";
+import { useStore } from "zustand";
 import { session } from "../lib/session.js";
 import { realtimeStore } from "../lib/realtime.js";
 import { useRealtime } from "../lib/useRealtime.js";
 import { useMessages } from "../lib/useMessages.js";
 import { readCollapsedCategories, writeCollapsedCategories } from "../lib/lastLocation.js";
+import { joinVoiceChannel, voiceStore } from "../lib/voice.js";
 import { UserPanel } from "./UserPanel.js";
+import { VoiceStatusPanel } from "./VoiceStatusPanel.js";
+import { VoiceChannelParticipants } from "./VoiceChannelParticipants.js";
 import { InviteDialog } from "./InviteDialog.js";
 import { GuildSettingsDialog } from "./GuildSettingsDialog.js";
 import { ChannelSettingsDialog } from "./ChannelSettingsDialog.js";
@@ -114,6 +118,7 @@ function GuildMenu({
 
 function ChannelRow({
   channel,
+  guildId,
   active,
   unread,
   mentionCount,
@@ -124,6 +129,7 @@ function ChannelRow({
   onOpenSettings,
 }: {
   channel: ChannelJson;
+  guildId: string;
   active: boolean;
   unread: boolean;
   mentionCount: number;
@@ -135,50 +141,65 @@ function ChannelRow({
 }) {
   const [, navigate] = useLocation();
   const bright = active || unread;
+  const isVoice = channel.type === "voice";
+  const connectedChannelId = useStore(voiceStore, (s) => (s.status === "connected" ? s.channelId : null));
+
+  function onSelect(): void {
+    navigate(href);
+    if (isVoice) {
+      void joinVoiceChannel(guildId, channel.id);
+    }
+  }
+
   return (
-    <div
-      draggable={draggable}
-      data-channel-row={channel.name}
-      onDragStart={() => onDragStartId(channel.id)}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        onDropOn(channel.id);
-      }}
-      className="group flex items-center gap-1 rounded px-2 py-1"
-      style={{ backgroundColor: active ? "var(--color-bg-main)" : "transparent" }}
-    >
-      <button
-        type="button"
-        onClick={() => navigate(href)}
-        className="flex-1 truncate text-left text-sm"
-        style={{
-          color: bright ? "var(--color-text-primary)" : "var(--color-text-muted)",
-          fontWeight: unread ? 600 : 400,
+    <div data-voice-channel={isVoice ? channel.name : undefined}>
+      <div
+        draggable={draggable}
+        data-channel-row={channel.name}
+        onDragStart={() => onDragStartId(channel.id)}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          onDropOn(channel.id);
         }}
+        className="group flex items-center gap-1 rounded px-2 py-1"
+        style={{ backgroundColor: active ? "var(--color-bg-main)" : "transparent" }}
       >
-        {channel.type === "voice" ? "\u{1F50A}" : "#"} {channel.name}
-      </button>
-      {mentionCount > 0 && (
-        <span
-          className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none"
-          style={{ backgroundColor: "#e05252", color: "white" }}
+        <button
+          type="button"
+          onClick={onSelect}
+          className="flex-1 truncate text-left text-sm"
+          style={{
+            color: bright ? "var(--color-text-primary)" : "var(--color-text-muted)",
+            fontWeight: unread ? 600 : 400,
+          }}
         >
-          <span aria-hidden="true">{formatBadgeCount(mentionCount)}</span>
-          <span className="sr-only">
-            {mentionCount} {mentionCount === 1 ? "mention" : "mentions"}
+          {isVoice ? "\u{1F50A}" : "#"} {channel.name}
+        </button>
+        {mentionCount > 0 && (
+          <span
+            className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none"
+            style={{ backgroundColor: "#e05252", color: "white" }}
+          >
+            <span aria-hidden="true">{formatBadgeCount(mentionCount)}</span>
+            <span className="sr-only">
+              {mentionCount} {mentionCount === 1 ? "mention" : "mentions"}
+            </span>
           </span>
-        </span>
+        )}
+        <button
+          type="button"
+          aria-label={`${channel.name} settings`}
+          onClick={onOpenSettings}
+          className="hidden px-1 text-sm group-hover:block"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          &#8942;
+        </button>
+      </div>
+      {isVoice && (
+        <VoiceChannelParticipants guildId={guildId} channelId={channel.id} live={connectedChannelId === channel.id} />
       )}
-      <button
-        type="button"
-        aria-label={`${channel.name} settings`}
-        onClick={onOpenSettings}
-        className="hidden px-1 text-sm group-hover:block"
-        style={{ color: "var(--color-text-muted)" }}
-      >
-        &#8942;
-      </button>
     </div>
   );
 }
@@ -317,6 +338,7 @@ export function ChannelColumn({ guildId, activeChannelId }: { guildId: string; a
       <ChannelRow
         key={id}
         channel={channel}
+        guildId={guildId}
         active={id === activeChannelId}
         unread={unread}
         mentionCount={mentionCount}
@@ -410,6 +432,7 @@ export function ChannelColumn({ guildId, activeChannelId }: { guildId: string; a
         })}
       </div>
 
+      <VoiceStatusPanel />
       <UserPanel />
 
       {inviteChannelId && (
