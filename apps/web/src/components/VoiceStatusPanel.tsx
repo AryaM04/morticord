@@ -39,30 +39,55 @@ export function VoiceStatusPanel() {
   const inputMode = useStore(voiceDeviceSettingsStore, (s) => s.inputMode);
   const pttKeyCode = useStore(voiceDeviceSettingsStore, (s) => s.pttKeyCode);
   const channelName = useRealtime((s) => (channelId ? s.channels[channelId]?.name : undefined));
+  const selfVoiceState = useRealtime((s) =>
+    channelId && s.selfUserId ? s.voiceStatesByChannel[channelId]?.[s.selfUserId] : undefined,
+  );
+  const serverMuted = selfVoiceState?.serverMute ?? false;
+  const serverDeafened = selfVoiceState?.serverDeaf ?? false;
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
 
   if (status === "idle") {
     return errorMessage ? (
-      <div className="border-t px-3 py-2 text-xs" style={{ borderColor: "var(--color-border)", color: "#e05252" }} role="alert">
+      <div
+        className="border-t px-3 py-2 text-xs"
+        style={{ borderColor: "var(--color-border)", color: "#e05252" }}
+        role="alert"
+      >
         {errorMessage}
       </div>
     ) : null;
   }
 
   return (
-    <div className="flex flex-col gap-1 border-t px-3 py-2" style={{ borderColor: "var(--color-border)" }}>
+    <div
+      className="flex flex-col gap-1 border-t px-3 py-2"
+      style={{ borderColor: "var(--color-border)" }}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-col">
-          <span className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }} data-voice-status="connected">
+          <span
+            className="text-sm font-semibold"
+            style={{ color: "var(--color-text-primary)" }}
+            data-voice-status="connected"
+          >
             {status === "connecting" ? "Voice connecting" : "Voice connected"}
             {channelName ? `: ${channelName}` : ""}
           </span>
-          <span className="text-xs" style={{ color: "var(--color-text-muted)" }} data-voice-quality={quality}>
+          <span
+            className="text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+            data-voice-quality={quality}
+          >
             {status === "connecting" ? "Connecting" : QUALITY_LABEL[quality]}
           </span>
           {inputMode === "push-to-talk" && (
-            <span className="text-xs" style={{ color: "var(--color-text-muted)" }} data-voice-ptt-active={pttActive}>
-              Push to talk{pttKeyCode ? ` (${describeKeyCode(pttKeyCode)})` : ""}: {pttActive ? "open" : "closed"}
+            <span
+              className="text-xs"
+              style={{ color: "var(--color-text-muted)" }}
+              data-voice-ptt-active={pttActive}
+            >
+              Push to talk{pttKeyCode ? ` (${describeKeyCode(pttKeyCode)})` : ""}:{" "}
+              {pttActive ? "open" : "closed"}
             </span>
           )}
         </div>
@@ -78,7 +103,10 @@ export function VoiceStatusPanel() {
         </button>
       </div>
       {voiceSettingsOpen && (
-        <VoiceSettingsDialogLoader open={voiceSettingsOpen} onClose={() => setVoiceSettingsOpen(false)} />
+        <VoiceSettingsDialogLoader
+          open={voiceSettingsOpen}
+          onClose={() => setVoiceSettingsOpen(false)}
+        />
       )}
       {errorMessage && (
         <span className="text-xs" style={{ color: "#e05252" }} role="alert">
@@ -106,7 +134,9 @@ export function VoiceStatusPanel() {
           onClick={toggleScreenShare}
           aria-pressed={screenOn}
           disabled={!screenShareSupported}
-          title={!screenShareSupported ? "This browser does not support screen sharing." : undefined}
+          title={
+            !screenShareSupported ? "This browser does not support screen sharing." : undefined
+          }
           data-voice-screen={screenOn}
           className="flex-1 rounded px-2 py-1 text-xs"
           style={{
@@ -117,26 +147,52 @@ export function VoiceStatusPanel() {
           {screenOn ? "Stop share" : "Share screen"}
         </button>
       </div>
+      {serverMuted && (
+        <span
+          className="text-xs"
+          style={{ color: "#e05252" }}
+          role="status"
+          data-voice-server-muted="true"
+        >
+          A moderator muted you. You cannot unmute yourself.
+        </span>
+      )}
+      {serverDeafened && (
+        <span
+          className="text-xs"
+          style={{ color: "#e05252" }}
+          role="status"
+          data-voice-server-deafened="true"
+        >
+          A moderator deafened you. You cannot undeafen yourself.
+        </span>
+      )}
       <div className="flex gap-2">
         <button
           type="button"
           onClick={toggleMute}
-          aria-pressed={muted}
-          data-voice-muted={muted}
+          disabled={serverMuted}
+          title={serverMuted ? "A moderator muted you. You cannot unmute yourself." : undefined}
+          aria-pressed={muted || serverMuted}
+          data-voice-muted={muted || serverMuted}
           className="flex-1 rounded px-2 py-1 text-xs"
           style={{ backgroundColor: "var(--color-bg-main)", color: "var(--color-text-primary)" }}
         >
-          {muted ? "Unmute" : "Mute"}
+          {muted || serverMuted ? "Unmute" : "Mute"}
         </button>
         <button
           type="button"
           onClick={toggleDeafen}
-          aria-pressed={deafened}
-          data-voice-deafened={deafened}
+          disabled={serverDeafened}
+          title={
+            serverDeafened ? "A moderator deafened you. You cannot undeafen yourself." : undefined
+          }
+          aria-pressed={deafened || serverDeafened}
+          data-voice-deafened={deafened || serverDeafened}
           className="flex-1 rounded px-2 py-1 text-xs"
           style={{ backgroundColor: "var(--color-bg-main)", color: "var(--color-text-primary)" }}
         >
-          {deafened ? "Undeafen" : "Deafen"}
+          {deafened || serverDeafened ? "Undeafen" : "Deafen"}
         </button>
         <button
           type="button"

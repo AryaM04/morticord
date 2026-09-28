@@ -15,7 +15,12 @@ import type { RealtimeState } from "./realtime-store.js";
 function memberContext(
   state: RealtimeState,
   guildId: string,
-): { isOwner: boolean; everyoneRole: RoleInput; memberRoles: RoleInput[]; memberId: bigint } | null {
+): {
+  isOwner: boolean;
+  everyoneRole: RoleInput;
+  memberRoles: RoleInput[];
+  memberId: bigint;
+} | null {
   const guild = state.guilds[guildId];
   const member = state.selfMemberByGuild[guildId];
   const roles = state.rolesByGuild[guildId];
@@ -33,7 +38,10 @@ function memberContext(
 
   return {
     isOwner: guild.ownerId === state.selfUserId,
-    everyoneRole: { id: BigInt(everyoneRoleJson.id), permissions: BigInt(everyoneRoleJson.permissions) },
+    everyoneRole: {
+      id: BigInt(everyoneRoleJson.id),
+      permissions: BigInt(everyoneRoleJson.permissions),
+    },
     memberRoles,
     memberId: BigInt(state.selfUserId),
   };
@@ -81,7 +89,11 @@ export interface SelfContext {
 }
 
 /** The highest role position among `heldRoleIds` (plus @everyone, which every member holds). */
-function highestPositionOf(rolesById: Map<string, RoleJson>, guildId: string, heldRoleIds: string[]): number {
+function highestPositionOf(
+  rolesById: Map<string, RoleJson>,
+  guildId: string,
+  heldRoleIds: string[],
+): number {
   const heldIds = new Set<string>([guildId, ...heldRoleIds]);
   let max = 0;
   for (const role of rolesById.values()) {
@@ -135,7 +147,11 @@ export function canManageRole(context: SelfContext | null, role: RoleJson): bool
  * otherwise the target's highest role must be strictly below the caller's.
  * The owner always passes.
  */
-export function canActOnMember(context: SelfContext | null, member: GuildMemberJson, isTargetOwner: boolean): boolean {
+export function canActOnMember(
+  context: SelfContext | null,
+  member: GuildMemberJson,
+  isTargetOwner: boolean,
+): boolean {
   if (!context) {
     return false;
   }
@@ -157,6 +173,12 @@ export function canActOnMember(context: SelfContext | null, member: GuildMemberJ
  * Pass `channelId` for a channel overwrite's scope, or omit it for a role's
  * guild-wide scope.
  */
-export function grantablePermissions(state: RealtimeState, guildId: string, channelId?: string): bigint {
-  return channelId ? selfChannelPermissions(state, channelId) : selfGuildPermissions(state, guildId);
+export function grantablePermissions(
+  state: RealtimeState,
+  guildId: string,
+  channelId?: string,
+): bigint {
+  return channelId
+    ? selfChannelPermissions(state, channelId)
+    : selfGuildPermissions(state, guildId);
 }

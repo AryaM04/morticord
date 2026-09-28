@@ -1,12 +1,20 @@
 // Channel settings: rename, edit the topic, move up/down (the keyboard
-// alternative to drag-and-drop reorder), and delete with confirmation.
-import { useEffect, useRef, useState } from "react";
+// alternative to drag-and-drop reorder), delete with confirmation, and a
+// Permissions tab for this channel's overwrites (a lazy chunk, loaded
+// only the first time it opens).
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { channelNameSchema, type ChannelJson } from "@discord-clone/shared";
 import { deleteChannel, updateChannel } from "@discord-clone/client-core";
 import { session } from "../lib/session.js";
 import { describeError } from "../lib/errors.js";
 import { realtimeStore } from "../lib/realtime.js";
+
+const ChannelPermissionsTab = lazy(() =>
+  import("./ChannelPermissionsTab.js").then((mod) => ({ default: mod.ChannelPermissionsTab })),
+);
+
+type ChannelSettingsTab = "general" | "permissions";
 
 export function ChannelSettingsDialog({
   open,
@@ -26,6 +34,7 @@ export function ChannelSettingsDialog({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [tab, setTab] = useState<ChannelSettingsTab>("general");
   const [, navigate] = useLocation();
 
   useEffect(() => {
@@ -37,6 +46,7 @@ export function ChannelSettingsDialog({
       setTopic(channel.topic ?? "");
       setError(null);
       setConfirmingDelete(false);
+      setTab("general");
     } else if (!open && dialog.open) {
       dialog.close();
     }
@@ -85,102 +95,171 @@ export function ChannelSettingsDialog({
     }
   }
 
+  const showPermissionsTab = channel.type !== "category";
+
   return (
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      className="w-full max-w-sm rounded-lg border p-6"
-      style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-bg-sidebar)", color: "var(--color-text-primary)" }}
+      className="flex w-full max-w-2xl flex-col rounded-lg border p-0"
+      style={{
+        borderColor: "var(--color-border)",
+        backgroundColor: "var(--color-bg-sidebar)",
+        color: "var(--color-text-primary)",
+        height: showPermissionsTab ? "min(32rem, 80vh)" : undefined,
+      }}
       aria-label="Channel settings"
     >
-      <h2 className="mb-4 text-lg font-semibold">Channel settings</h2>
-
-      <form onSubmit={handleSave}>
-        <label htmlFor="channel-settings-name" className="mb-1 block text-sm font-medium">
-          Name
-        </label>
-        <input
-          id="channel-settings-name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="mb-4 w-full rounded border px-3 py-2 text-sm"
-          style={{ backgroundColor: "var(--color-bg-main)", borderColor: "var(--color-border)", color: "var(--color-text-primary)" }}
-        />
-
-        {channel.type === "text" && (
-          <>
-            <label htmlFor="channel-settings-topic" className="mb-1 block text-sm font-medium">
-              Topic
-            </label>
-            <input
-              id="channel-settings-topic"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              className="mb-4 w-full rounded border px-3 py-2 text-sm"
-              style={{ backgroundColor: "var(--color-bg-main)", borderColor: "var(--color-border)", color: "var(--color-text-primary)" }}
-            />
-          </>
-        )}
-
-        <div className="mb-4 flex gap-2">
-          <button type="button" onClick={() => onMove("up")} className="rounded border px-3 py-2 text-sm" style={{ borderColor: "var(--color-border)" }}>
-            Move up
-          </button>
-          <button type="button" onClick={() => onMove("down")} className="rounded border px-3 py-2 text-sm" style={{ borderColor: "var(--color-border)" }}>
-            Move down
-          </button>
-        </div>
-
-        {error && (
-          <p role="alert" className="mb-4 text-sm" style={{ color: "#e05252" }}>
-            {error}
-          </p>
-        )}
-
-        <div className="flex justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => setConfirmingDelete(true)}
-            className="rounded px-3 py-2 text-sm"
-            style={{ color: "#e05252" }}
+      <div className="flex h-full min-h-0">
+        {showPermissionsTab && (
+          <nav
+            className="flex w-36 flex-shrink-0 flex-col gap-0.5 border-r p-3"
+            style={{ borderColor: "var(--color-border)" }}
           >
-            Delete channel
-          </button>
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="rounded px-3 py-2 text-sm">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={pending}
-              className="rounded px-3 py-2 text-sm font-medium"
-              style={{ backgroundColor: "var(--color-accent)", color: "white" }}
-            >
-              {pending ? "Saving..." : "Save"}
-            </button>
-          </div>
-        </div>
-      </form>
+            {(
+              [
+                { id: "general", label: "General" },
+                { id: "permissions", label: "Permissions" },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                aria-current={tab === t.id ? "page" : undefined}
+                className="rounded px-2 py-1.5 text-left text-sm"
+                style={{ backgroundColor: tab === t.id ? "var(--color-bg-main)" : "transparent" }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+        )}
 
-      {confirmingDelete && (
-        <div className="mt-4 border-t pt-4" style={{ borderColor: "var(--color-border)" }}>
-          <p className="mb-3 text-sm">Delete #{channel.name}? This cannot be undone.</p>
-          <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => setConfirmingDelete(false)} className="rounded px-3 py-2 text-sm">
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={pending}
-              onClick={handleDelete}
-              className="rounded px-3 py-2 text-sm font-medium"
-              style={{ backgroundColor: "#e05252", color: "white" }}
-            >
-              {pending ? "Deleting..." : "Delete channel"}
-            </button>
-          </div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6">
+          {tab === "permissions" && showPermissionsTab ? (
+            <Suspense fallback={<p className="text-sm">Loading...</p>}>
+              <ChannelPermissionsTab channel={channel} />
+            </Suspense>
+          ) : (
+            <>
+              <h2 className="mb-4 text-lg font-semibold">Channel settings</h2>
+
+              <form onSubmit={handleSave}>
+                <label htmlFor="channel-settings-name" className="mb-1 block text-sm font-medium">
+                  Name
+                </label>
+                <input
+                  id="channel-settings-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="mb-4 w-full rounded border px-3 py-2 text-sm"
+                  style={{
+                    backgroundColor: "var(--color-bg-main)",
+                    borderColor: "var(--color-border)",
+                    color: "var(--color-text-primary)",
+                  }}
+                />
+
+                {channel.type === "text" && (
+                  <>
+                    <label
+                      htmlFor="channel-settings-topic"
+                      className="mb-1 block text-sm font-medium"
+                    >
+                      Topic
+                    </label>
+                    <input
+                      id="channel-settings-topic"
+                      value={topic}
+                      onChange={(e) => setTopic(e.target.value)}
+                      className="mb-4 w-full rounded border px-3 py-2 text-sm"
+                      style={{
+                        backgroundColor: "var(--color-bg-main)",
+                        borderColor: "var(--color-border)",
+                        color: "var(--color-text-primary)",
+                      }}
+                    />
+                  </>
+                )}
+
+                <div className="mb-4 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onMove("up")}
+                    className="rounded border px-3 py-2 text-sm"
+                    style={{ borderColor: "var(--color-border)" }}
+                  >
+                    Move up
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onMove("down")}
+                    className="rounded border px-3 py-2 text-sm"
+                    style={{ borderColor: "var(--color-border)" }}
+                  >
+                    Move down
+                  </button>
+                </div>
+
+                {error && (
+                  <p role="alert" className="mb-4 text-sm" style={{ color: "#e05252" }}>
+                    {error}
+                  </p>
+                )}
+
+                <div className="flex justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingDelete(true)}
+                    className="rounded px-3 py-2 text-sm"
+                    style={{ color: "#e05252" }}
+                  >
+                    Delete channel
+                  </button>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={onClose} className="rounded px-3 py-2 text-sm">
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={pending}
+                      className="rounded px-3 py-2 text-sm font-medium"
+                      style={{ backgroundColor: "var(--color-accent)", color: "white" }}
+                    >
+                      {pending ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                </div>
+              </form>
+
+              {confirmingDelete && (
+                <div className="mt-4 border-t pt-4" style={{ borderColor: "var(--color-border)" }}>
+                  <p className="mb-3 text-sm">Delete #{channel.name}? This cannot be undone.</p>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingDelete(false)}
+                      className="rounded px-3 py-2 text-sm"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={handleDelete}
+                      className="rounded px-3 py-2 text-sm font-medium"
+                      style={{ backgroundColor: "#e05252", color: "white" }}
+                    >
+                      {pending ? "Deleting..." : "Delete channel"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
-      )}
+      </div>
     </dialog>
   );
 }

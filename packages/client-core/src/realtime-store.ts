@@ -141,7 +141,13 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       const next = createInitialRealtimeState();
       next.selfUserId = payload.user.id;
       for (const guild of payload.guilds) {
-        next.guilds[guild.id] = { id: guild.id, name: guild.name, iconKey: guild.iconKey, ownerId: guild.ownerId, createdAt: guild.createdAt };
+        next.guilds[guild.id] = {
+          id: guild.id,
+          name: guild.name,
+          iconKey: guild.iconKey,
+          ownerId: guild.ownerId,
+          createdAt: guild.createdAt,
+        };
         next.rolesByGuild[guild.id] = guild.roles;
         next.selfMemberByGuild[guild.id] = guild.member;
         const ids: string[] = [];
@@ -176,11 +182,23 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       }
       return {
         ...state,
-        guilds: { ...state.guilds, [guild.id]: { id: guild.id, name: guild.name, iconKey: guild.iconKey, ownerId: guild.ownerId, createdAt: guild.createdAt } },
+        guilds: {
+          ...state.guilds,
+          [guild.id]: {
+            id: guild.id,
+            name: guild.name,
+            iconKey: guild.iconKey,
+            ownerId: guild.ownerId,
+            createdAt: guild.createdAt,
+          },
+        },
         rolesByGuild: { ...state.rolesByGuild, [guild.id]: guild.roles },
         selfMemberByGuild: { ...state.selfMemberByGuild, [guild.id]: guild.member },
         channels,
-        channelIdsByGuild: { ...state.channelIdsByGuild, [guild.id]: withSortedChannelIds(channels, ids) },
+        channelIdsByGuild: {
+          ...state.channelIdsByGuild,
+          [guild.id]: withSortedChannelIds(channels, ids),
+        },
         voiceStatesByChannel: withVoiceStates(state.voiceStatesByChannel, guild.voiceStates),
       };
     }
@@ -190,7 +208,10 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       if (!(patch.id in state.guilds)) {
         return state;
       }
-      return { ...state, guilds: { ...state.guilds, [patch.id]: { ...state.guilds[patch.id], ...patch } } };
+      return {
+        ...state,
+        guilds: { ...state.guilds, [patch.id]: { ...state.guilds[patch.id], ...patch } },
+      };
     }
 
     case "GUILD_DELETE": {
@@ -230,7 +251,10 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       return {
         ...state,
         channels,
-        channelIdsByGuild: { ...state.channelIdsByGuild, [channel.guildId]: withSortedChannelIds(channels, ids) },
+        channelIdsByGuild: {
+          ...state.channelIdsByGuild,
+          [channel.guildId]: withSortedChannelIds(channels, ids),
+        },
       };
     }
 
@@ -254,8 +278,14 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       if (!(member.guildId in state.guilds)) {
         return state;
       }
-      const guildMembers = { ...(state.membersByGuild[member.guildId] ?? {}), [member.userId]: member };
-      return { ...state, membersByGuild: { ...state.membersByGuild, [member.guildId]: guildMembers } };
+      const guildMembers = {
+        ...(state.membersByGuild[member.guildId] ?? {}),
+        [member.userId]: member,
+      };
+      return {
+        ...state,
+        membersByGuild: { ...state.membersByGuild, [member.guildId]: guildMembers },
+      };
     }
 
     case "GUILD_MEMBER_REMOVE": {
@@ -278,7 +308,8 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       }
       const existing = state.rolesByGuild[guildId] ?? [];
       const index = existing.findIndex((r) => r.id === role.id);
-      const nextRoles = index === -1 ? [...existing, role] : existing.map((r, i) => (i === index ? role : r));
+      const nextRoles =
+        index === -1 ? [...existing, role] : existing.map((r, i) => (i === index ? role : r));
       return { ...state, rolesByGuild: { ...state.rolesByGuild, [guildId]: nextRoles } };
     }
 
@@ -290,7 +321,10 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       }
       return {
         ...state,
-        rolesByGuild: { ...state.rolesByGuild, [guildId]: existing.filter((role) => role.id !== roleId) },
+        rolesByGuild: {
+          ...state.rolesByGuild,
+          [guildId]: existing.filter((role) => role.id !== roleId),
+        },
       };
     }
 
@@ -309,7 +343,10 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       if (!existing || !(userId in existing)) {
         return state;
       }
-      return { ...state, bansByGuild: { ...state.bansByGuild, [guildId]: without(existing, userId) } };
+      return {
+        ...state,
+        bansByGuild: { ...state.bansByGuild, [guildId]: without(existing, userId) },
+      };
     }
 
     case "PRESENCE_UPDATE": {

@@ -66,9 +66,16 @@ export function getGuild(api: ApiClient, guildId: string): Promise<GuildView> {
   return api.request<GuildView>("GET", `/guilds/${guildId}`, { schema: guildViewSchema });
 }
 
-export function updateGuild(api: ApiClient, guildId: string, input: UpdateGuildRequest): Promise<GuildView> {
+export function updateGuild(
+  api: ApiClient,
+  guildId: string,
+  input: UpdateGuildRequest,
+): Promise<GuildView> {
   updateGuildRequestSchema.parse(input);
-  return api.request<GuildView>("PATCH", `/guilds/${guildId}`, { body: input, schema: guildViewSchema });
+  return api.request<GuildView>("PATCH", `/guilds/${guildId}`, {
+    body: input,
+    schema: guildViewSchema,
+  });
 }
 
 export function deleteGuild(api: ApiClient, guildId: string): Promise<void> {
@@ -132,30 +139,54 @@ export function createChannel(
   input: CreateChannelRequest,
 ): Promise<ChannelJson> {
   createChannelRequestSchema.parse(input);
-  return api.request<ChannelJson>("POST", `/guilds/${guildId}/channels`, { body: input, schema: channelSchema });
+  return api.request<ChannelJson>("POST", `/guilds/${guildId}/channels`, {
+    body: input,
+    schema: channelSchema,
+  });
 }
 
 /** Send one bulk order request for every channel that moved in a drag-and-drop reorder. */
-export function reorderChannels(api: ApiClient, guildId: string, input: ChannelOrderRequest): Promise<void> {
+export function reorderChannels(
+  api: ApiClient,
+  guildId: string,
+  input: ChannelOrderRequest,
+): Promise<void> {
   channelOrderRequestSchema.parse(input);
   return api.request("PUT", `/guilds/${guildId}/channels/order`, { body: input });
 }
 
-export function updateChannel(api: ApiClient, channelId: string, input: UpdateChannelRequest): Promise<ChannelJson> {
+export function updateChannel(
+  api: ApiClient,
+  channelId: string,
+  input: UpdateChannelRequest,
+): Promise<ChannelJson> {
   updateChannelRequestSchema.parse(input);
-  return api.request<ChannelJson>("PATCH", `/channels/${channelId}`, { body: input, schema: channelSchema });
+  return api.request<ChannelJson>("PATCH", `/channels/${channelId}`, {
+    body: input,
+    schema: channelSchema,
+  });
 }
 
 export function deleteChannel(api: ApiClient, channelId: string): Promise<void> {
   return api.request("DELETE", `/channels/${channelId}`);
 }
 
-export function createInvite(api: ApiClient, channelId: string, input: CreateInviteRequest): Promise<InviteJson> {
+export function createInvite(
+  api: ApiClient,
+  channelId: string,
+  input: CreateInviteRequest,
+): Promise<InviteJson> {
   createInviteRequestSchema.parse(input);
-  return api.request<InviteJson>("POST", `/channels/${channelId}/invites`, { body: input, schema: inviteSchema });
+  return api.request<InviteJson>("POST", `/channels/${channelId}/invites`, {
+    body: input,
+    schema: inviteSchema,
+  });
 }
 
-export function listGuildInvites(api: ApiClient, guildId: string): Promise<{ invites: InviteJson[] }> {
+export function listGuildInvites(
+  api: ApiClient,
+  guildId: string,
+): Promise<{ invites: InviteJson[] }> {
   return api.request("GET", `/guilds/${guildId}/invites`, { schema: invitesListSchema });
 }
 
@@ -164,7 +195,9 @@ export function getInvitePreview(api: ApiClient, code: string): Promise<InvitePr
 }
 
 export function acceptInvite(api: ApiClient, code: string): Promise<AcceptInviteResult> {
-  return api.request<AcceptInviteResult>("POST", `/invites/${code}`, { schema: acceptInviteResultSchema });
+  return api.request<AcceptInviteResult>("POST", `/invites/${code}`, {
+    schema: acceptInviteResultSchema,
+  });
 }
 
 export function deleteInvite(api: ApiClient, code: string): Promise<void> {
@@ -177,9 +210,16 @@ export function listGuildRoles(api: ApiClient, guildId: string): Promise<{ roles
   return api.request("GET", `/guilds/${guildId}/roles`, { schema: rolesListSchema });
 }
 
-export function createRole(api: ApiClient, guildId: string, input: Partial<CreateRoleRequest>): Promise<RoleJson> {
+export function createRole(
+  api: ApiClient,
+  guildId: string,
+  input: Partial<CreateRoleRequest>,
+): Promise<RoleJson> {
   const parsed = createRoleRequestSchema.parse(input);
-  return api.request<RoleJson>("POST", `/guilds/${guildId}/roles`, { body: parsed, schema: roleSchema });
+  return api.request<RoleJson>("POST", `/guilds/${guildId}/roles`, {
+    body: parsed,
+    schema: roleSchema,
+  });
 }
 
 export function updateRole(
@@ -189,7 +229,10 @@ export function updateRole(
   input: UpdateRoleRequest,
 ): Promise<RoleJson> {
   updateRoleRequestSchema.parse(input);
-  return api.request<RoleJson>("PATCH", `/guilds/${guildId}/roles/${roleId}`, { body: input, schema: roleSchema });
+  return api.request<RoleJson>("PATCH", `/guilds/${guildId}/roles/${roleId}`, {
+    body: input,
+    schema: roleSchema,
+  });
 }
 
 export function deleteRole(api: ApiClient, guildId: string, roleId: string): Promise<void> {
@@ -197,18 +240,32 @@ export function deleteRole(api: ApiClient, guildId: string, roleId: string): Pro
 }
 
 /** Send one bulk order request for every role that moved in a drag-and-drop reorder. */
-export function reorderRoles(api: ApiClient, guildId: string, input: RoleOrderRequest): Promise<void> {
+export function reorderRoles(
+  api: ApiClient,
+  guildId: string,
+  input: RoleOrderRequest,
+): Promise<void> {
   roleOrderRequestSchema.parse(input);
   return api.request("PUT", `/guilds/${guildId}/roles/order`, { body: input });
 }
 
 // ---- member roles and nickname --------------------------------------------
 
-export function addMemberRole(api: ApiClient, guildId: string, userId: string, roleId: string): Promise<void> {
+export function addMemberRole(
+  api: ApiClient,
+  guildId: string,
+  userId: string,
+  roleId: string,
+): Promise<void> {
   return api.request("PUT", `/guilds/${guildId}/members/${userId}/roles/${roleId}`);
 }
 
-export function removeMemberRole(api: ApiClient, guildId: string, userId: string, roleId: string): Promise<void> {
+export function removeMemberRole(
+  api: ApiClient,
+  guildId: string,
+  userId: string,
+  roleId: string,
+): Promise<void> {
   return api.request("DELETE", `/guilds/${guildId}/members/${userId}/roles/${roleId}`);
 }
 
@@ -277,7 +334,11 @@ export function applyVoiceModeration(
   return api.request("PATCH", `/guilds/${guildId}/members/${userId}/voice`, { body: input });
 }
 
-export function transferGuildOwnership(api: ApiClient, guildId: string, input: TransferGuildRequest): Promise<void> {
+export function transferGuildOwnership(
+  api: ApiClient,
+  guildId: string,
+  input: TransferGuildRequest,
+): Promise<void> {
   transferGuildRequestSchema.parse(input);
   return api.request("POST", `/guilds/${guildId}/transfer`, { body: input });
 }
