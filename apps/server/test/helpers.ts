@@ -21,6 +21,13 @@ export function buildTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     smtp: { host: "localhost", port: 1025, from: "Test <no-reply@example.com>" },
     oauth: {},
     publicApiUrl: "http://localhost:5173",
+    authRateLimit: {
+      register: 10,
+      login: 10,
+      refresh: 30,
+      resendVerification: 5,
+      forgotPassword: 10,
+    },
     ...overrides,
   };
 }

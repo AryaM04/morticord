@@ -87,4 +87,26 @@ describe("loadConfig", () => {
     expect(config.turnTlsEnabled).toBe(true);
     expect(config.turnTlsPort).toBe(5350);
   });
+
+  it("scales auth rate limits from the default AUTH_RATE_LIMIT_PER_MINUTE", () => {
+    const config = loadConfig(validEnv);
+    expect(config.authRateLimit).toEqual({
+      register: 10,
+      login: 10,
+      refresh: 30,
+      resendVerification: 5,
+      forgotPassword: 10,
+    });
+  });
+
+  it("scales auth rate limits from a custom AUTH_RATE_LIMIT_PER_MINUTE", () => {
+    const config = loadConfig({ ...validEnv, AUTH_RATE_LIMIT_PER_MINUTE: "1000" });
+    expect(config.authRateLimit).toEqual({
+      register: 1000,
+      login: 1000,
+      refresh: 3000,
+      resendVerification: 500,
+      forgotPassword: 1000,
+    });
+  });
 });

@@ -46,7 +46,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
 
   app.post(
     "/register",
-    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    { config: { rateLimit: { max: deps.config.authRateLimit.register, timeWindow: "1 minute" } } },
     async (request, reply) => {
       const input = registerRequestSchema.parse(request.body);
       const result = await registerUser(authDeps, input, summarizeUserAgent(request.headers["user-agent"]));
@@ -56,7 +56,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
 
   app.post(
     "/login",
-    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    { config: { rateLimit: { max: deps.config.authRateLimit.login, timeWindow: "1 minute" } } },
     async (request, reply) => {
       const input = loginRequestSchema.parse(request.body);
       const result = await loginUser(authDeps, input, summarizeUserAgent(request.headers["user-agent"]));
@@ -66,7 +66,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
 
   app.post(
     "/refresh",
-    { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+    { config: { rateLimit: { max: deps.config.authRateLimit.refresh, timeWindow: "1 minute" } } },
     async (request, reply) => {
       const input = refreshRequestSchema.parse(request.body);
       const result = await refreshSession(authDeps, input.refreshToken);
@@ -87,7 +87,10 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
 
   app.post(
     "/resend-verification",
-    { preHandler: app.authenticate, config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
+    {
+      preHandler: app.authenticate,
+      config: { rateLimit: { max: deps.config.authRateLimit.resendVerification, timeWindow: "1 minute" } },
+    },
     async (request, reply) => {
       await resendVerification(authDeps, request.auth!.userId);
       return reply.status(202).send();
@@ -96,7 +99,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
 
   app.post(
     "/forgot-password",
-    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    { config: { rateLimit: { max: deps.config.authRateLimit.forgotPassword, timeWindow: "1 minute" } } },
     async (request, reply) => {
       const input = forgotPasswordRequestSchema.parse(request.body);
       await forgotPassword(authDeps, input.email);

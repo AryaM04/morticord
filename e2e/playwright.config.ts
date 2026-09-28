@@ -73,7 +73,13 @@ if (authInfraAvailable) {
       url: `http://localhost:${apiPort}/api/v1/health`,
       reuseExistingServer: !process.env.CI,
       cwd: repoRoot,
-      env: { ...process.env, POSTGRES_DB: "discord_clone_e2e" } as Record<string, string>,
+      // A high rate limit stops repeated local e2e runs from hitting 429s
+      // on the auth routes. Production config is untouched.
+      env: {
+        ...process.env,
+        POSTGRES_DB: "discord_clone_e2e",
+        AUTH_RATE_LIMIT_PER_MINUTE: "1000",
+      } as Record<string, string>,
       timeout: 30_000,
     },
     {
