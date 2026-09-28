@@ -6,6 +6,7 @@ import {
   createGatewayClient,
   createRealtimeStore,
   type GatewayClient,
+  type GatewayDispatch,
   type GatewayState,
 } from "@discord-clone/client-core";
 import { GatewayOpcode } from "@discord-clone/shared";
@@ -21,6 +22,20 @@ export interface ConnectionState {
 export const connectionStore = createStore<ConnectionState>(() => ({ state: "closed" }));
 
 let client: GatewayClient | null = null;
+
+// A second, raw listener list for every dispatch, in addition to the
+// realtime store and the message store above. The voice module (loaded
+// only once a call starts) uses this to see VOICE_SIGNAL, VOICE_STATE_UPDATE
+// and VOICE_ERROR without this file needing to know voice exists.
+const dispatchListeners = new Set<(event: GatewayDispatch) => void>();
+
+/** Watch every gateway dispatch. Returns a function that stops watching. */
+export function subscribeDispatch(listener: (event: GatewayDispatch) => void): () => void {
+  dispatchListeners.add(listener);
+  return () => {
+    dispatchListeners.delete(listener);
+  };
+}
 
 function gatewayUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -42,6 +57,9 @@ function startGateway(deviceId: string): void {
         messagesStore.getState().setSelfUserId(payload.user.id);
       }
       messagesStore.getState().applyDispatch(event.t, event.d);
+      for (const listener of dispatchListeners) {
+        listener(event);
+      }
     },
     onState: (state) => connectionStore.setState({ state }),
     onFatal: () => {
