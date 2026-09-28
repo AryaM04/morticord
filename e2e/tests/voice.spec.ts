@@ -28,6 +28,8 @@ interface VoiceDebugStats {
   selectedCandidateType: string | null;
   inboundBytesReceived: number;
   outboundBytesSent: number;
+  inboundVideoBytesReceived: number;
+  outboundVideoBytesSent: number;
 }
 
 const WEB_ORIGIN = "http://localhost:5173";

@@ -4,17 +4,20 @@
 // this pane (see ChannelColumn and the voice status panel above the
 // user panel).
 import { useEffect, useMemo, useState } from "react";
+import { useStore } from "zustand";
 import { needsStaleRefetch, type AggregatedMessage } from "@discord-clone/client-core";
 import { Permission, hasPermission } from "@discord-clone/shared";
 import { ConnectionBanner } from "./ConnectionBanner.js";
 import { Composer, type EditTarget, type ReplyTarget } from "./Composer.js";
 import { MessageList } from "./MessageList.js";
 import { TypingIndicator } from "./TypingIndicator.js";
+import { VoiceCallView } from "./VoiceCallView.js";
 import { useRealtime } from "../lib/useRealtime.js";
 import { useMessages } from "../lib/useMessages.js";
 import { messagesStore } from "../lib/messages.js";
 import { selfChannelPermissions } from "@discord-clone/client-core";
 import { displayNameOf } from "../lib/members.js";
+import { voiceStore } from "../lib/voice.js";
 
 export function ChatPane({ channelId }: { channelId: string | null }) {
   const channel = useRealtime((s) => (channelId ? s.channels[channelId] : undefined));
@@ -28,6 +31,7 @@ export function ChatPane({ channelId }: { channelId: string | null }) {
   const canManageMessages = hasPermission(permissions, Permission.MANAGE_MESSAGES);
 
   const channelState = channelId ? messagesState.channels[channelId] : undefined;
+  const connectedVoiceChannelId = useStore(voiceStore, (s) => (s.status === "connected" ? s.channelId : null));
 
   useEffect(() => {
     setReplyTarget(null);
@@ -115,11 +119,15 @@ export function ChatPane({ channelId }: { channelId: string | null }) {
       </div>
 
       {channel.type === "voice" ? (
-        <div className="flex flex-1 flex-col items-center justify-center p-3 text-center">
-          <p style={{ color: "var(--color-text-muted)" }}>
-            Click this channel in the list on the left to join the voice call.
-          </p>
-        </div>
+        connectedVoiceChannelId === channelId ? (
+          <VoiceCallView guildId={channel.guildId} channelId={channelId} />
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center p-3 text-center">
+            <p style={{ color: "var(--color-text-muted)" }}>
+              Click this channel in the list on the left to join the voice call.
+            </p>
+          </div>
+        )
       ) : (
         <>
           <MessageList

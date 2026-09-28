@@ -110,6 +110,12 @@ export default defineConfig({
           args: [
             "--use-fake-device-for-media-stream",
             "--use-fake-ui-for-media-stream",
+            // Let getDisplayMedia() resolve without a manual screen picker,
+            // for the local-only screen share part of voice-video.spec.ts.
+            // Not reliable under a headless CI runner; that part skips
+            // itself there. See e2e/tests/voice-video.spec.ts.
+            "--auto-select-desktop-capture-source=Entire screen",
+            "--auto-accept-this-tab-capture",
           ],
         },
       },

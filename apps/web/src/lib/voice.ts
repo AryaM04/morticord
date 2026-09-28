@@ -31,6 +31,14 @@ export interface VoiceUiState {
   quality: VoiceQuality;
   /** The last error, in plain words fit for direct display. Cleared on the next successful join. */
   errorMessage: string | null;
+  /** Whether the local camera is on right now. */
+  cameraOn: boolean;
+  /** Whether local screen sharing is on right now. */
+  screenOn: boolean;
+  /** The local camera's stream, for the mirrored preview tile, or null when the camera is off. */
+  localCameraStream: MediaStream | null;
+  /** The local screen-share stream, for the preview tile, or null when not sharing. */
+  localScreenStream: MediaStream | null;
 }
 
 function initialVoiceUiState(): VoiceUiState {
@@ -44,8 +52,18 @@ function initialVoiceUiState(): VoiceUiState {
     localSpeaking: false,
     quality: "connecting",
     errorMessage: null,
+    cameraOn: false,
+    screenOn: false,
+    localCameraStream: null,
+    localScreenStream: null,
   };
 }
+
+/** True when this browser supports the camera at all. Used to disable the camera button with a clear reason. */
+export const cameraSupported = typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
+/** True when this browser supports screen capture. Used to disable the screen button with a clear reason. */
+export const screenShareSupported =
+  typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getDisplayMedia);
 
 export const voiceStore = createStore<VoiceUiState>(() => initialVoiceUiState());
 
@@ -53,6 +71,10 @@ function describeError(error: VoiceEngineErrorEvent): string {
   switch (error.kind) {
     case "mic-permission-denied":
       return "The browser did not allow use of the microphone. Voice chat needs microphone access.";
+    case "camera-permission-denied":
+      return "The browser did not allow use of the camera.";
+    case "screen-permission-denied":
+      return "The browser did not allow screen capture.";
     case "output-device-unsupported":
       return "This browser cannot change the audio output device.";
     case "ice-failed":
@@ -131,6 +153,7 @@ async function loadEngine(): Promise<VoiceEngine> {
         createPeerConnection: (config) =>
           new RTCPeerConnection(shouldForceRelay() ? { ...config, iceTransportPolicy: "relay" } : config),
         getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+        getDisplayMedia: (constraints) => navigator.mediaDevices.getDisplayMedia(constraints),
         createAudioContext: () => new AudioContext(),
       });
 
@@ -143,6 +166,14 @@ async function loadEngine(): Promise<VoiceEngine> {
       created.on("error", (error) => {
         voiceStore.setState({ errorMessage: describeError(error) });
       });
+      created.on("localMedia", ({ cameraOn, screenOn }) => {
+        voiceStore.setState({
+          cameraOn,
+          screenOn,
+          localCameraStream: created.localCameraStream,
+          localScreenStream: created.localScreenStream,
+        });
+      });
 
       subscribeDispatch((event) => {
         if (event.t === "VOICE_STATE_UPDATE") {
@@ -154,7 +185,16 @@ async function loadEngine(): Promise<VoiceEngine> {
           // rather than poll the engine's own state, since its teardown
           // runs asynchronously.
           if (update.channelId === null && update.userId === selfUserId && update.deviceId === selfDeviceId) {
-            voiceStore.setState({ status: "idle", guildId: null, channelId: null, peers: [] });
+            voiceStore.setState({
+              status: "idle",
+              guildId: null,
+              channelId: null,
+              peers: [],
+              cameraOn: false,
+              screenOn: false,
+              localCameraStream: null,
+              localScreenStream: null,
+            });
           }
         } else if (event.t === "VOICE_ERROR") {
           created.handleVoiceError(event.d as Parameters<VoiceEngine["handleVoiceError"]>[0]);
@@ -217,6 +257,22 @@ export function toggleDeafen(): void {
   } else {
     voiceStore.setState({ deafened: false, muted: mutedBeforeDeafen });
   }
+}
+
+/** Turn the local camera on or off. Does nothing when not in a call. */
+export function toggleCamera(): void {
+  if (!engine) {
+    return;
+  }
+  void engine.setCamera(!voiceStore.getState().cameraOn);
+}
+
+/** Turn local screen sharing on or off. Does nothing when not in a call. */
+export function toggleScreenShare(): void {
+  if (!engine) {
+    return;
+  }
+  void engine.setScreenShare(!voiceStore.getState().screenOn);
 }
 
 /** Debug stats for the e2e test and dev tooling. See `main.tsx` for where `window.__voiceDebug` is installed. */

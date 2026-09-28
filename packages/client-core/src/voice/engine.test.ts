@@ -32,19 +32,42 @@ const OPUS_SDP = [
 class FakeTrack {
   stopped = false;
   enabled = true;
-  constructor(public readonly kind: "audio" = "audio") {}
+  onended: (() => void) | null = null;
+  onmute: (() => void) | null = null;
+  constructor(public readonly kind: "audio" | "video" = "audio") {}
   stop(): void {
     this.stopped = true;
   }
 }
 
+let streamCounter = 0;
+
 class FakeMediaStream {
-  constructor(private readonly tracks: FakeTrack[] = [new FakeTrack()]) {}
+  readonly id: string;
+  constructor(
+    private readonly tracks: FakeTrack[] = [new FakeTrack()],
+    id?: string,
+  ) {
+    streamCounter += 1;
+    this.id = id ?? `stream-${streamCounter}`;
+  }
   getTracks(): FakeTrack[] {
     return this.tracks;
   }
   getAudioTracks(): FakeTrack[] {
     return this.tracks.filter((t) => t.kind === "audio");
+  }
+  getVideoTracks(): FakeTrack[] {
+    return this.tracks.filter((t) => t.kind === "video");
+  }
+}
+
+class FakeTransceiver {
+  sender: FakeSender;
+  direction: string;
+  constructor(track: FakeTrack | null, direction: string) {
+    this.sender = new FakeSender(track);
+    this.direction = direction;
   }
 }
 
@@ -72,8 +95,9 @@ class FakePeerConnection {
   restartIceCalls = 0;
   closed = false;
   addedCandidates: RTCIceCandidateInit[] = [];
+  transceivers: FakeTransceiver[] = [];
 
-  ontrack: ((event: unknown) => void) | null = null;
+  ontrack: ((event: { track: FakeTrack; streams: FakeMediaStream[] }) => void) | null = null;
   onicecandidate: ((event: { candidate: RTCIceCandidate | null }) => void) | null = null;
   onconnectionstatechange: (() => void) | null = null;
   onnegotiationneeded: (() => void) | null = null;
@@ -85,6 +109,11 @@ class FakePeerConnection {
   }
   getSenders(): FakeSender[] {
     return this.senders;
+  }
+  addTransceiver(track: FakeTrack, init?: { direction?: string; streams?: FakeMediaStream[] }): FakeTransceiver {
+    const transceiver = new FakeTransceiver(track, init?.direction ?? "sendrecv");
+    this.transceivers.push(transceiver);
+    return transceiver;
   }
   async createOffer(): Promise<RTCSessionDescriptionInit> {
     this.offerCount += 1;
@@ -209,8 +238,14 @@ function makeDeps(overrides: Partial<VoiceEngineDeps> = {}): TestSetup {
       pcs.push(pc);
       return pc as unknown as RTCPeerConnection;
     },
-    getUserMedia: async () => {
-      const stream = new FakeMediaStream();
+    getUserMedia: async (constraints?: MediaStreamConstraints) => {
+      const wantsVideo = Boolean(constraints && (constraints as { video?: unknown }).video);
+      const stream = new FakeMediaStream([new FakeTrack(wantsVideo ? "video" : "audio")]);
+      streams.push(stream);
+      return stream as unknown as MediaStream;
+    },
+    getDisplayMedia: async () => {
+      const stream = new FakeMediaStream([new FakeTrack("video"), new FakeTrack("audio")]);
       streams.push(stream);
       return stream as unknown as MediaStream;
     },
@@ -484,5 +519,250 @@ describe("onPeerVoiceState", () => {
     await Promise.resolve();
 
     expect(deps.sendVoiceLeave).not.toHaveBeenCalled(); // local cleanup only, no extra VOICE_LEAVE
+  });
+});
+
+// ---- camera --------------------------------------------------------------------
+
+describe("setCamera", () => {
+  it("adds one transceiver on the first toggle and reuses it on every later toggle", async () => {
+    const { deps, pcs } = makeDeps();
+    const engine = createVoiceEngine(deps);
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+
+    // A later peer, so a peer connection exists to hold the transceiver.
+    engine.onPeerVoiceState({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      userId: "b",
+      deviceId: "d1",
+      selfMute: false,
+      selfDeaf: false,
+      selfVideo: false,
+      selfStream: false,
+      joinedAt: new Date().toISOString(),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    const pc = pcs[0]!;
+
+    await engine.setCamera(true);
+    await engine.setCamera(false);
+    await engine.setCamera(true);
+
+    const cameraTransceivers = pc.transceivers.filter((t) => t.sender.track?.kind === "video" || t.direction === "sendonly");
+    expect(pc.transceivers).toHaveLength(1); // toggling 3 times never adds a second transceiver
+    expect(pc.transceivers[0]!.sender.track).not.toBeNull(); // last toggle left the track attached
+    expect(cameraTransceivers).toHaveLength(1);
+    expect(deps.sendVoiceState).toHaveBeenCalledWith({ selfVideo: true });
+  });
+
+  it("sends selfVideo=false and stops the track when turned off", async () => {
+    const { deps, streams } = makeDeps();
+    const engine = createVoiceEngine(deps);
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+
+    await engine.setCamera(true);
+    const cameraStream = streams.find((s) => s.getVideoTracks().length > 0)!;
+    await engine.setCamera(false);
+
+    expect(deps.sendVoiceState).toHaveBeenCalledWith({ selfVideo: false });
+    expect(cameraStream.getVideoTracks()[0]!.stopped).toBe(true);
+  });
+});
+
+// ---- screen share ----------------------------------------------------------------
+
+describe("setScreenShare", () => {
+  it("waits for the server's confirmation before it captures the screen", async () => {
+    const { deps } = makeDeps();
+    const getDisplayMedia = vi.fn(deps.getDisplayMedia);
+    const engine = createVoiceEngine({ ...deps, getDisplayMedia });
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+
+    const sharePromise = engine.setScreenShare(true);
+    await vi.waitFor(() => expect(deps.sendVoiceState).toHaveBeenCalledWith({ selfStream: true }));
+    expect(getDisplayMedia).not.toHaveBeenCalled(); // no capture before the server confirms
+
+    engine.onPeerVoiceState({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      userId: "a",
+      deviceId: "d1",
+      selfMute: false,
+      selfDeaf: false,
+      selfVideo: false,
+      selfStream: true,
+      joinedAt: new Date().toISOString(),
+    });
+    await sharePromise;
+
+    expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+    expect(engine.screenOn).toBe(true);
+  });
+
+  it("does not capture the screen on STREAM_IN_USE", async () => {
+    const { deps } = makeDeps();
+    const getDisplayMedia = vi.fn(deps.getDisplayMedia);
+    const engine = createVoiceEngine({ ...deps, getDisplayMedia });
+    const errors: string[] = [];
+    engine.on("error", (e) => errors.push(e.kind));
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+
+    const sharePromise = engine.setScreenShare(true);
+    await vi.waitFor(() => expect(deps.sendVoiceState).toHaveBeenCalledWith({ selfStream: true }));
+    engine.handleVoiceError({ code: "STREAM_IN_USE", message: "Someone else is already sharing." });
+    await sharePromise;
+
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+    expect(engine.screenOn).toBe(false);
+    expect(errors).toContain("voice-error");
+  });
+
+  it("turns selfStream off when the browser's own Stop sharing control ends the track", async () => {
+    const { deps, streams } = makeDeps();
+    const engine = createVoiceEngine(deps);
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+
+    const sharePromise = engine.setScreenShare(true);
+    await vi.waitFor(() => expect(deps.sendVoiceState).toHaveBeenCalledWith({ selfStream: true }));
+    engine.onPeerVoiceState({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      userId: "a",
+      deviceId: "d1",
+      selfMute: false,
+      selfDeaf: false,
+      selfVideo: false,
+      selfStream: true,
+      joinedAt: new Date().toISOString(),
+    });
+    await sharePromise;
+    expect(engine.screenOn).toBe(true);
+
+    const screenStream = streams.find((s) => s.getVideoTracks().length > 0 && s.getAudioTracks().length > 0)!;
+    const videoTrack = screenStream.getVideoTracks()[0]! as unknown as { onended: (() => void) | null };
+    videoTrack.onended!();
+    await vi.waitFor(() => expect(deps.sendVoiceState).toHaveBeenCalledWith({ selfStream: false }));
+    expect(engine.screenOn).toBe(false);
+  });
+
+  it("rolls back selfStream when the browser denies screen capture", async () => {
+    const { deps } = makeDeps({
+      getDisplayMedia: async () => {
+        throw new Error("denied");
+      },
+    });
+    const engine = createVoiceEngine(deps);
+    const errors: string[] = [];
+    engine.on("error", (e) => errors.push(e.kind));
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+
+    const sharePromise = engine.setScreenShare(true);
+    await vi.waitFor(() => expect(deps.sendVoiceState).toHaveBeenCalledWith({ selfStream: true }));
+    engine.onPeerVoiceState({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      userId: "a",
+      deviceId: "d1",
+      selfMute: false,
+      selfDeaf: false,
+      selfVideo: false,
+      selfStream: true,
+      joinedAt: new Date().toISOString(),
+    });
+    await sharePromise;
+
+    expect(deps.sendVoiceState).toHaveBeenCalledWith({ selfStream: false });
+    expect(engine.screenOn).toBe(false);
+    expect(errors).toContain("screen-permission-denied");
+  });
+});
+
+// ---- remote camera/screen identification ------------------------------------------
+
+describe("remote media identification", () => {
+  it("matches ontrack to the media signal when the signal arrives first", async () => {
+    const peerB: PeerKey = { userId: "b", deviceId: "d1" };
+    const { deps, pcs, transport } = makeDeps({ getInitialPeers: () => [peerB] });
+    const engine = createVoiceEngine(deps);
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+    const pc = pcs[0]!;
+
+    transport.emit(peerB, { kind: "media", streams: { camera: "remote-cam-1" } });
+    expect(engine.peers[0]!.cameraStream).toBeNull(); // no track yet
+
+    const remoteStream = new FakeMediaStream([new FakeTrack("video")], "remote-cam-1");
+    pc.ontrack!({ track: remoteStream.getVideoTracks()[0]!, streams: [remoteStream] });
+
+    expect(engine.peers[0]!.cameraStream).not.toBeNull();
+  });
+
+  it("matches ontrack to the media signal when the track arrives first", async () => {
+    const peerB: PeerKey = { userId: "b", deviceId: "d1" };
+    const { deps, pcs, transport } = makeDeps({ getInitialPeers: () => [peerB] });
+    const engine = createVoiceEngine(deps);
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+    const pc = pcs[0]!;
+
+    const remoteStream = new FakeMediaStream([new FakeTrack("video")], "remote-screen-1");
+    pc.ontrack!({ track: remoteStream.getVideoTracks()[0]!, streams: [remoteStream] });
+    expect(engine.peers[0]!.screenStream).toBeNull(); // no signal yet, held pending
+
+    transport.emit(peerB, { kind: "media", streams: { screen: "remote-screen-1" } });
+
+    expect(engine.peers[0]!.screenStream).not.toBeNull();
+  });
+
+  it("clears the remote camera stream once the media signal reports it off", async () => {
+    const peerB: PeerKey = { userId: "b", deviceId: "d1" };
+    const { deps, pcs, transport } = makeDeps({ getInitialPeers: () => [peerB] });
+    const engine = createVoiceEngine(deps);
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+    const pc = pcs[0]!;
+
+    transport.emit(peerB, { kind: "media", streams: { camera: "remote-cam-2" } });
+    const remoteStream = new FakeMediaStream([new FakeTrack("video")], "remote-cam-2");
+    pc.ontrack!({ track: remoteStream.getVideoTracks()[0]!, streams: [remoteStream] });
+    expect(engine.peers[0]!.cameraStream).not.toBeNull();
+
+    transport.emit(peerB, { kind: "media", streams: {} });
+    expect(engine.peers[0]!.cameraStream).toBeNull();
+  });
+});
+
+// ---- leave() stops video tracks too ------------------------------------------------
+
+describe("leave() with camera and screen on", () => {
+  it("stops the camera and screen tracks", async () => {
+    const { deps, streams } = makeDeps();
+    const engine = createVoiceEngine(deps);
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+
+    await engine.setCamera(true);
+    const sharePromise = engine.setScreenShare(true);
+    await vi.waitFor(() => expect(deps.sendVoiceState).toHaveBeenCalledWith({ selfStream: true }));
+    engine.onPeerVoiceState({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      userId: "a",
+      deviceId: "d1",
+      selfMute: false,
+      selfDeaf: false,
+      selfVideo: true,
+      selfStream: true,
+      joinedAt: new Date().toISOString(),
+    });
+    await sharePromise;
+
+    await engine.leave();
+
+    for (const stream of streams) {
+      for (const track of stream.getTracks()) {
+        expect(track.stopped).toBe(true);
+      }
+    }
+    expect(engine.cameraOn).toBe(false);
+    expect(engine.screenOn).toBe(false);
   });
 });

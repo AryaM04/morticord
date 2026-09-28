@@ -4,7 +4,16 @@
 // controls. See docs/concepts/voice.md for the call this panel controls.
 import { useStore } from "zustand";
 import { useRealtime } from "../lib/useRealtime.js";
-import { leaveVoice, toggleDeafen, toggleMute, voiceStore } from "../lib/voice.js";
+import {
+  cameraSupported,
+  leaveVoice,
+  screenShareSupported,
+  toggleCamera,
+  toggleDeafen,
+  toggleMute,
+  toggleScreenShare,
+  voiceStore,
+} from "../lib/voice.js";
 
 const QUALITY_LABEL: Record<string, string> = {
   good: "Good connection",
@@ -18,6 +27,8 @@ export function VoiceStatusPanel() {
   const channelId = useStore(voiceStore, (s) => s.channelId);
   const muted = useStore(voiceStore, (s) => s.muted);
   const deafened = useStore(voiceStore, (s) => s.deafened);
+  const cameraOn = useStore(voiceStore, (s) => s.cameraOn);
+  const screenOn = useStore(voiceStore, (s) => s.screenOn);
   const quality = useStore(voiceStore, (s) => s.quality);
   const errorMessage = useStore(voiceStore, (s) => s.errorMessage);
   const channelName = useRealtime((s) => (channelId ? s.channels[channelId]?.name : undefined));
@@ -46,6 +57,38 @@ export function VoiceStatusPanel() {
           {errorMessage}
         </span>
       )}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={toggleCamera}
+          aria-pressed={cameraOn}
+          disabled={!cameraSupported}
+          title={!cameraSupported ? "This browser does not support the camera." : undefined}
+          data-voice-camera={cameraOn}
+          className="flex-1 rounded px-2 py-1 text-xs"
+          style={{
+            backgroundColor: cameraOn ? "var(--color-accent)" : "var(--color-bg-main)",
+            color: cameraOn ? "white" : "var(--color-text-primary)",
+          }}
+        >
+          {cameraOn ? "Stop camera" : "Camera"}
+        </button>
+        <button
+          type="button"
+          onClick={toggleScreenShare}
+          aria-pressed={screenOn}
+          disabled={!screenShareSupported}
+          title={!screenShareSupported ? "This browser does not support screen sharing." : undefined}
+          data-voice-screen={screenOn}
+          className="flex-1 rounded px-2 py-1 text-xs"
+          style={{
+            backgroundColor: screenOn ? "var(--color-accent)" : "var(--color-bg-main)",
+            color: screenOn ? "white" : "var(--color-text-primary)",
+          }}
+        >
+          {screenOn ? "Stop share" : "Share screen"}
+        </button>
+      </div>
       <div className="flex gap-2">
         <button
           type="button"
