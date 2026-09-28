@@ -2,6 +2,7 @@
 // is connecting or connected. It names the channel, gives a plain-word
 // connection quality reading, and holds the mute, deafen and disconnect
 // controls. See docs/concepts/voice.md for the call this panel controls.
+import { useState } from "react";
 import { useStore } from "zustand";
 import { useRealtime } from "../lib/useRealtime.js";
 import {
@@ -14,6 +15,9 @@ import {
   toggleScreenShare,
   voiceStore,
 } from "../lib/voice.js";
+import { describeKeyCode } from "../lib/ptt.js";
+import { voiceDeviceSettingsStore } from "../lib/voice-settings.js";
+import { VoiceSettingsDialogLoader } from "./VoiceSettingsDialogLoader.js";
 
 const QUALITY_LABEL: Record<string, string> = {
   good: "Good connection",
@@ -31,7 +35,11 @@ export function VoiceStatusPanel() {
   const screenOn = useStore(voiceStore, (s) => s.screenOn);
   const quality = useStore(voiceStore, (s) => s.quality);
   const errorMessage = useStore(voiceStore, (s) => s.errorMessage);
+  const pttActive = useStore(voiceStore, (s) => s.pttActive);
+  const inputMode = useStore(voiceDeviceSettingsStore, (s) => s.inputMode);
+  const pttKeyCode = useStore(voiceDeviceSettingsStore, (s) => s.pttKeyCode);
   const channelName = useRealtime((s) => (channelId ? s.channels[channelId]?.name : undefined));
+  const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
 
   if (status === "idle") {
     return errorMessage ? (
@@ -43,15 +51,35 @@ export function VoiceStatusPanel() {
 
   return (
     <div className="flex flex-col gap-1 border-t px-3 py-2" style={{ borderColor: "var(--color-border)" }}>
-      <div className="flex flex-col">
-        <span className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }} data-voice-status="connected">
-          {status === "connecting" ? "Voice connecting" : "Voice connected"}
-          {channelName ? `: ${channelName}` : ""}
-        </span>
-        <span className="text-xs" style={{ color: "var(--color-text-muted)" }} data-voice-quality={quality}>
-          {status === "connecting" ? "Connecting" : QUALITY_LABEL[quality]}
-        </span>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex flex-col">
+          <span className="text-sm font-semibold" style={{ color: "var(--color-text-primary)" }} data-voice-status="connected">
+            {status === "connecting" ? "Voice connecting" : "Voice connected"}
+            {channelName ? `: ${channelName}` : ""}
+          </span>
+          <span className="text-xs" style={{ color: "var(--color-text-muted)" }} data-voice-quality={quality}>
+            {status === "connecting" ? "Connecting" : QUALITY_LABEL[quality]}
+          </span>
+          {inputMode === "push-to-talk" && (
+            <span className="text-xs" style={{ color: "var(--color-text-muted)" }} data-voice-ptt-active={pttActive}>
+              Push to talk{pttKeyCode ? ` (${describeKeyCode(pttKeyCode)})` : ""}: {pttActive ? "open" : "closed"}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          aria-label="Voice call settings"
+          onClick={() => setVoiceSettingsOpen(true)}
+          className="rounded px-1 text-sm"
+          style={{ color: "var(--color-text-muted)" }}
+          title="Voice and video settings"
+        >
+          &#9881;
+        </button>
       </div>
+      {voiceSettingsOpen && (
+        <VoiceSettingsDialogLoader open={voiceSettingsOpen} onClose={() => setVoiceSettingsOpen(false)} />
+      )}
       {errorMessage && (
         <span className="text-xs" style={{ color: "#e05252" }} role="alert">
           {errorMessage}

@@ -5,6 +5,7 @@ import type { PresenceStatus } from "@discord-clone/shared";
 import { useStore } from "zustand";
 import { Avatar } from "./Avatar.js";
 import { SettingsDialog } from "./SettingsDialog.js";
+import { VoiceSettingsDialogLoader } from "./VoiceSettingsDialogLoader.js";
 import { useSession } from "../lib/useSession.js";
 import { chooseStatus, presenceUiStore } from "../lib/presence.js";
 
@@ -88,6 +89,7 @@ function StatusMenu() {
 export function UserPanel() {
   const user = useSession((s) => s.user);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
 
   if (!user) return null;
 
@@ -110,6 +112,16 @@ export function UserPanel() {
       </div>
       <button
         type="button"
+        aria-label="Open voice and video settings"
+        onClick={() => setVoiceSettingsOpen(true)}
+        className="rounded px-2 py-1 text-sm"
+        style={{ color: "var(--color-text-muted)" }}
+        title="Voice and video"
+      >
+        &#127908;
+      </button>
+      <button
+        type="button"
         aria-label="Open account settings"
         onClick={() => setSettingsOpen(true)}
         className="rounded px-2 py-1 text-sm"
@@ -118,6 +130,7 @@ export function UserPanel() {
         Settings
       </button>
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {voiceSettingsOpen && <VoiceSettingsDialogLoader open={voiceSettingsOpen} onClose={() => setVoiceSettingsOpen(false)} />}
     </div>
   );
 }

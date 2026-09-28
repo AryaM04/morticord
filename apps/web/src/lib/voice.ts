@@ -14,6 +14,8 @@ import type {
 } from "@discord-clone/client-core/voice";
 import { session } from "./session.js";
 import { gatewaySend, realtimeStore, subscribeDispatch } from "./realtime.js";
+import { effectiveVolumeFor, updateVoiceDeviceSettings, voiceDeviceSettingsStore } from "./voice-settings.js";
+import { startPushToTalkRuntime, stopPushToTalkRuntime } from "./voice-ptt-runtime.js";
 
 export type VoiceConnectionState = "idle" | "connecting" | "connected";
 
@@ -39,6 +41,8 @@ export interface VoiceUiState {
   localCameraStream: MediaStream | null;
   /** The local screen-share stream, for the preview tile, or null when not sharing. */
   localScreenStream: MediaStream | null;
+  /** Whether the push-to-talk key is held right now (only meaningful when the input mode is push-to-talk). */
+  pttActive: boolean;
 }
 
 function initialVoiceUiState(): VoiceUiState {
@@ -56,6 +60,7 @@ function initialVoiceUiState(): VoiceUiState {
     screenOn: false,
     localCameraStream: null,
     localScreenStream: null,
+    pttActive: false,
   };
 }
 
@@ -105,6 +110,47 @@ function worstQuality(peers: VoicePeerState[]): VoiceQuality {
 
 let engine: VoiceEngine | null = null;
 let engineLoad: Promise<VoiceEngine> | null = null;
+
+/** The user's explicit mute choice, kept apart from `voiceStore.muted` so push-to-talk can gate the mic without losing it. */
+let manualMuted = false;
+
+/** Recomputes whether the mic should be open and tells the engine, given the manual mute choice, deafen, and (in push-to-talk mode) whether the key is held. */
+function applyMicGate(): void {
+  if (!engine) {
+    return;
+  }
+  const state = voiceStore.getState();
+  if (state.deafened) {
+    return;
+  }
+  const mode = voiceDeviceSettingsStore.getState().inputMode;
+  const desiredMuted = mode === "push-to-talk" ? manualMuted || !state.pttActive : manualMuted;
+  if (desiredMuted !== state.muted) {
+    engine.setMute(desiredMuted);
+  }
+  voiceStore.setState({ muted: desiredMuted });
+}
+
+function setUpPushToTalkIfNeeded(): void {
+  if (voiceDeviceSettingsStore.getState().inputMode === "push-to-talk") {
+    startPushToTalkRuntime((active) => {
+      voiceStore.setState({ pttActive: active });
+      applyMicGate();
+    });
+  } else {
+    stopPushToTalkRuntime();
+  }
+}
+
+/** Called from the voice settings dialog when the input mode changes, live during a call. */
+export function applyVoiceInputMode(): void {
+  if (voiceStore.getState().status !== "connected") {
+    return;
+  }
+  setUpPushToTalkIfNeeded();
+  voiceStore.setState({ pttActive: false });
+  applyMicGate();
+}
 
 /**
  * True when the page's first URL of this tab carried `?forceRelay`, a
@@ -157,7 +203,14 @@ async function loadEngine(): Promise<VoiceEngine> {
         createAudioContext: () => new AudioContext(),
       });
 
+      const volumeAppliedTo = new Set<string>();
       created.on("peers", (peers) => {
+        for (const peer of peers) {
+          if (!volumeAppliedTo.has(peer.userId)) {
+            volumeAppliedTo.add(peer.userId);
+            created.setUserVolume(peer.userId, effectiveVolumeFor(peer.userId));
+          }
+        }
         voiceStore.setState({ peers, quality: worstQuality(peers) });
       });
       created.on("localSpeaking", (localSpeaking) => {
@@ -212,9 +265,19 @@ async function loadEngine(): Promise<VoiceEngine> {
 export async function joinVoiceChannel(guildId: string, channelId: string): Promise<void> {
   voiceStore.setState({ status: "connecting", guildId, channelId, errorMessage: null });
   const voiceEngine = await loadEngine();
+  const saved = voiceDeviceSettingsStore.getState();
+  if (saved.inputDeviceId) {
+    voiceEngine.setInputDevice(saved.inputDeviceId);
+  }
+  if (saved.outputDeviceId) {
+    void voiceEngine.setOutputDevice(saved.outputDeviceId);
+  }
   await voiceEngine.join(guildId, channelId);
   if (voiceEngine.channelId === channelId) {
-    voiceStore.setState({ status: "connected", muted: false, deafened: false });
+    manualMuted = false;
+    voiceStore.setState({ status: "connected", muted: false, deafened: false, pttActive: false });
+    setUpPushToTalkIfNeeded();
+    applyMicGate();
   } else {
     // join() left the engine in a clean, not-in-call state (for example,
     // the microphone permission was denied). The "error" event already
@@ -224,6 +287,7 @@ export async function joinVoiceChannel(guildId: string, channelId: string): Prom
 }
 
 export async function leaveVoice(): Promise<void> {
+  stopPushToTalkRuntime();
   if (!engine) {
     voiceStore.setState(initialVoiceUiState());
     return;
@@ -236,13 +300,13 @@ export function toggleMute(): void {
   if (!engine) {
     return;
   }
-  const nextMuted = !voiceStore.getState().muted;
-  engine.setMute(nextMuted);
-  voiceStore.setState({ muted: nextMuted });
+  manualMuted = !manualMuted;
+  applyMicGate();
 }
 
-// Remembers the mute state from right before a deafen, so the status
-// panel's mute icon can be restored correctly when the user un-deafens.
+// Remembers the manual mute choice from right before a deafen, so the
+// status panel's mute icon can be restored correctly when the user
+// un-deafens.
 let mutedBeforeDeafen = false;
 
 export function toggleDeafen(): void {
@@ -252,10 +316,13 @@ export function toggleDeafen(): void {
   const nextDeafened = !voiceStore.getState().deafened;
   engine.setDeafen(nextDeafened);
   if (nextDeafened) {
-    mutedBeforeDeafen = voiceStore.getState().muted;
+    mutedBeforeDeafen = manualMuted;
+    manualMuted = true;
     voiceStore.setState({ deafened: true, muted: true });
   } else {
-    voiceStore.setState({ deafened: false, muted: mutedBeforeDeafen });
+    manualMuted = mutedBeforeDeafen;
+    voiceStore.setState({ deafened: false });
+    applyMicGate();
   }
 }
 
@@ -286,6 +353,78 @@ export async function getVoiceDebugStats(): Promise<VoiceDebugPeerStats[]> {
 /** Whether the local microphone track is enabled right now, or null when not in a call. */
 export function isLocalVoiceTrackEnabled(): boolean | null {
   return engine ? engine.isLocalTrackEnabled() : null;
+}
+
+/** Applies a peer's volume (0 to 2) at once, when in a call. Persistence happens in `voice-settings.ts`; this is only the live apply step. */
+export function applyPeerVolume(userId: string, volume: number): void {
+  engine?.setUserVolume(userId, volume);
+}
+
+/** Hot-swaps the microphone during a call. Does nothing when not in a call; the choice still applies on the next join. */
+export function applyInputDeviceLive(deviceId: string): void {
+  if (voiceStore.getState().status === "connected") {
+    engine?.setInputDevice(deviceId);
+  }
+}
+
+/** Hot-swaps the audio output device during a call. Does nothing when not in a call. */
+export function applyOutputDeviceLive(deviceId: string): void {
+  if (voiceStore.getState().status === "connected") {
+    void engine?.setOutputDevice(deviceId);
+  }
+}
+
+/** Hot-swaps the camera during a call, only while the camera is already on. */
+export function applyCameraDeviceLive(deviceId: string): void {
+  if (voiceStore.getState().status === "connected" && voiceStore.getState().cameraOn) {
+    void engine?.setCamera(true, deviceId);
+  }
+}
+
+/**
+ * If the microphone, speaker, or camera the user picked in the voice
+ * settings dialog disappears (unplugged, driver reset), fall back to the
+ * browser's default device and say so, instead of leaving the call on a
+ * dead device. Only acts while in a call.
+ */
+async function handleDeviceChange(): Promise<void> {
+  if (!engine || voiceStore.getState().status !== "connected") {
+    return;
+  }
+  let devices: MediaDeviceInfo[];
+  try {
+    devices = await navigator.mediaDevices.enumerateDevices();
+  } catch {
+    return;
+  }
+  const ids = new Set(devices.map((d) => d.deviceId));
+  const settings = voiceDeviceSettingsStore.getState();
+  let notice: string | null = null;
+
+  if (settings.inputDeviceId && !ids.has(settings.inputDeviceId)) {
+    updateVoiceDeviceSettings({ inputDeviceId: null });
+    engine.setInputDevice("default");
+    notice = "The chosen microphone was disconnected. Using the default microphone.";
+  }
+  if (settings.outputDeviceId && !ids.has(settings.outputDeviceId)) {
+    updateVoiceDeviceSettings({ outputDeviceId: null });
+    void engine.setOutputDevice("default");
+    notice = "The chosen speaker was disconnected. Using the default speaker.";
+  }
+  if (settings.cameraDeviceId && !ids.has(settings.cameraDeviceId) && voiceStore.getState().cameraOn) {
+    updateVoiceDeviceSettings({ cameraDeviceId: null });
+    void engine.setCamera(true);
+    notice = "The chosen camera was disconnected. Using the default camera.";
+  }
+  if (notice) {
+    voiceStore.setState({ errorMessage: notice });
+  }
+}
+
+if (typeof navigator !== "undefined" && navigator.mediaDevices) {
+  navigator.mediaDevices.addEventListener("devicechange", () => {
+    void handleDeviceChange();
+  });
 }
 
 session.store.subscribe((state) => {
