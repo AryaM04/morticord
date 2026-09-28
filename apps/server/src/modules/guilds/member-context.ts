@@ -6,6 +6,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { computePermissions, hasPermission, Permission, type OverwriteInput, type RoleInput } from "@discord-clone/shared";
 import type { DbClient } from "../../db/client.js";
 import { channels, guildMembers, guilds, memberRoles, permissionOverwrites, roles } from "../../db/schema.js";
+import { AppError } from "../../errors.js";
 
 export type GuildRow = typeof guilds.$inferSelect;
 export type ChannelRow = typeof channels.$inferSelect;
@@ -117,6 +118,13 @@ export async function loadOverwrites(db: DbClient, channelIds: bigint[]): Promis
     byChannel.set(row.channelId, list);
   }
   return byChannel;
+}
+
+/** Throw 403 when `permissions` lacks `permission`. Shared by every channel-level check. */
+export function requireChannelPermission(permissions: bigint, permission: bigint): void {
+  if (!hasPermission(permissions, permission)) {
+    throw new AppError(403, "MISSING_PERMISSION", "You do not have permission to do this.");
+  }
 }
 
 /** Every channel of the guild that the caller can view, in one pass. */

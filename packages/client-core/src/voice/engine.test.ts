@@ -336,6 +336,8 @@ function selfJoinUpdate(deps: VoiceEngineDeps, guildId: string, channelId: strin
     selfDeaf: false,
     selfVideo: false,
     selfStream: false,
+    serverMute: false,
+    serverDeaf: false,
     joinedAt: new Date().toISOString(),
   };
 }
@@ -446,6 +448,8 @@ describe("glare handling", () => {
       selfDeaf: false,
       selfVideo: false,
       selfStream: false,
+      serverMute: false,
+      serverDeaf: false,
       joinedAt: new Date().toISOString(),
     });
     await Promise.resolve();
@@ -660,6 +664,8 @@ describe("onPeerVoiceState", () => {
       selfDeaf: false,
       selfVideo: false,
       selfStream: false,
+      serverMute: false,
+      serverDeaf: false,
       joinedAt: new Date().toISOString(),
     };
     engine.onPeerVoiceState(laterPeer);
@@ -689,6 +695,8 @@ describe("onPeerVoiceState", () => {
       selfDeaf: false,
       selfVideo: false,
       selfStream: false,
+      serverMute: false,
+      serverDeaf: false,
       joinedAt: new Date().toISOString(),
     });
     await Promise.resolve();
@@ -716,6 +724,8 @@ describe("setCamera", () => {
       selfDeaf: false,
       selfVideo: false,
       selfStream: false,
+      serverMute: false,
+      serverDeaf: false,
       joinedAt: new Date().toISOString(),
     });
     await Promise.resolve();
@@ -769,6 +779,8 @@ describe("setScreenShare", () => {
       selfDeaf: false,
       selfVideo: false,
       selfStream: true,
+      serverMute: false,
+      serverDeaf: false,
       joinedAt: new Date().toISOString(),
     });
     await sharePromise;
@@ -811,6 +823,8 @@ describe("setScreenShare", () => {
       selfDeaf: false,
       selfVideo: false,
       selfStream: true,
+      serverMute: false,
+      serverDeaf: false,
       joinedAt: new Date().toISOString(),
     });
     await sharePromise;
@@ -845,6 +859,8 @@ describe("setScreenShare", () => {
       selfDeaf: false,
       selfVideo: false,
       selfStream: true,
+      serverMute: false,
+      serverDeaf: false,
       joinedAt: new Date().toISOString(),
     });
     await sharePromise;
@@ -927,6 +943,8 @@ describe("leave() with camera and screen on", () => {
       selfDeaf: false,
       selfVideo: true,
       selfStream: true,
+      serverMute: false,
+      serverDeaf: false,
       joinedAt: new Date().toISOString(),
     });
     await sharePromise;
@@ -1046,6 +1064,8 @@ describe("adaptive quality applier", () => {
       selfDeaf: false,
       selfVideo: false,
       selfStream: false,
+      serverMute: false,
+      serverDeaf: false,
       joinedAt: new Date().toISOString(),
     });
     await Promise.resolve();
@@ -1063,6 +1083,8 @@ describe("adaptive quality applier", () => {
       selfDeaf: false,
       selfVideo: false,
       selfStream: false,
+      serverMute: false,
+      serverDeaf: false,
       joinedAt: new Date().toISOString(),
     });
     await Promise.resolve();

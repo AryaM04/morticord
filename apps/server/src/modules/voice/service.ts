@@ -37,6 +37,9 @@ export interface VoiceState {
   selfDeaf: boolean;
   selfVideo: boolean;
   selfStream: boolean;
+  /** Set by a moderator with MUTE_MEMBERS/DEAFEN_MEMBERS. A server-muted peer cannot self-unmute. */
+  serverMute: boolean;
+  serverDeaf: boolean;
   joinedAt: string;
 }
 
@@ -69,6 +72,8 @@ export function toVoiceStateUpdate(state: VoiceState, leaving = false): VoiceSta
     selfDeaf: state.selfDeaf,
     selfVideo: state.selfVideo,
     selfStream: state.selfStream,
+    serverMute: state.serverMute,
+    serverDeaf: state.serverDeaf,
     joinedAt: state.joinedAt,
   };
 }
@@ -159,6 +164,8 @@ export class VoiceService {
       selfDeaf: input.selfDeaf,
       selfVideo: false,
       selfStream: false,
+      serverMute: false,
+      serverDeaf: false,
       joinedAt: new Date().toISOString(),
     };
     this.addInternal(state);
@@ -196,6 +203,9 @@ export class VoiceService {
     }
     if (patch.selfMute === false && !hasSpeak) {
       throw new VoiceError("NO_PERMISSION", "You do not have permission to speak in this channel.");
+    }
+    if (patch.selfMute === false && state.serverMute) {
+      throw new VoiceError("NO_PERMISSION", "A moderator muted you. You cannot unmute yourself.");
     }
 
     if (patch.selfMute !== undefined) {
@@ -314,6 +324,50 @@ export class VoiceService {
       }
     }
     return removed;
+  }
+
+  /**
+   * Set the server-mute or server-deafen flag of a live peer. A no-op
+   * (returns null) when the target is not in voice.
+   */
+  applyServerModeration(userId: bigint, patch: { serverMute?: boolean; serverDeaf?: boolean }): VoiceState | null {
+    const state = this.userPeer.get(userId.toString());
+    if (!state) {
+      return null;
+    }
+    if (patch.serverMute !== undefined) {
+      state.serverMute = patch.serverMute;
+    }
+    if (patch.serverDeaf !== undefined) {
+      state.serverDeaf = patch.serverDeaf;
+    }
+    return state;
+  }
+
+  /**
+   * Move a live peer to another voice channel, or disconnect it when
+   * `channelId` is null. Throws CHANNEL_FULL when the destination is
+   * already at capacity. Returns null when the target is not in voice.
+   */
+  moveUser(userId: bigint, channelId: bigint | null): { previous: VoiceState; next: VoiceState | null } | null {
+    const existing = this.userPeer.get(userId.toString());
+    if (!existing) {
+      return null;
+    }
+    if (channelId === null) {
+      this.removeInternal(existing);
+      this.clearGrace(existing);
+      return { previous: existing, next: null };
+    }
+    const peers = this.channelPeers.get(channelId.toString());
+    if (peers && peers.size >= VOICE_CHANNEL_CAP) {
+      throw new VoiceError("CHANNEL_FULL", "This voice channel already has the most members it can hold.");
+    }
+    this.removeInternal(existing);
+    this.clearGrace(existing);
+    const next: VoiceState = { ...existing, channelId };
+    this.addInternal(next);
+    return { previous: existing, next };
   }
 
   /** Test helper: how many peers (across every channel) are tracked right now. */

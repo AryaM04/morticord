@@ -55,6 +55,57 @@ member with zero permissions in a channel cannot see it, so no route,
 and no gateway dispatch, needs a separate "can they see this channel"
 check next to the permission check.
 
+## Role hierarchy
+
+Every role has a `position`. The `@everyone` role is always position 0; it
+cannot move and cannot be deleted. A member's **highest role** is the
+largest position among the roles they hold (their held roles plus
+`@everyone`). The guild owner has no position of their own: the owner
+counts as above every role, and skips every hierarchy check below.
+
+- A member may create, edit, delete or assign/remove only a role whose
+  position is **strictly below** their own highest role. Assigning or
+  removing `@everyone` is not an action (everyone always holds it).
+- Creating a role places it just below the actor's highest role (shifting
+  roles at or above that position up by one), or at position 1 when the
+  actor's highest role is `@everyone` itself. For the owner, a new role
+  goes just above the guild's current highest role, since the owner has
+  no explicit position to sit below.
+- A member may grant, through a role's `permissions` or a channel
+  overwrite's `allow`/`deny`, only a permission bit they hold themselves.
+  The owner and a member with `ADMINISTRATOR` may grant any permission.
+- Acting on another member — kicking, banning, or changing their roles or
+  nickname — requires the target's highest role to be strictly below the
+  actor's highest role. **Nobody can act on the guild owner**, regardless
+  of permissions.
+- A channel overwrite may be edited only by someone with `MANAGE_ROLES`
+  in that channel, and only with `allow`/`deny` bits the editor holds in
+  that channel (unless admin or owner).
+
+## Visibility changes
+
+Granting or revoking `VIEW_CHANNEL` — through a role's permissions, a
+channel overwrite, or a member's role list — can change which channels a
+member can see. After any such change commits, the server compares each
+affected member's set of viewable channels from just before the change to
+just after:
+
+- A channel they gained gets a `CHANNEL_CREATE` dispatch.
+- A channel they lost gets a `CHANNEL_DELETE` dispatch.
+- A channel whose visibility did not change for them gets nothing here
+  (a plain `CHANNEL_UPDATE`, if the channel itself changed, is sent
+  separately to whoever can still see it).
+
+Because the fan-out for messages, reactions and edits always loads
+permissions fresh (`GatewayService.toChannelViewers`), a member who lost
+`VIEW_CHANNEL` stops receiving `EVENT_CREATE` for that channel the
+instant the change commits, with no separate cache to invalidate.
+
+The server also calls `voice.revalidate(guildId)` after the change, so a
+member who lost `VIEW_CHANNEL` or `CONNECT` on their current voice
+channel is disconnected from it and a `VOICE_STATE_UPDATE` (with a null
+channel) is sent to that channel's former viewers.
+
 ## Where the server uses this
 
 - Every guild and channel route loads the caller's member context first

@@ -24,6 +24,8 @@ export const Permission = {
   DEAFEN_MEMBERS: 1n << 18n,
   MOVE_MEMBERS: 1n << 19n,
   ADMINISTRATOR: 1n << 20n,
+  CHANGE_NICKNAME: 1n << 21n,
+  MANAGE_NICKNAMES: 1n << 22n,
 } as const;
 
 export type PermissionName = keyof typeof Permission;

@@ -3,13 +3,21 @@
 import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import {
+  createBanRequestSchema,
   createChannelRequestSchema,
   createGuildRequestSchema,
   createInviteRequestSchema,
+  createRoleRequestSchema,
   listMembersQuerySchema,
+  putOverwriteRequestSchema,
+  roleOrderRequestSchema,
   searchMembersQuerySchema,
+  transferGuildRequestSchema,
   updateChannelRequestSchema,
   updateGuildRequestSchema,
+  updateMemberRequestSchema,
+  updateRoleRequestSchema,
+  voiceModerationRequestSchema,
   channelOrderRequestSchema,
 } from "@discord-clone/shared";
 import type { AppDeps } from "../../app.js";
@@ -31,6 +39,25 @@ import {
 } from "./invites.js";
 import { readIconFile } from "./icon.js";
 import {
+  applyVoiceModeration,
+  banMember,
+  kickMember,
+  listBans,
+  transferOwnership,
+  unbanMember,
+} from "./moderation.js";
+import { deleteOverwrite, putOverwrite } from "./overwrites.js";
+import {
+  addMemberRole,
+  createRole,
+  deleteRole,
+  listRoles,
+  removeMemberRole,
+  reorderRoles,
+  updateMemberNickname,
+  updateRole,
+} from "./roles.js";
+import {
   createGuild,
   deleteGuild,
   getGuildView,
@@ -41,7 +68,7 @@ import {
   setGuildIcon,
   updateGuild,
 } from "./service.js";
-import { toChannelJson, toInviteJson, toInvitePreviewJson, toMemberJson } from "./serialize.js";
+import { toChannelJson, toInviteJson, toInvitePreviewJson, toMemberJson, toRoleJson } from "./serialize.js";
 
 const ICON_BODY_LIMIT_BYTES = 1024 * 1024; // 1 MiB
 
@@ -231,6 +258,151 @@ export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): 
   app.delete("/invites/:code", { preHandler: app.authenticate }, async (request, reply) => {
     const { code } = request.params as { code: string };
     await deleteInvite(deps.db, code, request.auth!.userId);
+    return reply.status(204).send();
+  });
+
+  // ---- roles ------------------------------------------------------------
+
+  const rolesDeps = { db: deps.db, gateway: deps.gateway, voice: deps.voice };
+
+  app.get("/guilds/:id/roles", { preHandler: app.authenticate }, async (request, reply) => {
+    const guildId = parseId((request.params as { id: string }).id);
+    const rows = await listRoles(deps.db, guildId, request.auth!.userId);
+    return reply.send({ roles: rows.map(toRoleJson) });
+  });
+
+  app.post("/guilds/:id/roles", { preHandler: app.authenticate }, async (request, reply) => {
+    const guildId = parseId((request.params as { id: string }).id);
+    const input = createRoleRequestSchema.parse(request.body ?? {});
+    const role = await createRole(rolesDeps, guildId, request.auth!.userId, input);
+    return reply.status(201).send(toRoleJson(role));
+  });
+
+  app.patch("/guilds/:id/roles/:roleId", { preHandler: app.authenticate }, async (request, reply) => {
+    const { id, roleId } = request.params as { id: string; roleId: string };
+    const guildId = parseId(id);
+    const input = updateRoleRequestSchema.parse(request.body);
+    const role = await updateRole(rolesDeps, guildId, request.auth!.userId, parseId(roleId), input);
+    return reply.send(toRoleJson(role));
+  });
+
+  app.delete("/guilds/:id/roles/:roleId", { preHandler: app.authenticate }, async (request, reply) => {
+    const { id, roleId } = request.params as { id: string; roleId: string };
+    await deleteRole(rolesDeps, parseId(id), request.auth!.userId, parseId(roleId));
+    return reply.status(204).send();
+  });
+
+  app.put("/guilds/:id/roles/order", { preHandler: app.authenticate }, async (request, reply) => {
+    const guildId = parseId((request.params as { id: string }).id);
+    const input = roleOrderRequestSchema.parse(request.body);
+    await reorderRoles(rolesDeps, guildId, request.auth!.userId, input);
+    return reply.status(204).send();
+  });
+
+  // ---- member roles and nickname -----------------------------------------
+
+  app.put(
+    "/guilds/:id/members/:userId/roles/:roleId",
+    { preHandler: app.authenticate },
+    async (request, reply) => {
+      const { id, userId: targetUserId, roleId } = request.params as { id: string; userId: string; roleId: string };
+      await addMemberRole(rolesDeps, parseId(id), request.auth!.userId, parseId(targetUserId), parseId(roleId));
+      return reply.status(204).send();
+    },
+  );
+
+  app.delete(
+    "/guilds/:id/members/:userId/roles/:roleId",
+    { preHandler: app.authenticate },
+    async (request, reply) => {
+      const { id, userId: targetUserId, roleId } = request.params as { id: string; userId: string; roleId: string };
+      await removeMemberRole(rolesDeps, parseId(id), request.auth!.userId, parseId(targetUserId), parseId(roleId));
+      return reply.status(204).send();
+    },
+  );
+
+  app.patch("/guilds/:id/members/:userId", { preHandler: app.authenticate }, async (request, reply) => {
+    const { id, userId: targetUserId } = request.params as { id: string; userId: string };
+    const input = updateMemberRequestSchema.parse(request.body);
+    if (input.nickname !== undefined) {
+      await updateMemberNickname(rolesDeps, parseId(id), request.auth!.userId, parseId(targetUserId), input.nickname);
+    }
+    return reply.status(204).send();
+  });
+
+  // ---- channel overwrites -------------------------------------------------
+
+  app.put("/channels/:id/overwrites/:targetId", { preHandler: app.authenticate }, async (request, reply) => {
+    const { id, targetId } = request.params as { id: string; targetId: string };
+    const input = putOverwriteRequestSchema.parse(request.body);
+    await putOverwrite(
+      { db: deps.db, gateway: deps.gateway, voice: deps.voice },
+      parseId(id),
+      request.auth!.userId,
+      parseId(targetId),
+      input,
+    );
+    return reply.status(204).send();
+  });
+
+  app.delete("/channels/:id/overwrites/:targetId", { preHandler: app.authenticate }, async (request, reply) => {
+    const { id, targetId } = request.params as { id: string; targetId: string };
+    const query = request.query as { type?: string };
+    const targetType = query.type === "member" ? "member" : "role";
+    await deleteOverwrite(
+      { db: deps.db, gateway: deps.gateway, voice: deps.voice },
+      parseId(id),
+      request.auth!.userId,
+      parseId(targetId),
+      targetType,
+    );
+    return reply.status(204).send();
+  });
+
+  // ---- moderation ---------------------------------------------------------
+
+  const moderationDeps = { db: deps.db, gateway: deps.gateway, voice: deps.voice };
+
+  app.delete("/guilds/:id/members/:userId", { preHandler: app.authenticate }, async (request, reply) => {
+    const { id, userId: targetUserId } = request.params as { id: string; userId: string };
+    await kickMember(moderationDeps, parseId(id), request.auth!.userId, parseId(targetUserId));
+    return reply.status(204).send();
+  });
+
+  app.put("/guilds/:id/bans/:userId", { preHandler: app.authenticate }, async (request, reply) => {
+    const { id, userId: targetUserId } = request.params as { id: string; userId: string };
+    const input = createBanRequestSchema.parse(request.body ?? {});
+    await banMember(moderationDeps, parseId(id), request.auth!.userId, parseId(targetUserId), input);
+    return reply.status(204).send();
+  });
+
+  app.delete("/guilds/:id/bans/:userId", { preHandler: app.authenticate }, async (request, reply) => {
+    const { id, userId: targetUserId } = request.params as { id: string; userId: string };
+    await unbanMember(moderationDeps, parseId(id), request.auth!.userId, parseId(targetUserId));
+    return reply.status(204).send();
+  });
+
+  app.get("/guilds/:id/bans", { preHandler: app.authenticate }, async (request, reply) => {
+    const guildId = parseId((request.params as { id: string }).id);
+    const rows = await listBans(deps.db, guildId, request.auth!.userId);
+    return reply.send({ bans: rows });
+  });
+
+  app.patch("/guilds/:id/members/:userId/voice", { preHandler: app.authenticate }, async (request, reply) => {
+    const { id, userId: targetUserId } = request.params as { id: string; userId: string };
+    const input = voiceModerationRequestSchema.parse(request.body ?? {});
+    await applyVoiceModeration(moderationDeps, parseId(id), request.auth!.userId, parseId(targetUserId), {
+      mute: input.mute,
+      deaf: input.deaf,
+      channelId: input.channelId === undefined ? undefined : input.channelId ? parseId(input.channelId) : null,
+    });
+    return reply.status(204).send();
+  });
+
+  app.post("/guilds/:id/transfer", { preHandler: app.authenticate }, async (request, reply) => {
+    const guildId = parseId((request.params as { id: string }).id);
+    const input = transferGuildRequestSchema.parse(request.body);
+    await transferOwnership(moderationDeps, guildId, request.auth!.userId, parseId(input.userId));
     return reply.status(204).send();
   });
 }
