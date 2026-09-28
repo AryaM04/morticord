@@ -14,6 +14,9 @@ All code text must obey ASD-STE100. This includes comments, docs, commit message
 - Put warnings and cautions before the step they refer to.
 - Identifiers use clear, simple English words. Do not use slang or unclear short forms.
 
+## Git
+- Never add a `Co-Authored-By` trailer (or any AI attribution line) to a commit message or a pull request.
+
 ## Code style
 - Keep code simple. Write the least code that does the job correctly.
 - Prefer the standard library and platform APIs. Add a dependency only when it removes real work.
