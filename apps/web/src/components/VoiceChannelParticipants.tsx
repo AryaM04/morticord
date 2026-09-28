@@ -4,6 +4,7 @@
 import { useStore } from "zustand";
 import { useRealtime } from "../lib/useRealtime.js";
 import { voiceStore } from "../lib/voice.js";
+import { ParticipantVolumeMenu, useParticipantMenu } from "./ParticipantVolumeMenu.js";
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).slice(0, 2);
@@ -26,6 +27,8 @@ export function VoiceChannelParticipants({
   const voicePeers = useStore(voiceStore, (s) => s.peers);
   const localSpeaking = useStore(voiceStore, (s) => s.localSpeaking);
 
+  const { openForUserId, anchor, onContextMenu, openAt, close } = useParticipantMenu();
+
   const entries = states ? Object.values(states) : [];
   if (entries.length === 0) {
     return null;
@@ -46,6 +49,7 @@ export function VoiceChannelParticipants({
             data-voice-participant={name}
             data-voice-participant-muted={state.selfMute}
             data-voice-participant-deafened={state.selfDeaf}
+            onContextMenu={isSelf ? undefined : (event) => onContextMenu(event, state.userId)}
           >
             <div
               className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold"
@@ -81,9 +85,27 @@ export function VoiceChannelParticipants({
               </span>
             )}
             {state.selfDeaf && <span className="sr-only">{name} has muted all sound.</span>}
+            {!isSelf && (
+              <button
+                type="button"
+                aria-label={`Volume for ${name}`}
+                aria-haspopup="menu"
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  openAt(state.userId, rect.left, rect.bottom);
+                }}
+                className="ml-auto rounded px-1 text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                &#8942;
+              </button>
+            )}
           </li>
         );
       })}
+      {openForUserId && anchor && (
+        <ParticipantVolumeMenu userId={openForUserId} anchor={anchor} onClose={close} />
+      )}
     </ul>
   );
 }
