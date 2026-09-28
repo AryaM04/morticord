@@ -1,4 +1,4 @@
-// Tests for the voice engine: the politeness comparator, ICE candidate
+﻿// Tests for the voice engine: the politeness comparator, ICE candidate
 // queueing before the remote description is set, glare handling, the
 // speaking hysteresis window, leave() cleanup, and peer add/remove
 // reacting to onPeerVoiceState per the newcomer/later-peer offer rule.
@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VoiceStateJson } from "@discord-clone/shared";
 import {
+  ADAPTIVE_TICK_MS,
   comparePeerKeys,
   createVoiceEngine,
   ICE_RESTART_BACKOFFS_MS,
@@ -35,9 +36,14 @@ class FakeTrack {
   enabled = true;
   onended: (() => void) | null = null;
   onmute: (() => void) | null = null;
+  /** Only the `height` field is read by the engine (adaptive-quality source resolution). */
+  settings: MediaTrackSettings = {};
   constructor(public readonly kind: "audio" | "video" = "audio") {}
   stop(): void {
     this.stopped = true;
+  }
+  getSettings(): MediaTrackSettings {
+    return this.settings;
   }
 }
 
@@ -63,24 +69,71 @@ class FakeMediaStream {
   }
 }
 
+let transceiverMidCounter = 0;
+
 class FakeTransceiver {
   sender: FakeSender;
   direction: string;
+  mid: string | null;
   constructor(track: FakeTrack | null, direction: string) {
     this.sender = new FakeSender(track);
     this.direction = direction;
+    transceiverMidCounter += 1;
+    this.mid = `mid-${transceiverMidCounter}`;
   }
 }
 
 class FakeSender {
+  /** Every `setParameters()` call this sender received, for the adaptive-quality applier tests. */
+  setParametersCalls: RTCRtpSendParameters[] = [];
   constructor(public track: FakeTrack | null) {}
   getParameters(): RTCRtpSendParameters {
     return { encodings: [{}] } as unknown as RTCRtpSendParameters;
   }
-  async setParameters(): Promise<void> {}
+  async setParameters(parameters: RTCRtpSendParameters): Promise<void> {
+    this.setParametersCalls.push(parameters);
+  }
   async replaceTrack(track: FakeTrack | null): Promise<void> {
     this.track = track;
   }
+}
+
+/** A minimal stand-in for `RTCStatsReport`: iterable with `forEach`, built from a plain list. */
+class FakeStatsReport {
+  constructor(private readonly stats: RTCStats[]) {}
+  forEach(callback: (stat: RTCStats) => void): void {
+    for (const stat of this.stats) {
+      callback(stat);
+    }
+  }
+}
+
+/** Build a fake `getStats()` report with one selected candidate pair and, optionally, per-video-sender outbound-rtp stats keyed by `mid`. */
+function fakeStatsReport(options: {
+  availableOutgoingBitrate?: number;
+  video?: Array<{ mid: string; qualityLimitationReason?: string }>;
+}): FakeStatsReport {
+  const stats: RTCStats[] = [
+    { id: "transport-1", type: "transport", timestamp: 0, selectedCandidatePairId: "pair-1" } as unknown as RTCStats,
+    {
+      id: "pair-1",
+      type: "candidate-pair",
+      timestamp: 0,
+      nominated: true,
+      availableOutgoingBitrate: options.availableOutgoingBitrate,
+    } as unknown as RTCStats,
+  ];
+  for (const [i, v] of (options.video ?? []).entries()) {
+    stats.push({
+      id: `outbound-video-${i}`,
+      type: "outbound-rtp",
+      timestamp: 0,
+      kind: "video",
+      mid: v.mid,
+      qualityLimitationReason: v.qualityLimitationReason ?? "none",
+    } as unknown as RTCStats);
+  }
+  return new FakeStatsReport(stats);
 }
 
 type SignalingState = "stable" | "have-local-offer" | "have-remote-offer";
@@ -97,6 +150,9 @@ class FakePeerConnection {
   closed = false;
   addedCandidates: RTCIceCandidateInit[] = [];
   transceivers: FakeTransceiver[] = [];
+  /** The report `getStats()` returns; the adaptive-quality tests set this per tick. */
+  statsReport: FakeStatsReport = new FakeStatsReport([]);
+  getStatsCallCount = 0;
 
   ontrack: ((event: { track: FakeTrack; streams: FakeMediaStream[] }) => void) | null = null;
   onicecandidate: ((event: { candidate: RTCIceCandidate | null }) => void) | null = null;
@@ -142,6 +198,10 @@ class FakePeerConnection {
   }
   restartIce(): void {
     this.restartIceCalls += 1;
+  }
+  async getStats(): Promise<FakeStatsReport> {
+    this.getStatsCallCount += 1;
+    return this.statsReport;
   }
   close(): void {
     this.closed = true;
@@ -880,5 +940,186 @@ describe("leave() with camera and screen on", () => {
     }
     expect(engine.cameraOn).toBe(false);
     expect(engine.screenOn).toBe(false);
+  });
+});
+
+// ---- adaptive video quality applier ------------------------------------------------
+
+describe("adaptive quality applier", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does not run the stats timer while no local video track is live", async () => {
+    const peerB: PeerKey = { userId: "b", deviceId: "d1" };
+    const { deps, pcs } = makeDeps({ getInitialPeers: () => [peerB] });
+    const engine = createVoiceEngine(deps);
+    const joinPromise = engine.join("guild-1", "channel-1");
+    await vi.advanceTimersByTimeAsync(JOIN_CONFIRM_TIMEOUT_MS + NEWCOMER_TRACK_SHARE_DELAY_MS);
+    await joinPromise;
+
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS * 3);
+
+    expect(pcs[0]!.getStatsCallCount).toBe(0);
+  });
+
+  it("starts the timer once the camera turns on, and stops it once the last video track turns off", async () => {
+    const peerB: PeerKey = { userId: "b", deviceId: "d1" };
+    const { deps, pcs } = makeDeps({ getInitialPeers: () => [peerB] });
+    const engine = createVoiceEngine(deps);
+    const joinPromise = engine.join("guild-1", "channel-1");
+    await vi.advanceTimersByTimeAsync(JOIN_CONFIRM_TIMEOUT_MS + NEWCOMER_TRACK_SHARE_DELAY_MS);
+    await joinPromise;
+    const pc = pcs[0]!;
+
+    await engine.setCamera(true);
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS);
+    expect(pc.getStatsCallCount).toBeGreaterThan(0);
+
+    const countWhileOn = pc.getStatsCallCount;
+    await engine.setCamera(false);
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS * 3);
+    expect(pc.getStatsCallCount).toBe(countWhileOn); // the timer stopped, not just idling
+  });
+
+  it("stops the timer on leave", async () => {
+    const peerB: PeerKey = { userId: "b", deviceId: "d1" };
+    const { deps, pcs } = makeDeps({ getInitialPeers: () => [peerB] });
+    const engine = createVoiceEngine(deps);
+    const joinPromise = engine.join("guild-1", "channel-1");
+    await vi.advanceTimersByTimeAsync(JOIN_CONFIRM_TIMEOUT_MS + NEWCOMER_TRACK_SHARE_DELAY_MS);
+    await joinPromise;
+    const pc = pcs[0]!;
+
+    await engine.setCamera(true);
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS);
+    await engine.leave();
+
+    const countAfterLeave = pc.getStatsCallCount;
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS * 3);
+    expect(pc.getStatsCallCount).toBe(countAfterLeave);
+  });
+
+  it("does not call setParameters again when the chosen encoding has not changed", async () => {
+    const peerB: PeerKey = { userId: "b", deviceId: "d1" };
+    const { deps, pcs } = makeDeps({ getInitialPeers: () => [peerB] });
+    const engine = createVoiceEngine(deps);
+    const joinPromise = engine.join("guild-1", "channel-1");
+    await vi.advanceTimersByTimeAsync(JOIN_CONFIRM_TIMEOUT_MS + NEWCOMER_TRACK_SHARE_DELAY_MS);
+    await joinPromise;
+    const pc = pcs[0]!;
+
+    await engine.setCamera(true);
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS);
+    const sender = pc.transceivers[0]!.sender;
+    expect(sender.setParametersCalls).toHaveLength(1);
+
+    // Steady state: same peer count, same (empty) stats every tick.
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS * 3);
+    expect(sender.setParametersCalls).toHaveLength(1);
+  });
+
+  it("re-applies exactly once when the remote peer count crosses into a worse camera tier", async () => {
+    const peerB: PeerKey = { userId: "b", deviceId: "d1" };
+    const { deps, pcs } = makeDeps({ getInitialPeers: () => [peerB] });
+    const engine = createVoiceEngine(deps);
+    const joinPromise = engine.join("guild-1", "channel-1");
+    await vi.advanceTimersByTimeAsync(JOIN_CONFIRM_TIMEOUT_MS + NEWCOMER_TRACK_SHARE_DELAY_MS);
+    await joinPromise;
+    const pc = pcs[0]!;
+
+    await engine.setCamera(true);
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS);
+    const sender = pc.transceivers[0]!.sender;
+    expect(sender.setParametersCalls).toHaveLength(1); // tier 0: 1 remote peer
+
+    // A second remote peer: still 1-2 peers, tier 0, no change.
+    engine.onPeerVoiceState({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      userId: "c",
+      deviceId: "d1",
+      selfMute: false,
+      selfDeaf: false,
+      selfVideo: false,
+      selfStream: false,
+      joinedAt: new Date().toISOString(),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS);
+    expect(sender.setParametersCalls).toHaveLength(1);
+
+    // A third remote peer crosses into the 3-4 peer tier: exactly one more apply.
+    engine.onPeerVoiceState({
+      guildId: "guild-1",
+      channelId: "channel-1",
+      userId: "e",
+      deviceId: "d1",
+      selfMute: false,
+      selfDeaf: false,
+      selfVideo: false,
+      selfStream: false,
+      joinedAt: new Date().toISOString(),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS);
+    expect(sender.setParametersCalls).toHaveLength(2);
+
+    // Steady state again: no further calls.
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS * 3);
+    expect(sender.setParametersCalls).toHaveLength(2);
+  });
+
+  it("sets the audio sender to high priority once, unaffected by later ticks", async () => {
+    const peerB: PeerKey = { userId: "b", deviceId: "d1" };
+    const { deps, pcs } = makeDeps({ getInitialPeers: () => [peerB] });
+    const engine = createVoiceEngine(deps);
+    const joinPromise = engine.join("guild-1", "channel-1");
+    await vi.advanceTimersByTimeAsync(JOIN_CONFIRM_TIMEOUT_MS + NEWCOMER_TRACK_SHARE_DELAY_MS);
+    await joinPromise;
+    const pc = pcs[0]!;
+    const audioSender = pc.senders.find((s) => s.track?.kind === "audio")!;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const priorityCall = audioSender.setParametersCalls.find(
+      (p) => (p as unknown as { priority?: string }).priority === "high",
+    );
+    expect(priorityCall).toBeDefined();
+    const callsBeforeVideo = audioSender.setParametersCalls.length;
+
+    await engine.setCamera(true);
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS * 3);
+
+    expect(audioSender.setParametersCalls).toHaveLength(callsBeforeVideo); // the adaptive tick never touches the audio sender
+  });
+
+  it("reads qualityLimitationReason from getStats() and steps the tier down after 2 limited samples", async () => {
+    const peerB: PeerKey = { userId: "b", deviceId: "d1" };
+    const { deps, pcs } = makeDeps({ getInitialPeers: () => [peerB] });
+    const engine = createVoiceEngine(deps);
+    const joinPromise = engine.join("guild-1", "channel-1");
+    await vi.advanceTimersByTimeAsync(JOIN_CONFIRM_TIMEOUT_MS + NEWCOMER_TRACK_SHARE_DELAY_MS);
+    await joinPromise;
+    const pc = pcs[0]!;
+
+    await engine.setCamera(true);
+    const transceiver = pc.transceivers[0]!;
+    pc.statsReport = fakeStatsReport({ video: [{ mid: transceiver.mid!, qualityLimitationReason: "bandwidth" }] });
+
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS); // 1st limited sample: no step down yet
+    let lastParams = transceiver.sender.setParametersCalls.at(-1)!;
+    expect((lastParams.encodings![0] as RTCRtpEncodingParameters).scaleResolutionDownBy).toBeCloseTo(1); // still tier 0 (720p)
+
+    await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS); // 2nd consecutive limited sample: steps down to tier 1 (540p)
+    lastParams = transceiver.sender.setParametersCalls.at(-1)!;
+    expect((lastParams.encodings![0] as RTCRtpEncodingParameters).maxFramerate).toBe(30);
+    expect((lastParams.encodings![0] as RTCRtpEncodingParameters).maxBitrate).toBe(800_000);
+    expect((lastParams.encodings![0] as RTCRtpEncodingParameters).scaleResolutionDownBy).toBeCloseTo(720 / 540);
   });
 });
