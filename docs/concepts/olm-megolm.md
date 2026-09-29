@@ -312,7 +312,13 @@ that it comes from a different device.
 
 Envelope types: `dummy` (session recovery), `debug.ping` (development
 only), and from pass 2: `megolm.session`, `megolm.forward`,
-`megolm.request`, `voice.signal`.
+`megolm.request`, `voice.signal` (see `docs/concepts/voice.md`),
+`settings.key` and `settings.request` (section 11).
+
+Voice signals use the gateway op `TO_DEVICE_SEND { messages }`. It has
+the same rules as `POST /to-device` (visibility, size, queue) and no
+reply. The server stores the ops of one connection in the order that they
+arrive.
 
 The client acknowledges a message after the session state, the account
 state, the seen id and the queue id are saved in one IndexedDB
@@ -534,6 +540,42 @@ They can still read old `plain-v1` events.
 
 Emoji SAS verification between two devices comes after pass 4. Until
 then, users compare nothing and trust the master key on first use.
+
+## 11. Encrypted settings (pass 3)
+
+The synced settings blob (`PUT /users/@me/settings`) is encrypted with
+the **settings key** of the user: one random AES-256-GCM key. The code is
+`packages/client-core/src/crypto/settings-key.ts`.
+
+- Blob: one version byte (1), the 8-byte key id, a 12-byte IV, then the
+  AES-GCM ciphertext of the settings JSON. The version byte and the key id
+  are the additional data. An old plaintext blob starts with `{`. The
+  client reads it, and the next save encrypts it.
+- The first device that saves settings, when the server blob is empty or
+  plaintext, makes the key. It sends `settings.key { keyId, key }` to each
+  other device of the same user in the verified device list.
+- A device that reads a blob with an unknown key id sends
+  `settings.request { keyId }` to its other devices (at most one time a
+  minute). A device that has the key answers with `settings.key` (at most
+  one time in 30 seconds for each device). The receiver accepts
+  `settings.key` only from a device of the same user, and never replaces a
+  known key id with a different value.
+- Until the key arrives, the device is **locked**: it shows the defaults
+  and its own changes, and it never writes the server blob. When the key
+  arrives, it reads the blob again, puts its changes on top and saves.
+- The crypto store keeps the keys, encrypted with the pickle key.
+- Pass 4 adds the settings key to the key backup.
+
+Deviations and why:
+
+- "Verified" means that the device keys have a valid signature and the
+  master key of the user did not change. The owner signature is not
+  necessary: pass 1 signs only the first device, so other devices could
+  never get the key. When the master key of the user changed, the device
+  does not send the key.
+- Two new devices can make two keys at the same time. The second save
+  then gets `VERSION_CONFLICT`, reads a blob with the other key, and is
+  locked until that key arrives. Its own key is never used again.
 
 ## Code
 

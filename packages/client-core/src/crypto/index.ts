@@ -19,6 +19,7 @@ import { MegolmMachine, type MegolmTimings } from "./megolm.js";
 import { ChannelMembership, membershipScope } from "./membership.js";
 import { OlmMachine, type EncryptResult, type ToDeviceHandler } from "./olm-machine.js";
 import { KeyedQueue } from "./queue.js";
+import { SettingsKeys } from "./settings-key.js";
 import { cryptoStoreName, openCryptoStore, type CryptoStore } from "./store.js";
 import type { CryptoTransport } from "./transport.js";
 import { loadWasm } from "./wasm.js";
@@ -27,6 +28,7 @@ export { createHttpCryptoTransport, type CryptoTransport } from "./transport.js"
 export type { DecryptedToDevice, EncryptResult, ToDeviceHandler } from "./olm-machine.js";
 export type { DeviceRecord, UserRecord } from "./store.js";
 export { WAITING_TEXT, type MegolmTimings } from "./megolm.js";
+export { SettingsKeyMissingError } from "./settings-key.js";
 
 /** The gateway events that say that a user left a guild, a DM or a channel. */
 const MEMBER_LEFT_EVENTS = new Set([
@@ -79,6 +81,8 @@ export interface CryptoHandle {
   /** Encrypt and send one envelope to every device of these users, except this device. */
   encryptToUsers(userIds: string[], type: string, content: Record<string, unknown>): Promise<EncryptResult>;
   onToDevice(handler: ToDeviceHandler): () => void;
+  /** The encryption of the synced settings blob. See settings-key.ts. */
+  readonly settings: Pick<SettingsKeys, "open" | "seal" | "onKey">;
   sessionCount(): Promise<number>;
   /** Users whose master key changed. The UI must warn about each one. */
   changedMasterKeys(): Promise<string[]>;
@@ -164,6 +168,17 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
     timings: options.megolmTimings,
   });
   olm.onToDevice((event) => megolm.handleToDevice(event));
+  const settings = new SettingsKeys({
+    store,
+    pickleKey,
+    deviceList: devices,
+    encryptToDevices: (targets, type, content) => olm.encryptToDevices(targets, type, content),
+    userId,
+    deviceId,
+    now: options.now,
+    log,
+  });
+  olm.onToDevice((event) => settings.handleToDevice(event));
 
   const codec: PayloadCodec = {
     async encode(channelId, payload) {
@@ -286,6 +301,11 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
       return olm.encryptToDevices(targets, type, content);
     },
     onToDevice: (handler) => olm.onToDevice(handler),
+    settings: {
+      open: (blob) => settings.open(blob),
+      seal: (plaintext, keyId) => settings.seal(plaintext, keyId),
+      onKey: (listener) => settings.onKey(listener),
+    },
     sessionCount: () => olm.sessionCount(),
     changedMasterKeys: () => devices.changedMasterKeys(),
     onMasterKeyChanged(listener) {

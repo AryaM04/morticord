@@ -220,6 +220,7 @@ test.describe("friends and DMs", () => {
     await expect.poll(() => connectedPeerCount(pageB), { timeout: 20_000 }).toBe(0);
 
     // 9. A sets the notification level of the guild. The level is in the synced settings and stays after a reload.
+    // The server has only an encrypted blob (version byte 1, then the key id), never the JSON.
     await pageA.getByRole("link", { name: "DM E2E Guild" }).click({ button: "right" });
     await pageA.getByRole("menuitemradio", { name: "All messages" }).click();
     await expect
@@ -229,12 +230,12 @@ test.describe("friends and DMs", () => {
             data: string | null;
           };
           if (!settings.data) return null;
-          const values = JSON.parse(Buffer.from(settings.data, "base64url").toString("utf8"));
-          return values.notificationLevels?.[guild.id] ?? null;
+          const blob = Buffer.from(settings.data, "base64url");
+          return blob[0] === 1 && !blob.includes(Buffer.from(guild.id)) ? "encrypted" : "plaintext";
         },
         { timeout: 10_000 },
       )
-      .toBe("all");
+      .toBe("encrypted");
     await pageA.reload();
     await expect(pageA.getByRole("link", { name: "DM E2E Guild" })).toBeVisible({ timeout: 10_000 });
     // Wait for the settings to load after READY, then check the menu.

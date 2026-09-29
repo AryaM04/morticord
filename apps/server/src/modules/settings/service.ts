@@ -1,5 +1,5 @@
 // Synced user settings. The server stores one opaque blob for each user and
-// never reads it. The client stores JSON now and encrypts it in milestone M6.
+// never reads it. The client encrypts it with the settings key of the user.
 // A save must carry the version the client last read, so two devices cannot
 // overwrite each other by mistake.
 import { and, eq } from "drizzle-orm";
