@@ -5,6 +5,7 @@
 import type { RealtimeState } from "@discord-clone/client-core";
 import type { User } from "@discord-clone/shared";
 import { session } from "./session.js";
+import { serverUrl } from "./server-url.js";
 
 /** The signed-in user's own profile. The session keeps it even before a member row loads. */
 function selfUser(state: RealtimeState, guildId: string | null): User | undefined {
@@ -48,5 +49,5 @@ export function displayNameOf(state: RealtimeState, guildId: string | null, user
 }
 
 export function avatarUrlOf(user: User | undefined): string | undefined {
-  return user?.avatarKey ? `/api/v1/avatars/${user.id}/${user.avatarKey}` : undefined;
+  return user?.avatarKey ? serverUrl(`/api/v1/avatars/${user.id}/${user.avatarKey}`) : undefined;
 }

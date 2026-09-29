@@ -3,20 +3,15 @@
 // The web platform asks our own server for the page data (browsers block
 // other sites). The preview image is encrypted and uploaded as an
 // attachment. See docs/concepts/link-previews.md.
-import {
-  createServerLinkPreviewFetcher,
-  webPlatform,
-  type Platform,
-} from "@discord-clone/client-core";
+import { createServerLinkPreviewFetcher, type FetchLinkPreview } from "@discord-clone/client-core";
 import type { LinkEmbed } from "@discord-clone/shared";
 import { prepareAttachment } from "./attachment-files.js";
+import { currentPlatform } from "./platform.js";
 import { session } from "./session.js";
 
-const platform: Platform = {
-  ...webPlatform,
-  fetchLinkPreview:
-    webPlatform.fetchLinkPreview ?? createServerLinkPreviewFetcher(session.apiClient),
-};
+// The desktop app fetches the page itself. The web app asks its server.
+const fetchLinkPreview: FetchLinkPreview =
+  currentPlatform().fetchLinkPreview ?? createServerLinkPreviewFetcher(session.apiClient);
 
 export interface BuiltLinkPreview {
   embed: LinkEmbed;
@@ -30,7 +25,7 @@ export async function buildLinkPreview(
   url: string,
   signal: AbortSignal,
 ): Promise<BuiltLinkPreview | null> {
-  const data = await platform.fetchLinkPreview!(url);
+  const data = await fetchLinkPreview(url);
   if (!data || signal.aborted) {
     return null;
   }

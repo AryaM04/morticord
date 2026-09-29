@@ -48,7 +48,7 @@ export type SessionStore = SessionState & SessionActions;
 type BroadcastMessage = { type: "signed-in" } | { type: "signed-out" };
 
 export interface CreateSessionOptions {
-  baseUrl: string;
+  baseUrl: string | (() => string);
   platform: Platform;
 }
 

@@ -11,7 +11,8 @@ import {
   applyOutputDeviceLive,
   applyVoiceInputMode,
 } from "../lib/voice.js";
-import { describeKeyCode } from "../lib/ptt.js";
+import { describeKeyCode, shortcutFromEvent } from "../lib/ptt.js";
+import { desktopFeatures } from "../lib/platform.js";
 import { updateVoiceDeviceSettings, voiceDeviceSettingsStore, type VoiceInputMode } from "../lib/voice-settings.js";
 
 // The Audio Output Devices API adds `setSinkId` to `AudioContext`, not yet
@@ -196,7 +197,13 @@ export function VoiceSettingsDialog({ open, onClose }: { open: boolean; onClose:
         setCapturingKey(false);
         return;
       }
-      updateVoiceDeviceSettings({ pttKeyCode: event.code });
+      // The desktop app keeps the modifiers too, for a global shortcut such
+      // as Ctrl + Shift + T. It waits while only a modifier key is down.
+      const pttKeyCode = desktopFeatures() ? shortcutFromEvent(event) : event.code;
+      if (!pttKeyCode) {
+        return;
+      }
+      updateVoiceDeviceSettings({ pttKeyCode });
       applyVoiceInputMode();
       setCapturingKey(false);
     }
@@ -397,7 +404,9 @@ export function VoiceSettingsDialog({ open, onClose }: { open: boolean; onClose:
               {capturingKey ? "Press a key…" : settings.pttKeyCode ? `Key: ${describeKeyCode(settings.pttKeyCode)}` : "Set key"}
             </button>
             <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-              Push to talk works only while this window has focus.
+              {desktopFeatures()
+                ? "Push to talk works in all apps. Other apps do not get this key, so use a function key or add Ctrl, Alt or Shift."
+                : "Push to talk works only while this window has focus."}
             </span>
           </div>
         )}

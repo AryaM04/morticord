@@ -9,6 +9,7 @@ import { useSession } from "../lib/useSession.js";
 import { describeError } from "../lib/errors.js";
 import { realtimeStore } from "../lib/realtime.js";
 import { rememberLastLocation } from "../lib/lastLocation.js";
+import { serverUrl } from "../lib/server-url.js";
 
 export function InvitePage() {
   const { code } = useParams<{ code: string }>();
@@ -79,7 +80,7 @@ export function InvitePage() {
             <div className="mb-4 flex items-center gap-3">
               {preview.guild.iconKey ? (
                 <img
-                  src={`/api/v1/icons/${preview.guild.id}/${preview.guild.iconKey}`}
+                  src={serverUrl(`/api/v1/icons/${preview.guild.id}/${preview.guild.iconKey}`)}
                   alt=""
                   className="h-12 w-12 rounded-full object-cover"
                 />

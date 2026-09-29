@@ -34,8 +34,21 @@ if (!rootElement) {
   throw new Error("Root element not found. Check the id in index.html.");
 }
 
-createRoot(rootElement).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+/**
+ * The desktop app (Tauri) puts `__TAURI_INTERNALS__` on the window. Its
+ * platform loads with a dynamic import, so the web bundle does not grow.
+ * It sets the server address and the platform before the app renders.
+ */
+async function start(root: HTMLElement): Promise<void> {
+  if ("__TAURI_INTERNALS__" in window) {
+    const { startDesktop } = await import("./desktop/tauri-platform.js");
+    await startDesktop(root);
+  }
+  createRoot(root).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+}
+
+void start(rootElement);

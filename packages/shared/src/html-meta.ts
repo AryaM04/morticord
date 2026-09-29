@@ -102,3 +102,19 @@ export function readHtmlMeta(
     ),
   };
 }
+
+/**
+ * Decode the bytes of an HTML page to text. The charset comes from the
+ * Content-Type header, or else from a `<meta charset>` tag near the start
+ * of the page. The default is UTF-8.
+ */
+export function decodeHtml(bytes: Uint8Array, contentType: string): string {
+  const declared =
+    /charset=["']?([\w-]+)/i.exec(contentType)?.[1] ??
+    /<meta[^>]+charset=["']?([\w-]+)/i.exec(new TextDecoder("latin1").decode(bytes.subarray(0, 2048)))?.[1];
+  try {
+    return new TextDecoder(declared ?? "utf-8").decode(bytes);
+  } catch {
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+}

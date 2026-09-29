@@ -12,6 +12,7 @@ import {
 import { GatewayOpcode } from "@discord-clone/shared";
 import { session } from "./session.js";
 import { messagesStore } from "./messages.js";
+import { gatewayUrl } from "./server-url.js";
 
 export const realtimeStore = createRealtimeStore();
 
@@ -35,11 +36,6 @@ export function subscribeDispatch(listener: (event: GatewayDispatch) => void): (
   return () => {
     dispatchListeners.delete(listener);
   };
-}
-
-function gatewayUrl(): string {
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${window.location.host}/gateway`;
 }
 
 function startGateway(deviceId: string): void {

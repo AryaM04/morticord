@@ -2,6 +2,7 @@
 // image fails to load.
 import { useState } from "react";
 import type { User } from "@discord-clone/shared";
+import { serverUrl } from "../lib/server-url.js";
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).slice(0, 2);
@@ -15,7 +16,7 @@ export function Avatar({ user, size = 40 }: { user: User; size?: number }) {
   if (user.avatarKey && !failed) {
     return (
       <img
-        src={`/api/v1/avatars/${user.id}/${user.avatarKey}`}
+        src={serverUrl(`/api/v1/avatars/${user.id}/${user.avatarKey}`)}
         alt={`${user.displayName}'s avatar`}
         className="rounded-full object-cover"
         style={style}

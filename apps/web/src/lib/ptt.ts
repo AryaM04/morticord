@@ -119,8 +119,59 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable === true;
 }
 
-/** A short, readable name for a `KeyboardEvent.code` value, for the settings dialog and the status panel. */
+/** The modifier names of a global shortcut, in the order that `shortcutFromEvent` writes them. */
+const SHORTCUT_MODIFIERS = ["Control", "Alt", "Shift", "Super"] as const;
+
+const MODIFIER_CODES = new Set([
+  "ControlLeft",
+  "ControlRight",
+  "ShiftLeft",
+  "ShiftRight",
+  "AltLeft",
+  "AltRight",
+  "MetaLeft",
+  "MetaRight",
+  "OSLeft",
+  "OSRight",
+]);
+
+/** The parts of a keyboard event that a shortcut uses. A plain object works in a test. */
+export interface ShortcutKeyEvent {
+  code: string;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  metaKey: boolean;
+}
+
+/**
+ * A global shortcut for the desktop app, such as "Control+Shift+KeyT", from
+ * a key press. Returns null for a modifier key alone: the capture waits for
+ * the main key.
+ */
+export function shortcutFromEvent(event: ShortcutKeyEvent): string | null {
+  if (MODIFIER_CODES.has(event.code) || event.code === "") {
+    return null;
+  }
+  const held = [event.ctrlKey, event.altKey, event.shiftKey, event.metaKey];
+  const parts: string[] = SHORTCUT_MODIFIERS.filter((_name, index) => held[index]);
+  parts.push(event.code);
+  return parts.join("+");
+}
+
+/** The main key code of a shortcut: "KeyT" for "Control+Shift+KeyT", and "Backquote" for "Backquote". */
+export function shortcutKeyCode(shortcut: string): string {
+  return shortcut.split("+").at(-1) ?? shortcut;
+}
+
+/** A short, readable name for a `KeyboardEvent.code` value, or for a shortcut with modifiers, for the settings dialog and the status panel. */
 export function describeKeyCode(code: string): string {
+  if (code.includes("+")) {
+    const parts = code.split("+");
+    const key = parts.pop() ?? "";
+    const names: Record<string, string> = { Control: "Ctrl", Alt: "Alt", Shift: "Shift", Super: "Win/Cmd" };
+    return [...parts.map((part) => names[part] ?? part), describeKeyCode(key)].join(" + ");
+  }
   if (code.startsWith("Key")) return code.slice(3);
   if (code.startsWith("Digit")) return code.slice(5);
   const named: Record<string, string> = {

@@ -1,14 +1,14 @@
 {
   "name": "@discord-clone/desktop-tauri",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
     "typecheck": "echo \"no typescript in this package\"",
     "lint": "echo \"no lint target in this package\"",
-    "test": "echo \"no tests yet\""
+    "test": "echo \"The Rust tests run with cargo test in src-tauri (see the desktop job in ci.yml).\""
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0"

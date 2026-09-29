@@ -4,7 +4,8 @@
 // device runs the crypto layer: it holds a Web Lock. A different tab shows
 // a banner and waits for the lock. See docs/concepts/olm-megolm.md.
 import type { BackupStatus, CryptoHandle, VerificationView } from "@discord-clone/client-core/crypto";
-import { ApiError, postEvent, webPlatform } from "@discord-clone/client-core";
+import { ApiError, postEvent } from "@discord-clone/client-core";
+import { currentPlatform } from "./platform.js";
 import { encodeBase64Url } from "@discord-clone/shared";
 import { createStore } from "zustand/vanilla";
 import { messageCodec, setCryptoHandle } from "./messages.js";
@@ -107,7 +108,7 @@ function start(userId: string, deviceId: string): void {
     const started = await crypto.startCrypto({
       userId,
       deviceId,
-      secureStore: webPlatform.secureStore,
+      secureStore: currentPlatform().secureStore,
       transport: crypto.createHttpCryptoTransport(session.apiClient, gatewaySend),
       log: (message) => console.warn(`[crypto] ${message}`),
       isOnline: (userId) => realtimeStore.getState().presences[userId] !== "offline",

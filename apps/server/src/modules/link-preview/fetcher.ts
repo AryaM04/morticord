@@ -16,8 +16,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import http, { type IncomingMessage } from "node:http";
 import https from "node:https";
 import { BlockList, isIP, type LookupFunction } from "node:net";
-import { LINK_PREVIEW_IMAGE_TYPES } from "@discord-clone/shared";
-import { readHtmlMeta } from "./html-meta.js";
+import { decodeHtml, LINK_PREVIEW_IMAGE_TYPES, readHtmlMeta } from "@discord-clone/shared";
 
 export const LINK_PREVIEW_TIMEOUT_MS = 3000;
 export const MAX_HTML_BYTES = 512 * 1024;
@@ -268,17 +267,6 @@ export function createLinkPreviewFetcher(options: LinkPreviewFetcherOptions = {}
       response.destroy();
     }
     return Buffer.concat(chunks);
-  }
-
-  function decodeHtml(bytes: Buffer, contentType: string): string {
-    const declared =
-      /charset=["']?([\w-]+)/i.exec(contentType)?.[1] ??
-      /<meta[^>]+charset=["']?([\w-]+)/i.exec(bytes.subarray(0, 2048).toString("latin1"))?.[1];
-    try {
-      return new TextDecoder(declared ?? "utf-8").decode(bytes);
-    } catch {
-      return new TextDecoder("utf-8").decode(bytes);
-    }
   }
 
   async function fetchImage(

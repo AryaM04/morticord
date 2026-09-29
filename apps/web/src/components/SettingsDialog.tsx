@@ -9,11 +9,14 @@ import { Avatar } from "./Avatar.js";
 import { describeError } from "../lib/errors.js";
 import { useSession } from "../lib/useSession.js";
 import { session } from "../lib/session.js";
+import { desktopFeatures } from "../lib/platform.js";
 
 // The notification part loads only when the dialog opens, to keep the main bundle small.
 const NotificationSettings = lazy(() => import("./NotificationSettings.js"));
 const MessageSettings = lazy(() => import("./MessageSettings.js"));
 const SecurityDialog = lazy(() => import("./SecurityDialog.js"));
+// Only the desktop app has this part: the server address and the tray setting.
+const DesktopSettings = lazy(() => import("../desktop/DesktopSettings.js"));
 
 const MAX_AVATAR_BYTES = 1024 * 1024;
 const ALLOWED_AVATAR_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -145,6 +148,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         <Suspense fallback={null}>
           <NotificationSettings />
           <MessageSettings />
+          {desktopFeatures() && <DesktopSettings />}
         </Suspense>
       )}
 

@@ -17,6 +17,7 @@ import {
   voiceStore,
 } from "../lib/voice.js";
 import { describeKeyCode } from "../lib/ptt.js";
+import { desktopFeatures } from "../lib/platform.js";
 import { voiceDeviceSettingsStore } from "../lib/voice-settings.js";
 import { VoiceSettingsDialogLoader } from "./VoiceSettingsDialogLoader.js";
 
@@ -38,6 +39,8 @@ export function VoiceStatusPanel() {
   const errorMessage = useStore(voiceStore, (s) => s.errorMessage);
   const pttActive = useStore(voiceStore, (s) => s.pttActive);
   const inputMode = useStore(voiceDeviceSettingsStore, (s) => s.inputMode);
+  // For example, the macOS desktop app cannot share a screen (see docs/concepts/desktop-shells.md).
+  const screenUnavailableReason = desktopFeatures()?.screenShareUnavailableReason ?? null;
   const pttKeyCode = useStore(voiceDeviceSettingsStore, (s) => s.pttKeyCode);
   const channelName = useRealtime((s) => {
     if (!channelId) return undefined;
@@ -134,23 +137,33 @@ export function VoiceStatusPanel() {
         >
           {cameraOn ? "Stop camera" : "Camera"}
         </button>
-        <button
-          type="button"
-          onClick={toggleScreenShare}
-          aria-pressed={screenOn}
-          disabled={!screenShareSupported}
-          title={
-            !screenShareSupported ? "This browser does not support screen sharing." : undefined
-          }
-          data-voice-screen={screenOn}
-          className="flex-1 rounded px-2 py-1 text-xs"
-          style={{
-            backgroundColor: screenOn ? "var(--color-accent)" : "var(--color-bg-main)",
-            color: screenOn ? "white" : "var(--color-text-primary)",
-          }}
-        >
-          {screenOn ? "Stop share" : "Share screen"}
-        </button>
+        {screenUnavailableReason ? (
+          <span
+            className="flex-1 text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+            data-voice-screen-unavailable="true"
+          >
+            {screenUnavailableReason}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={toggleScreenShare}
+            aria-pressed={screenOn}
+            disabled={!screenShareSupported}
+            title={
+              !screenShareSupported ? "This browser does not support screen sharing." : undefined
+            }
+            data-voice-screen={screenOn}
+            className="flex-1 rounded px-2 py-1 text-xs"
+            style={{
+              backgroundColor: screenOn ? "var(--color-accent)" : "var(--color-bg-main)",
+              color: screenOn ? "white" : "var(--color-text-primary)",
+            }}
+          >
+            {screenOn ? "Stop share" : "Share screen"}
+          </button>
+        )}
       </div>
       {serverMuted && (
         <span

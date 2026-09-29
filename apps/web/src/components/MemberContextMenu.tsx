@@ -28,6 +28,7 @@ import { realtimeStore } from "../lib/realtime.js";
 import { useRealtime } from "../lib/useRealtime.js";
 import { openDmWith } from "../lib/dms.js";
 import { currentCrypto } from "../lib/crypto.js";
+import { serverUrl } from "../lib/server-url.js";
 
 // A stable fallback: a fresh `[]` on every render would break the store
 // subscription (it always looks "changed"), causing a render loop.
@@ -160,7 +161,7 @@ export function MemberContextMenu({
       <div className="mb-2 flex items-center gap-2">
         {member.user?.avatarKey ? (
           <img
-            src={`/api/v1/avatars/${member.userId}/${member.user.avatarKey}`}
+            src={serverUrl(`/api/v1/avatars/${member.userId}/${member.user.avatarKey}`)}
             alt=""
             className="h-10 w-10 rounded-full object-cover"
           />

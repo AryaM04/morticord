@@ -16,6 +16,7 @@ import { session } from "../lib/session.js";
 import { describeError } from "../lib/errors.js";
 import { realtimeStore } from "../lib/realtime.js";
 import { useRealtime } from "../lib/useRealtime.js";
+import { serverUrl } from "../lib/server-url.js";
 
 const RolesTab = lazy(() => import("./RolesTab.js").then((mod) => ({ default: mod.RolesTab })));
 const MembersTab = lazy(() =>
@@ -190,7 +191,7 @@ export function GuildSettingsDialog({
               <div className="mb-4 flex items-center gap-3">
                 {guild.iconKey ? (
                   <img
-                    src={`/api/v1/icons/${guild.id}/${guild.iconKey}`}
+                    src={serverUrl(`/api/v1/icons/${guild.id}/${guild.iconKey}`)}
                     alt=""
                     className="h-14 w-14 rounded-full object-cover"
                   />
