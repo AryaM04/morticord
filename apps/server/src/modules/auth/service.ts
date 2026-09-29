@@ -10,6 +10,7 @@ import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
 import type { Mailer } from "../../mailer.js";
 import type { GatewayService } from "../gateway/service.js";
+import { announceDeviceListChange, retireDevices } from "../keys/service.js";
 import { toUserJson, type UserRow } from "../users/serialize.js";
 import {
   EMAIL_VERIFY_TOKEN_TTL_MS,
@@ -38,6 +39,17 @@ function getDummyHash(): Promise<string> {
     dummyHashPromise = hash("a-dummy-password-used-only-for-constant-time-checks");
   }
   return dummyHashPromise;
+}
+
+/**
+ * A device that loses all its refresh tokens never signs in again. Take it
+ * out of every device list, so no one encrypts for it any more.
+ */
+async function retireDeviceKeys(deps: AuthDeps, deviceIds: string[]): Promise<void> {
+  const userIds = await retireDevices(deps.db, deviceIds);
+  for (const userId of userIds) {
+    await announceDeviceListChange(deps, userId);
+  }
 }
 
 function isUniqueViolation(error: unknown, constraintPart: string): boolean {
@@ -256,6 +268,7 @@ export async function refreshSession(deps: AuthDeps, refreshToken: string): Prom
         .update(refreshTokens)
         .set({ revokedAt: now })
         .where(and(eq(refreshTokens.deviceId, existingRow.deviceId), isNull(refreshTokens.revokedAt)));
+      await retireDeviceKeys(deps, [existingRow.deviceId]);
       throw new AppError(401, "TOKEN_REUSED", "This refresh token was already used. All sessions on this device are signed out.");
     }
 
@@ -290,8 +303,9 @@ export async function logoutDevice(deps: AuthDeps, deviceId: string): Promise<vo
     .update(refreshTokens)
     .set({ revokedAt: new Date() })
     .where(and(eq(refreshTokens.deviceId, deviceId), isNull(refreshTokens.revokedAt)));
-  // The device row stays. Its E2EE keys, if any, are still valid for
-  // events sent to it while it was signed in.
+  // The device row stays, because old events name it as the sender. Its
+  // keys leave every device list.
+  await retireDeviceKeys(deps, [deviceId]);
   deps.gateway?.closeDevice(deviceId, GatewayCloseCode.DEVICE_REVOKED, "Signed out.");
 }
 
@@ -331,9 +345,9 @@ export async function listDevices(
 
 /**
  * Revoke a device's refresh tokens, so it must sign in again. The device
- * row is deleted only when it holds no end-to-end encryption keys; a
- * device with keys stays, since other devices may still send it queued
- * "to-device" events under those keys.
+ * row is deleted only when it holds no end-to-end encryption keys. A
+ * device with keys stays, because old events name it as the sender, but
+ * it leaves every device list.
  */
 export async function deleteDevice(deps: AuthDeps, userId: bigint, deviceId: string): Promise<void> {
   const { db } = deps;
@@ -356,6 +370,8 @@ export async function deleteDevice(deps: AuthDeps, userId: bigint, deviceId: str
 
   if (device.curve25519Key === null) {
     await db.delete(devices).where(eq(devices.id, deviceId));
+  } else {
+    await retireDeviceKeys(deps, [deviceId]);
   }
 
   deps.gateway?.closeDevice(deviceId, GatewayCloseCode.DEVICE_REVOKED, "This device was removed.");
@@ -453,6 +469,11 @@ export async function resetPassword(deps: AuthDeps, token: string, newPassword: 
     .update(refreshTokens)
     .set({ revokedAt: now })
     .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+  const userDevices = await db.select({ id: devices.id }).from(devices).where(eq(devices.userId, userId));
+  await retireDeviceKeys(
+    deps,
+    userDevices.map((row) => row.id),
+  );
 
   deps.gateway?.closeUser(userId, GatewayCloseCode.DEVICE_REVOKED, "The password was reset.");
 }

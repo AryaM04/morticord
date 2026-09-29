@@ -50,6 +50,20 @@
       "when": 1790648818470,
       "tag": "0006_m5_dms_friends_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790666334804,
+      "tag": "0007_m6_drop_unused_key_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790666357216,
+      "tag": "0008_m6_keys_and_to_device",
+      "breakpoints": true
     }
   ]
 }

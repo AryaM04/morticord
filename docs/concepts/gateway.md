@@ -68,6 +68,14 @@ After the 60 seconds pass, the server drops the session and its buffer
 for good, so memory use stays flat no matter how many connections have
 come and gone.
 
+## To-device messages
+
+`TO_DEVICE` dispatches have no `s` and are not in the resume buffer. The
+`to_device_queue` table is their durable store. The server sends queued
+messages after `IDENTIFY`, after `RESUME` and when a new message arrives.
+The client sends op `TO_DEVICE_ACK` (15) to delete processed messages.
+See `docs/concepts/olm-megolm.md` section 6.
+
 ## Fan-out
 
 The server never guesses who should get an event: it sends a dispatch

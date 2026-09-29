@@ -16,8 +16,11 @@ import { registerAuthRoutes } from "./modules/auth/routes.js";
 import { registerDmRoutes } from "./modules/dms/routes.js";
 import { registerFriendRoutes } from "./modules/friends/routes.js";
 import { registerGuildRoutes } from "./modules/guilds/routes.js";
+import { registerKeyRoutes } from "./modules/keys/routes.js";
 import { registerMessageRoutes } from "./modules/messages/routes.js";
 import { registerSettingsRoutes } from "./modules/settings/routes.js";
+import { registerToDeviceRoutes } from "./modules/to-device/routes.js";
+import { ToDeviceDelivery, TO_DEVICE_QUEUE_LIMIT } from "./modules/to-device/service.js";
 import { registerUserRoutes } from "./modules/users/routes.js";
 import { CallRinger } from "./modules/voice/calls.js";
 import { registerVoiceRoutes } from "./modules/voice/routes.js";
@@ -43,6 +46,8 @@ export interface AppDeps {
   callRingMs?: number;
   /** The DM call ringer. buildApp makes one when it is left out. */
   ringer?: CallRinger;
+  /** The most queued to-device messages for each device. Tests can lower it. */
+  toDeviceQueueLimit?: number;
 }
 
 const IMAGE_CONTENT_TYPES = ["image/png", "image/jpeg", "image/webp"];
@@ -54,6 +59,7 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
   const voice = rawDeps.voice ?? new VoiceService(rawDeps.voiceGraceMs);
   const ringer = rawDeps.ringer ?? new CallRinger(gateway, rawDeps.callRingMs);
   const deps: AppDeps = { ...rawDeps, gateway, voice, ringer };
+  const delivery = new ToDeviceDelivery(deps.db, gateway, app.log);
   app.addHook("onClose", async () => ringer.dispose());
 
   // Raw image bytes for the avatar upload route. Fastify parses only JSON
@@ -89,7 +95,13 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
   await app.register(async (instance) => registerGuildRoutes(instance, deps), { prefix: "/api/v1" });
   await app.register(async (instance) => registerMessageRoutes(instance, deps), { prefix: "/api/v1" });
   await app.register(async (instance) => registerVoiceRoutes(instance, deps), { prefix: "/api/v1" });
-  registerGatewayRoute(app, { db: deps.db, config: deps.config, gateway, voice, ringer }, deps.gatewayTiming);
+  await app.register(async (instance) => registerKeyRoutes(instance, deps), { prefix: "/api/v1" });
+  await app.register(
+    async (instance) =>
+      registerToDeviceRoutes(instance, { ...deps, delivery, toDeviceQueueLimit: deps.toDeviceQueueLimit ?? TO_DEVICE_QUEUE_LIMIT }),
+    { prefix: "/api/v1" },
+  );
+  registerGatewayRoute(app, { db: deps.db, config: deps.config, gateway, voice, ringer, delivery }, deps.gatewayTiming);
 
   return app;
 }

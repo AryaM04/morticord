@@ -545,6 +545,21 @@ export class GatewayService {
     return false;
   }
 
+  /**
+   * Send one event to one live session, with no sequence number and no
+   * resume buffering. The to-device queue uses this: its table is the
+   * durable store, so a resume must not replay it. Returns false when the
+   * session has no open socket.
+   */
+  sendToSession(sessionId: string, t: DispatchEventName, d: unknown): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session?.ws || session.ws.readyState !== OPEN) {
+      return false;
+    }
+    session.ws.send(JSON.stringify({ op: GatewayOpcode.DISPATCH, t, d }));
+    return true;
+  }
+
   private dispatchToSession(sessionId: string, t: DispatchEventName, d: unknown): void {
     const session = this.sessions.get(sessionId);
     if (!session) {
