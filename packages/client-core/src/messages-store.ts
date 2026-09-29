@@ -5,8 +5,9 @@
 // zustand store and adds the I/O: the codec, the REST calls and the
 // gateway send.
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { encodeBase64Url, GatewayOpcode, type DecryptedPayload, type EventJson } from "@discord-clone/shared";
+import { encodeBase64Url, GatewayOpcode, type Attachment, type DecryptedPayload, type EventJson } from "@discord-clone/shared";
 import { ApiError, type ApiClient } from "./api.js";
+import { claimAttachment } from "./attachments.js";
 import type { PayloadCodec } from "./codec.js";
 import * as messagesApi from "./messages-api.js";
 
@@ -47,6 +48,8 @@ export interface PendingMessage {
   mentions: string[];
   relType?: "reply";
   relatesToId?: string;
+  /** Encrypted files that are already uploaded. */
+  attachments?: Attachment[];
   createdAt: string;
   state: PendingSendState;
   /** Why the last send failed, in words for people. Only set when `state` is "failed". */
@@ -75,6 +78,8 @@ export interface AggregatedMessage {
   cannotRead: boolean;
   body: string;
   mentions: string[];
+  /** The encrypted files of the message. An edit does not change them. */
+  attachments: Attachment[];
   edited: boolean;
   reactions: AggregatedReaction[];
 }
@@ -108,6 +113,7 @@ export function aggregateEvent(
     cannotRead: false,
     body: "",
     mentions: [],
+    attachments: [],
     edited: false,
     reactions: [],
   };
@@ -124,6 +130,9 @@ export function aggregateEvent(
   } else if (ownPayload && ownPayload.type !== "reaction") {
     base.body = ownPayload.body;
     base.mentions = ownPayload.mentions;
+    if (ownPayload.type === "message") {
+      base.attachments = ownPayload.attachments;
+    }
   }
 
   // The latest edit (highest event id) from the ORIGINAL sender wins.
@@ -734,7 +743,13 @@ export interface MessagesActions {
   loadNewer(channelId: string): Promise<void>;
   jumpTo(channelId: string, eventId: string): Promise<void>;
   refetchLatest(channelId: string): Promise<void>;
-  sendMessage(channelId: string, body: string, mentions: string[], relatesToId?: string): Promise<void>;
+  sendMessage(
+    channelId: string,
+    body: string,
+    mentions: string[],
+    relatesToId?: string,
+    attachments?: Attachment[],
+  ): Promise<void>;
   retryPending(channelId: string, nonce: string): Promise<void>;
   discardPending(channelId: string, nonce: string): void;
   sendReaction(channelId: string, eventId: string, key: string): Promise<void>;
@@ -843,6 +858,17 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
     return trimWindow({ ...result, eventIds: [...next.eventIds, ...later], eventsById }, "after");
   }
 
+  /** Claim the files of a sent message, so the server keeps them. A failed claim only logs: the next send claims again. */
+  function claimAll(attachments: Attachment[] | undefined): void {
+    for (const attachment of attachments ?? []) {
+      for (const id of [attachment.id, attachment.thumbnail?.id]) {
+        if (id) {
+          claimAttachment(api, id).catch(() => {});
+        }
+      }
+    }
+  }
+
   const store = createStore<MessagesStore>((set, get) => ({
     ...createInitialMessagesState(),
 
@@ -913,7 +939,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
       });
     },
 
-    async sendMessage(channelId, body, mentions, relatesToId) {
+    async sendMessage(channelId, body, mentions, relatesToId, attachments = []) {
       // A sent message ends the typing state. The next keystroke must send TYPING again at once.
       updateChannel(get, set, channelId, (c) => ({ ...c, lastTypingSentAt: -Infinity }));
       const nonce = makeNonce();
@@ -924,6 +950,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
         mentions,
         relType: relatesToId ? "reply" : undefined,
         relatesToId,
+        attachments,
         createdAt: new Date(now()).toISOString(),
         state: "sending",
       };
@@ -933,7 +960,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
           type: "message",
           body,
           mentions,
-          attachments: [],
+          attachments,
           embeds: [],
         });
         const event = await messagesApi.postEvent(api, channelId, {
@@ -945,6 +972,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
           nonce,
         });
         updateChannel(get, set, channelId, (c) => reconcilePosted(c, event));
+        claimAll(attachments);
         await decodeAndStore(get, set, channelId, [event]);
       } catch (error) {
         updateChannel(get, set, channelId, (c) => markPendingFailed(c, nonce, sendErrorText(error)));
@@ -961,7 +989,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
           type: "message",
           body: pending.body,
           mentions: pending.mentions,
-          attachments: [],
+          attachments: pending.attachments ?? [],
           embeds: [],
         });
         const event = await messagesApi.postEvent(api, channelId, {
@@ -973,6 +1001,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
           nonce,
         });
         updateChannel(get, set, channelId, (c) => reconcilePosted(c, event));
+        claimAll(pending.attachments);
         await decodeAndStore(get, set, channelId, [event]);
       } catch (error) {
         updateChannel(get, set, channelId, (c) => markPendingFailed(c, nonce, sendErrorText(error)));

@@ -1,10 +1,12 @@
 // The message composer: an autosize textarea, plus the reply/edit banner
 // above it and the @-mention suggestion listbox. Enter sends. Shift+Enter
 // starts a new line. Escape cancels a reply, an edit, or the mention
-// listbox. ArrowUp in an empty box edits the sender's last message.
+// listbox. ArrowUp in an empty box edits the sender's last message. Files come from
+// the attach button, a drop or a paste. Each file is encrypted and uploaded
+// at once, and the message sends when every upload is done.
 import { useEffect, useId, useRef, useState } from "react";
-import type { GuildMemberJson, User } from "@discord-clone/shared";
-import { searchGuildMembers } from "@discord-clone/client-core";
+import { MAX_ATTACHMENTS, type Attachment, type GuildMemberJson, type User } from "@discord-clone/shared";
+import { formatFileSize, searchGuildMembers } from "@discord-clone/client-core";
 import { messagesStore } from "../lib/messages.js";
 import { session } from "../lib/session.js";
 import { Avatar } from "./Avatar.js";
@@ -16,6 +18,20 @@ const MENTION_RE = /<@(\d+)>/g;
 const MAX_MENTIONS = 50;
 const MENTION_SEARCH_DEBOUNCE_MS = 150;
 const MENTION_SEARCH_LIMIT = 10;
+/** The default server limit. The server gives the real error when its limit is lower. */
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+
+interface Upload {
+  key: number;
+  name: string;
+  size: number;
+  progress: number;
+  controller: AbortController;
+  result?: Attachment;
+  error?: string;
+}
+
+let uploadCounter = 0;
 
 /** Extract every `<@id>` token from a message body, in order, with no duplicate and at most 50. */
 export function extractMentions(text: string): string[] {
@@ -112,6 +128,8 @@ export function Composer(props: ComposerProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchGenerationRef = useRef(0);
+  const [uploads, setUploads] = useState<Upload[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (editTarget) {
@@ -131,7 +149,60 @@ export function Composer(props: ComposerProps) {
   // channel changes, so a stale query from another channel never shows.
   useEffect(() => {
     closeMentionMenu();
+    // Files belong to one channel. Cancel the uploads when the channel changes.
+    setUploads((current) => {
+      current.forEach((upload) => upload.controller.abort());
+      return [];
+    });
   }, [channelId]);
+
+  function updateUpload(key: number, patch: Partial<Upload>): void {
+    setUploads((current) => current.map((upload) => (upload.key === key ? { ...upload, ...patch } : upload)));
+  }
+
+  function addFiles(files: File[]): void {
+    if (!props.canSend || editTarget || files.length === 0) {
+      return;
+    }
+    const room = MAX_ATTACHMENTS - uploads.length;
+    const added: Upload[] = files.slice(0, Math.max(0, room)).map((file) => ({
+      key: ++uploadCounter,
+      name: file.name,
+      size: file.size,
+      progress: 0,
+      controller: new AbortController(),
+      error: file.size > MAX_FILE_BYTES ? `The file is larger than ${formatFileSize(MAX_FILE_BYTES)}.` : undefined,
+    }));
+    setUploads((current) => [...current, ...added]);
+    added.forEach((upload, index) => {
+      if (upload.error) {
+        return;
+      }
+      void import("../lib/attachment-files.js")
+        .then((module) =>
+          module.prepareAttachment(channelId, files[index]!, upload.controller.signal, (progress) =>
+            updateUpload(upload.key, { progress }),
+          ),
+        )
+        .then((result) => updateUpload(upload.key, { result, progress: 1 }))
+        .catch((error: unknown) => {
+          if (!upload.controller.signal.aborted) {
+            updateUpload(upload.key, { error: error instanceof Error ? error.message : "The file could not be uploaded." });
+          }
+        });
+    });
+  }
+
+  function removeUpload(key: number): void {
+    setUploads((current) =>
+      current.filter((upload) => {
+        if (upload.key === key) {
+          upload.controller.abort();
+        }
+        return upload.key !== key;
+      }),
+    );
+  }
 
   function closeMentionMenu(): void {
     setMentionQuery(null);
@@ -221,9 +292,12 @@ export function Composer(props: ComposerProps) {
     });
   }
 
+  const uploading = uploads.some((upload) => !upload.result && !upload.error);
+  const ready = uploads.flatMap((upload) => (upload.result ? [upload.result] : []));
+
   function submit(): void {
     const body = text.trim();
-    if (body.length === 0 || body.length > MAX_BODY_LENGTH) {
+    if ((body.length === 0 && ready.length === 0) || body.length > MAX_BODY_LENGTH || uploading) {
       return;
     }
     const mentions = extractMentions(body);
@@ -231,8 +305,9 @@ export function Composer(props: ComposerProps) {
       void messagesStore.getState().editMessage(channelId, editTarget.id, body, mentions);
       props.onCancelEdit();
     } else {
-      void messagesStore.getState().sendMessage(channelId, body, mentions, props.replyTarget?.id);
+      void messagesStore.getState().sendMessage(channelId, body, mentions, props.replyTarget?.id, ready);
       props.onCancelReply();
+      setUploads([]);
     }
     setText("");
     closeMentionMenu();
@@ -340,10 +415,66 @@ export function Composer(props: ComposerProps) {
           ))}
         </div>
       )}
+      {uploads.length > 0 && (
+        <ul className="mb-1 flex flex-wrap gap-2" aria-label="Files to send">
+          {uploads.map((upload) => (
+            <li
+              key={upload.key}
+              className="flex items-center gap-2 rounded border px-2 py-1 text-xs"
+              style={{ borderColor: upload.error ? "#e05252" : "var(--color-border)" }}
+              data-upload-state={upload.error ? "failed" : upload.result ? "ready" : "uploading"}
+            >
+              <span className="max-w-40 truncate">{upload.name}</span>
+              <span style={{ color: upload.error ? "#e05252" : "var(--color-text-muted)" }}>
+                {upload.error ?? (upload.result ? formatFileSize(upload.size) : `${Math.round(upload.progress * 100)}%`)}
+              </span>
+              <button type="button" onClick={() => removeUpload(upload.key)} aria-label={`Remove ${upload.name}`}>
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div
         className="flex items-end gap-2 rounded px-3 py-2"
         style={{ backgroundColor: "var(--color-bg-sidebar)" }}
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes("Files")) {
+            event.preventDefault();
+          }
+        }}
+        onDrop={(event) => {
+          if (event.dataTransfer.files.length > 0) {
+            event.preventDefault();
+            addFiles([...event.dataTransfer.files]);
+          }
+        }}
       >
+        {props.canSend && !editTarget && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              aria-label="Files to attach"
+              onChange={(event) => {
+                addFiles([...(event.target.files ?? [])]);
+                event.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              aria-label="Attach files"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploads.length >= MAX_ATTACHMENTS}
+              className="rounded px-1.5 py-1 text-base"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              +
+            </button>
+          </>
+        )}
         <textarea
           ref={textareaRef}
           rows={1}
@@ -366,6 +497,12 @@ export function Composer(props: ComposerProps) {
           }}
           onSelect={(event) => syncMentionQuery(event.currentTarget, event.currentTarget.value)}
           onKeyDown={handleKeyDown}
+          onPaste={(event) => {
+            if (event.clipboardData.files.length > 0) {
+              event.preventDefault();
+              addFiles([...event.clipboardData.files]);
+            }
+          }}
           className="max-h-60 flex-1 resize-none bg-transparent py-1 text-sm outline-none"
           style={{ color: "var(--color-text-primary)" }}
         />
@@ -389,7 +526,12 @@ export function Composer(props: ComposerProps) {
         <button
           type="button"
           onClick={submit}
-          disabled={!props.canSend || text.trim().length === 0 || text.length > MAX_BODY_LENGTH}
+          disabled={
+            !props.canSend ||
+            uploading ||
+            (text.trim().length === 0 && ready.length === 0) ||
+            text.length > MAX_BODY_LENGTH
+          }
           className="rounded px-3 py-1 text-sm font-medium"
           style={{ backgroundColor: "var(--color-accent)", color: "white" }}
         >

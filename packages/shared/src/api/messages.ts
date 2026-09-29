@@ -23,12 +23,50 @@ export const MAX_MEGOLM_SESSION_ID_LENGTH = 64;
 
 const mentionsSchema = z.array(idSchema).max(MAX_MENTIONS);
 
+export const MAX_ATTACHMENTS = 10;
+export const MAX_THUMBNAIL_SIZE = 320;
+
+const base64UrlText = (bytes: number) =>
+  z.string().length(Math.ceil((bytes * 4) / 3)).regex(/^[A-Za-z0-9_-]+$/, "This is not valid base64url text.");
+
+/** The AES-256-GCM key, the 12-byte IV and the SHA-256 of the ciphertext of one encrypted file, as base64url. */
+const fileSecretsSchema = z.object({
+  key: base64UrlText(32),
+  iv: base64UrlText(12),
+  sha256: base64UrlText(32),
+});
+
+const dimensionSchema = z.number().int().positive().max(100_000);
+
+export const attachmentThumbnailSchema = fileSecretsSchema.extend({
+  id: idSchema,
+  width: z.number().int().positive().max(MAX_THUMBNAIL_SIZE),
+  height: z.number().int().positive().max(MAX_THUMBNAIL_SIZE),
+});
+export type AttachmentThumbnail = z.infer<typeof attachmentThumbnailSchema>;
+
+/**
+ * One encrypted file of a message. The server has only the ciphertext,
+ * under `id`. The key, the name and the type are only in this payload.
+ */
+export const attachmentSchema = fileSecretsSchema.extend({
+  id: idSchema,
+  name: z.string().min(1).max(255),
+  mime: z.string().max(255),
+  /** The size of the plaintext, in bytes. */
+  size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  width: dimensionSchema.optional(),
+  height: dimensionSchema.optional(),
+  thumbnail: attachmentThumbnailSchema.optional(),
+});
+export type Attachment = z.infer<typeof attachmentSchema>;
+
 export const messagePayloadSchema = z.object({
   type: z.literal("message"),
   body: z.string().max(MAX_MESSAGE_BODY_LENGTH),
   mentions: mentionsSchema.default([]),
-  /** Filled in from milestone M6. Always empty in the plaintext codec. */
-  attachments: z.array(z.never()).default([]),
+  /** Encrypted files (milestone M6). */
+  attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS).default([]),
   /** Filled in from milestone M6. Always empty in the plaintext codec. */
   embeds: z.array(z.never()).default([]),
 });

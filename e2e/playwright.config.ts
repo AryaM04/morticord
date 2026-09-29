@@ -20,6 +20,8 @@ loadRootEnv();
 const FIXTURE_PORT = 4310;
 const WEB_PORT = 5173;
 const repoRoot = path.join(fileURLToPath(new URL(".", import.meta.url)), "..");
+const E2E_DATA_DIR = path.join(repoRoot, "e2e", ".server-data");
+process.env.E2E_DATA_DIR = E2E_DATA_DIR;
 
 const postgresPort = Number(process.env.POSTGRES_PORT ?? 5432);
 const mailpitUiPort = Number(process.env.MAILPIT_UI_PORT ?? 8025);
@@ -79,6 +81,8 @@ if (authInfraAvailable) {
         ...process.env,
         POSTGRES_DB: "discord_clone_e2e",
         AUTH_RATE_LIMIT_PER_MINUTE: "1000",
+        // attachments.spec.ts reads the stored files here.
+        DATA_DIR: E2E_DATA_DIR,
       } as Record<string, string>,
       timeout: 30_000,
     },
