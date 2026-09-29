@@ -315,9 +315,12 @@ only), and from pass 2: `megolm.session`, `megolm.forward`,
 `megolm.request`, `voice.signal`.
 
 The client acknowledges a message after the session state, the account
-state and the seen id are saved in one IndexedDB transaction, and after
-the handlers of the event are done. A message that fails is dropped and
-acknowledged. It never blocks the queue.
+state, the seen id and the queue id are saved in one IndexedDB
+transaction, and after the handlers of the event are done. A message that
+fails is dropped and acknowledged. It never blocks the queue. Olm can
+decrypt a message only one time, so a crash after the save and before the
+end of the handlers loses the event. Megolm key requests (pass 3) get lost
+room keys again.
 
 ## 7. Local store and the pickle key
 
