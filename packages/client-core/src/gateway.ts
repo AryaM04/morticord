@@ -8,6 +8,14 @@ import {
   guildDeletePayloadSchema,
   guildMemberRemovePayloadSchema,
   channelDeletePayloadSchema,
+  channelRecipientAddPayloadSchema,
+  channelRecipientRemovePayloadSchema,
+  callRingPayloadSchema,
+  callRingStopPayloadSchema,
+  dmChannelSchema,
+  relationshipAddPayloadSchema,
+  relationshipRemovePayloadSchema,
+  userSettingsUpdatePayloadSchema,
   guildSchema,
   guildViewSchema,
   channelSchema,
@@ -30,7 +38,7 @@ import {
   voiceErrorPayloadSchema,
   type DispatchEventName,
 } from "@discord-clone/shared";
-import type { z } from "zod";
+import { z } from "zod";
 
 /** The connection's own lifecycle state, for a connection banner and the like. */
 export type GatewayState = "connecting" | "ready" | "reconnecting" | "closed";
@@ -93,8 +101,8 @@ const DISPATCH_SCHEMAS: Record<string, z.ZodType> = {
   GUILD_CREATE: guildViewSchema,
   GUILD_UPDATE: guildSchema,
   GUILD_DELETE: guildDeletePayloadSchema,
-  CHANNEL_CREATE: channelSchema,
-  CHANNEL_UPDATE: channelSchema,
+  CHANNEL_CREATE: z.union([channelSchema, dmChannelSchema]),
+  CHANNEL_UPDATE: z.union([channelSchema, dmChannelSchema]),
   CHANNEL_DELETE: channelDeletePayloadSchema,
   GUILD_MEMBER_ADD: guildMemberSchema,
   GUILD_MEMBER_UPDATE: guildMemberSchema,
@@ -112,6 +120,13 @@ const DISPATCH_SCHEMAS: Record<string, z.ZodType> = {
   VOICE_STATE_UPDATE: voiceStateUpdatePayloadSchema,
   VOICE_SIGNAL: voiceSignalDispatchPayloadSchema,
   VOICE_ERROR: voiceErrorPayloadSchema,
+  RELATIONSHIP_ADD: relationshipAddPayloadSchema,
+  RELATIONSHIP_REMOVE: relationshipRemovePayloadSchema,
+  CHANNEL_RECIPIENT_ADD: channelRecipientAddPayloadSchema,
+  CHANNEL_RECIPIENT_REMOVE: channelRecipientRemovePayloadSchema,
+  CALL_RING: callRingPayloadSchema,
+  CALL_RING_STOP: callRingStopPayloadSchema,
+  USER_SETTINGS_UPDATE: userSettingsUpdatePayloadSchema,
 };
 
 function defaultCreateSocket(url: string): WebSocketLike {

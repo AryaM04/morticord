@@ -6,9 +6,12 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import type {
   BanJson,
   ChannelJson,
+  DmChannelJson,
   GuildJson,
   GuildMemberJson,
+  RelationshipJson,
   RoleJson,
+  User,
   VisiblePresenceStatus,
   VoiceStateJson,
 } from "@discord-clone/shared";
@@ -30,6 +33,19 @@ export interface RealtimeState {
   presences: Record<string, VisiblePresenceStatus>;
   /** Who is in each voice channel right now: channel id -> user id -> voice state. */
   voiceStatesByChannel: Record<string, Record<string, VoiceStateJson>>;
+  /** Friends, pending requests and blocks of the signed-in user, by the other user's id. */
+  relationships: Record<string, RelationshipJson>;
+  /** Every DM and group DM of the signed-in user, by channel id. */
+  privateChannels: Record<string, DmChannelJson>;
+  /** DM calls that ring for the signed-in user right now, by channel id. */
+  incomingCalls: Record<string, { channelId: string; userId: string }>;
+  /** The newest settings version that another session announced. Null when none came yet. */
+  remoteSettingsVersion: number | null;
+}
+
+/** True when a channel payload is a DM or a group DM, and not a guild channel. */
+export function isDmChannel(channel: ChannelJson | DmChannelJson): channel is DmChannelJson {
+  return channel.type === "dm" || channel.type === "group_dm";
 }
 
 export function createInitialRealtimeState(): RealtimeState {
@@ -44,6 +60,10 @@ export function createInitialRealtimeState(): RealtimeState {
     bansByGuild: {},
     presences: {},
     voiceStatesByChannel: {},
+    relationships: {},
+    privateChannels: {},
+    incomingCalls: {},
+    remoteSettingsVersion: null,
   };
 }
 
@@ -137,6 +157,9 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
           }
         >;
         presences: Array<{ userId: string; status: VisiblePresenceStatus }>;
+        relationships?: RelationshipJson[];
+        privateChannels?: DmChannelJson[];
+        privateVoiceStates?: VoiceStateJson[];
       };
       const next = createInitialRealtimeState();
       next.selfUserId = payload.user.id;
@@ -161,6 +184,13 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       for (const presence of payload.presences) {
         next.presences[presence.userId] = presence.status;
       }
+      for (const relationship of payload.relationships ?? []) {
+        next.relationships[relationship.userId] = relationship;
+      }
+      for (const channel of payload.privateChannels ?? []) {
+        next.privateChannels[channel.id] = channel;
+      }
+      next.voiceStatesByChannel = withVoiceStates(next.voiceStatesByChannel, payload.privateVoiceStates);
       return next;
     }
 
@@ -241,7 +271,10 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
 
     case "CHANNEL_CREATE":
     case "CHANNEL_UPDATE": {
-      const channel = event.d as ChannelJson;
+      const channel = event.d as ChannelJson | DmChannelJson;
+      if (isDmChannel(channel)) {
+        return { ...state, privateChannels: { ...state.privateChannels, [channel.id]: channel } };
+      }
       if (!(channel.guildId in state.guilds)) {
         return state;
       }
@@ -259,7 +292,19 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
     }
 
     case "CHANNEL_DELETE": {
-      const { id, guildId } = event.d as { id: string; guildId: string };
+      const { id, guildId } = event.d as { id: string; guildId: string | null };
+      if (guildId === null) {
+        // A DM or group DM: the person left it, or the owner removed the person.
+        if (!(id in state.privateChannels)) {
+          return state;
+        }
+        return {
+          ...state,
+          privateChannels: without(state.privateChannels, id),
+          incomingCalls: without(state.incomingCalls, id),
+          voiceStatesByChannel: without(state.voiceStatesByChannel, id),
+        };
+      }
       if (!(guildId in state.guilds) || !(id in state.channels)) {
         return state;
       }
@@ -367,6 +412,67 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
     case "PRESENCE_UPDATE": {
       const { userId, status } = event.d as { userId: string; status: VisiblePresenceStatus };
       return { ...state, presences: { ...state.presences, [userId]: status } };
+    }
+
+    case "RELATIONSHIP_ADD": {
+      const relationship = event.d as RelationshipJson;
+      return { ...state, relationships: { ...state.relationships, [relationship.userId]: relationship } };
+    }
+
+    case "RELATIONSHIP_REMOVE": {
+      const { userId } = event.d as { userId: string };
+      if (!(userId in state.relationships)) {
+        return state;
+      }
+      return { ...state, relationships: without(state.relationships, userId) };
+    }
+
+    case "CHANNEL_RECIPIENT_ADD": {
+      const { channelId, user } = event.d as { channelId: string; user: User };
+      const channel = state.privateChannels[channelId];
+      if (!channel || channel.recipients.some((recipient) => recipient.id === user.id)) {
+        return state;
+      }
+      return {
+        ...state,
+        privateChannels: { ...state.privateChannels, [channelId]: { ...channel, recipients: [...channel.recipients, user] } },
+      };
+    }
+
+    case "CHANNEL_RECIPIENT_REMOVE": {
+      const { channelId, userId } = event.d as { channelId: string; userId: string };
+      const channel = state.privateChannels[channelId];
+      if (!channel || !channel.recipients.some((recipient) => recipient.id === userId)) {
+        return state;
+      }
+      return {
+        ...state,
+        privateChannels: {
+          ...state.privateChannels,
+          [channelId]: { ...channel, recipients: channel.recipients.filter((recipient) => recipient.id !== userId) },
+        },
+      };
+    }
+
+    case "CALL_RING": {
+      const ring = event.d as { channelId: string; userId: string };
+      return { ...state, incomingCalls: { ...state.incomingCalls, [ring.channelId]: ring } };
+    }
+
+    case "CALL_RING_STOP": {
+      const { channelId } = event.d as { channelId: string };
+      if (!(channelId in state.incomingCalls)) {
+        return state;
+      }
+      return { ...state, incomingCalls: without(state.incomingCalls, channelId) };
+    }
+
+    case "USER_SETTINGS_UPDATE": {
+      const { version } = event.d as { version: number };
+      if (state.remoteSettingsVersion !== null && state.remoteSettingsVersion >= version) {
+        return state;
+      }
+      return { ...state, remoteSettingsVersion: version };
     }
 
     case "VOICE_STATE_UPDATE": {

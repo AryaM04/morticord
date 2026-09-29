@@ -10,3 +10,6 @@ export * from "./codec.js";
 export * from "./messages-api.js";
 export * from "./messages-store.js";
 export * from "./voice-api.js";
+export * from "./friends-api.js";
+export * from "./dms-api.js";
+export * from "./settings-api.js";

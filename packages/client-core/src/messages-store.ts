@@ -953,6 +953,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
         case "READY": {
           const payload = d as {
             guilds: Array<{ channels: Array<{ id: string; lastEventId: string | null }> }>;
+            privateChannels?: Array<{ id: string; lastEventId: string | null }>;
             readStates: Array<{ channelId: string; lastReadEventId: string | null }>;
           };
           const readByChannel = new Map(payload.readStates.map((r) => [r.channelId, r.lastReadEventId]));
@@ -962,7 +963,19 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
               channels = seedChannelBaseline(channels, channel.id, channel.lastEventId, readByChannel.get(channel.id) ?? null);
             }
           }
+          // A DM works like a guild channel here: the channel id is all this store needs.
+          for (const channel of payload.privateChannels ?? []) {
+            channels = seedChannelBaseline(channels, channel.id, channel.lastEventId, readByChannel.get(channel.id) ?? null);
+          }
           set({ channels });
+          return;
+        }
+        case "CHANNEL_CREATE": {
+          // Only a DM needs a baseline. A guild channel starts empty and needs no seed.
+          const payload = d as { id: string; type: string; lastEventId?: string | null };
+          if (payload.type === "dm" || payload.type === "group_dm") {
+            set({ channels: seedChannelBaseline(state.channels, payload.id, payload.lastEventId ?? null, null) });
+          }
           return;
         }
         case "GUILD_CREATE": {
