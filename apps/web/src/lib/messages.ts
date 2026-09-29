@@ -7,6 +7,7 @@ import { createMessagesStore, decodePlainEvent, type PayloadCodec } from "@disco
 import type { CryptoHandle } from "@discord-clone/client-core/crypto";
 import { session } from "./session.js";
 import { gatewaySend } from "./realtime.js";
+import { queueDecoded, queueRedacted } from "./search-queue.js";
 
 /** Show the encryption setup notice when an encryption takes longer than this. */
 const SETUP_NOTICE_MS = 500;
@@ -88,4 +89,6 @@ export const messagesStore = createMessagesStore({
   api: session.apiClient,
   codec: messageCodec,
   send: gatewaySend,
+  onDecoded: queueDecoded,
+  onRedacted: queueRedacted,
 });
