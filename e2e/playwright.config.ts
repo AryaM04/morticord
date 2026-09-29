@@ -8,6 +8,7 @@
 // servers up, and auth.spec.ts skips itself with a clear message (it does
 // the same reachability check, since it cannot see this config's result
 // any other way).
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
@@ -22,6 +23,10 @@ const WEB_PORT = 5173;
 const repoRoot = path.join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const E2E_DATA_DIR = path.join(repoRoot, "e2e", ".server-data");
 process.env.E2E_DATA_DIR = E2E_DATA_DIR;
+// link-preview.spec.ts reads the server log here, to check that it holds no URL.
+const E2E_SERVER_LOG = path.join(E2E_DATA_DIR, "server.log");
+process.env.E2E_SERVER_LOG = E2E_SERVER_LOG;
+mkdirSync(E2E_DATA_DIR, { recursive: true });
 
 const postgresPort = Number(process.env.POSTGRES_PORT ?? 5432);
 const mailpitUiPort = Number(process.env.MAILPIT_UI_PORT ?? 8025);
@@ -83,6 +88,9 @@ if (authInfraAvailable) {
         AUTH_RATE_LIMIT_PER_MINUTE: "1000",
         // attachments.spec.ts reads the stored files here.
         DATA_DIR: E2E_DATA_DIR,
+        // link-preview.spec.ts: fetch the fixture page on localhost, and read the log.
+        LINK_PREVIEW_TEST_ALLOW_LOOPBACK: "true",
+        LOG_FILE: E2E_SERVER_LOG,
       } as Record<string, string>,
       timeout: 30_000,
     },

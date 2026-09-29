@@ -2,7 +2,9 @@
 // secure place to keep the session and the crypto pickle key, and desktop
 // notifications. The web
 // app uses IndexedDB and the Notification API. A desktop shell (M7) will
-// supply its own OS key store and notification service here.
+// supply its own OS key store and notification service here, and its own
+// link preview fetch.
+import type { FetchLinkPreview } from "./link-preview.js";
 
 /** A small secure key-value store. Values are text (JSON, in practice). */
 export interface SecureStore {
@@ -25,6 +27,14 @@ export interface Platform {
   secureStore: SecureStore;
   /** Show a desktop notification. It does nothing when the user did not give permission. */
   notify?(options: NotifyOptions): void;
+  /**
+   * Make the preview of a link, for a message that this device sends.
+   * The limits: 3 s, 512 KiB of HTML, a 2 MiB image, and no private
+   * network address. The web app supplies a version that asks its own
+   * server (see `createServerLinkPreviewFetcher`). A desktop shell (M7)
+   * fetches the page itself.
+   */
+  fetchLinkPreview?: FetchLinkPreview;
 }
 
 const DB_NAME = "discord-clone-secure-store";

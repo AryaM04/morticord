@@ -17,3 +17,4 @@ export * from "./settings-store.js";
 export * from "./notifications.js";
 export * from "./dm-view.js";
 export * from "./attachments.js";
+export * from "./link-preview.js";

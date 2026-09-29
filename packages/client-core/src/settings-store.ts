@@ -36,6 +36,8 @@ export interface SettingsValues {
   notificationLevels?: Record<string, NotificationLevel>;
   /** Play a sound for an incoming DM call. True when not set. */
   playRingSound?: boolean;
+  /** Add a link preview to the messages that this user sends. True when not set. */
+  linkPreviews?: boolean;
 }
 
 /** Encrypts and decrypts the settings blob. The crypto layer supplies it. */
@@ -108,6 +110,10 @@ export function notificationLevelOf(values: SettingsValues, guildId: string): No
 
 export function playRingSoundOf(values: SettingsValues): boolean {
   return values.playRingSound !== false;
+}
+
+export function linkPreviewsOf(values: SettingsValues): boolean {
+  return values.linkPreviews !== false;
 }
 
 export function hiddenDmsOf(values: SettingsValues): Record<string, string | null> {

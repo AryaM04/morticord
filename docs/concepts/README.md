@@ -8,6 +8,8 @@ Available notes:
 
 - `nat-turn.md`: why NAT traversal is hard, and how STUN and TURN help.
 - `olm-megolm.md`: the end-to-end encryption design used by this app.
+- `attachments.md`: encrypted files in a message.
+- `link-previews.md`: link previews that the sender makes, and the SSRF rules of the server route.
 
 Planned notes:
 

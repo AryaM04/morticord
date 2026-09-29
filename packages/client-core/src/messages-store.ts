@@ -5,7 +5,14 @@
 // zustand store and adds the I/O: the codec, the REST calls and the
 // gateway send.
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { encodeBase64Url, GatewayOpcode, type Attachment, type DecryptedPayload, type EventJson } from "@discord-clone/shared";
+import {
+  encodeBase64Url,
+  GatewayOpcode,
+  type Attachment,
+  type DecryptedPayload,
+  type Embed,
+  type EventJson,
+} from "@discord-clone/shared";
 import { ApiError, type ApiClient } from "./api.js";
 import { claimAttachment } from "./attachments.js";
 import type { PayloadCodec } from "./codec.js";
@@ -50,6 +57,8 @@ export interface PendingMessage {
   relatesToId?: string;
   /** Encrypted files that are already uploaded. */
   attachments?: Attachment[];
+  /** The link preview, when the sender made one. */
+  embeds?: Embed[];
   createdAt: string;
   state: PendingSendState;
   /** Why the last send failed, in words for people. Only set when `state` is "failed". */
@@ -80,6 +89,8 @@ export interface AggregatedMessage {
   mentions: string[];
   /** The encrypted files of the message. An edit does not change them. */
   attachments: Attachment[];
+  /** The link preview that the sender made. An edit does not change it. */
+  embeds: Embed[];
   edited: boolean;
   reactions: AggregatedReaction[];
 }
@@ -114,6 +125,7 @@ export function aggregateEvent(
     body: "",
     mentions: [],
     attachments: [],
+    embeds: [],
     edited: false,
     reactions: [],
   };
@@ -132,6 +144,7 @@ export function aggregateEvent(
     base.mentions = ownPayload.mentions;
     if (ownPayload.type === "message") {
       base.attachments = ownPayload.attachments;
+      base.embeds = ownPayload.embeds;
     }
   }
 
@@ -734,6 +747,10 @@ export interface MessagesStoreOptions {
   now?: () => number;
   /** Random nonce generator, injected for tests. */
   makeNonce?: () => string;
+  /** Gets each event that this store decoded (live, fetched or decoded again after a key arrived). The local search index uses it. */
+  onDecoded?: (decoded: Array<{ event: EventJson; payload: DecryptedPayload }>) => void;
+  /** Gets the ids of redacted events. The local search index uses it. */
+  onRedacted?: (channelId: string, ids: string[]) => void;
 }
 
 export interface MessagesActions {
@@ -749,6 +766,7 @@ export interface MessagesActions {
     mentions: string[],
     relatesToId?: string,
     attachments?: Attachment[],
+    embeds?: Embed[],
   ): Promise<void>;
   retryPending(channelId: string, nonce: string): Promise<void>;
   discardPending(channelId: string, nonce: string): void;
@@ -795,15 +813,24 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
   }
 
   /** Decode events in parallel. A redacted event needs no decode. */
-  function decodeEvents(events: EventJson[]): Promise<Array<{ id: string; payload: DecryptedPayload | null; waiting: boolean }>> {
-    return Promise.all(
+  async function decodeEvents(
+    events: EventJson[],
+  ): Promise<Array<{ id: string; payload: DecryptedPayload | null; waiting: boolean }>> {
+    const decoded = await Promise.all(
       events
         .filter((event) => !event.redactedAt)
         .map(async (event) => {
           const result = await codec.decode(event);
-          return { id: event.id, payload: result.ok ? result.payload : null, waiting: !result.ok && result.waiting === true };
+          return { event, payload: result.ok ? result.payload : null, waiting: !result.ok && result.waiting === true };
         }),
     );
+    if (options.onDecoded) {
+      const readable = decoded.flatMap((entry) => (entry.payload ? [{ event: entry.event, payload: entry.payload }] : []));
+      if (readable.length > 0) {
+        options.onDecoded(readable);
+      }
+    }
+    return decoded.map((entry) => ({ id: entry.event.id, payload: entry.payload, waiting: entry.waiting }));
   }
 
   async function decodeAndStore(
@@ -859,8 +886,9 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
   }
 
   /** Claim the files of a sent message, so the server keeps them. A failed claim only logs: the next send claims again. */
-  function claimAll(attachments: Attachment[] | undefined): void {
-    for (const attachment of attachments ?? []) {
+  function claimAll(attachments: Attachment[] | undefined, embeds: Embed[] | undefined): void {
+    const embedImages = (embeds ?? []).flatMap((embed) => (embed.image ? [embed.image] : []));
+    for (const attachment of [...(attachments ?? []), ...embedImages]) {
       for (const id of [attachment.id, attachment.thumbnail?.id]) {
         if (id) {
           claimAttachment(api, id).catch(() => {});
@@ -939,7 +967,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
       });
     },
 
-    async sendMessage(channelId, body, mentions, relatesToId, attachments = []) {
+    async sendMessage(channelId, body, mentions, relatesToId, attachments = [], embeds = []) {
       // A sent message ends the typing state. The next keystroke must send TYPING again at once.
       updateChannel(get, set, channelId, (c) => ({ ...c, lastTypingSentAt: -Infinity }));
       const nonce = makeNonce();
@@ -951,6 +979,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
         relType: relatesToId ? "reply" : undefined,
         relatesToId,
         attachments,
+        embeds,
         createdAt: new Date(now()).toISOString(),
         state: "sending",
       };
@@ -961,7 +990,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
           body,
           mentions,
           attachments,
-          embeds: [],
+          embeds,
         });
         const event = await messagesApi.postEvent(api, channelId, {
           relType: relatesToId ? "reply" : undefined,
@@ -972,7 +1001,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
           nonce,
         });
         updateChannel(get, set, channelId, (c) => reconcilePosted(c, event));
-        claimAll(attachments);
+        claimAll(attachments, embeds);
         await decodeAndStore(get, set, channelId, [event]);
       } catch (error) {
         updateChannel(get, set, channelId, (c) => markPendingFailed(c, nonce, sendErrorText(error)));
@@ -990,7 +1019,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
           body: pending.body,
           mentions: pending.mentions,
           attachments: pending.attachments ?? [],
-          embeds: [],
+          embeds: pending.embeds ?? [],
         });
         const event = await messagesApi.postEvent(api, channelId, {
           relType: pending.relType,
@@ -1001,7 +1030,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
           nonce,
         });
         updateChannel(get, set, channelId, (c) => reconcilePosted(c, event));
-        claimAll(pending.attachments);
+        claimAll(pending.attachments, pending.embeds);
         await decodeAndStore(get, set, channelId, [event]);
       } catch (error) {
         updateChannel(get, set, channelId, (c) => markPendingFailed(c, nonce, sendErrorText(error)));
@@ -1034,6 +1063,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
     async redact(channelId, eventId) {
       await messagesApi.redactEvent(api, channelId, eventId);
       updateChannel(get, set, channelId, (c) => applyEventRedact(c, [eventId]));
+      options.onRedacted?.(channelId, [eventId]);
     },
 
     async editMessage(channelId, eventId, body, mentions) {
@@ -1138,6 +1168,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
         }
         case "EVENT_REDACT": {
           const payload = d as { channelId: string; ids: string[] };
+          options.onRedacted?.(payload.channelId, payload.ids);
           const channel = state.channels[payload.channelId];
           if (!channel) return;
           set({

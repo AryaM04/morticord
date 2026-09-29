@@ -3,12 +3,15 @@
 // starts a new line. Escape cancels a reply, an edit, or the mention
 // listbox. ArrowUp in an empty box edits the sender's last message. Files come from
 // the attach button, a drop or a paste. Each file is encrypted and uploaded
-// at once, and the message sends when every upload is done.
-import { useEffect, useId, useRef, useState } from "react";
-import { MAX_ATTACHMENTS, type Attachment, type GuildMemberJson, type User } from "@discord-clone/shared";
-import { formatFileSize, searchGuildMembers } from "@discord-clone/client-core";
+// at once, and the message sends when every upload is done. The first link
+// gets a preview card, made on this device (see lib/link-preview.ts). The
+// message takes the preview only when it is ready at send time.
+import { lazy, Suspense, useEffect, useId, useRef, useState } from "react";
+import { MAX_ATTACHMENTS, type Attachment, type GuildMemberJson, type LinkEmbed, type User } from "@discord-clone/shared";
+import { findFirstLink, formatFileSize, linkPreviewsOf, searchGuildMembers } from "@discord-clone/client-core";
 import { messagesStore } from "../lib/messages.js";
 import { session } from "../lib/session.js";
+import { useSettings } from "../lib/settings.js";
 import { Avatar } from "./Avatar.js";
 import { EmojiPickerButton } from "./EmojiPickerButton.js";
 
@@ -20,6 +23,19 @@ const MENTION_SEARCH_DEBOUNCE_MS = 150;
 const MENTION_SEARCH_LIMIT = 10;
 /** The default server limit. The server gives the real error when its limit is lower. */
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
+/** Wait this long after the last change of the link before the preview starts. */
+const PREVIEW_DEBOUNCE_MS = 600;
+
+const LinkEmbedCard = lazy(() => import("./LinkEmbedCard.js"));
+
+interface LinkPreviewState {
+  url: string;
+  /** The preview image is an attachment of this channel. */
+  channelId: string;
+  controller: AbortController;
+  embed?: LinkEmbed;
+  imageUrl?: string | null;
+}
 
 interface Upload {
   key: number;
@@ -130,6 +146,68 @@ export function Composer(props: ComposerProps) {
   const searchGenerationRef = useRef(0);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const linkPreviewsOn = useSettings((s) => linkPreviewsOf(s.values));
+  const [preview, setPreview] = useState<LinkPreviewState | null>(null);
+  /** Links that get no preview: the user removed the card, or the page had none. */
+  const skippedLinksRef = useRef(new Set<string>());
+  const link = props.canSend && !editTarget && linkPreviewsOn ? findFirstLink(text) : null;
+
+  function clearPreview(): void {
+    setPreview((current) => {
+      if (current) {
+        current.controller.abort();
+        if (current.imageUrl) URL.revokeObjectURL(current.imageUrl);
+      }
+      return null;
+    });
+  }
+
+  // Make the preview of the first link, after a short pause in typing.
+  useEffect(() => {
+    if (preview && preview.url === link && preview.channelId === channelId) {
+      return;
+    }
+    clearPreview();
+    if (!link || skippedLinksRef.current.has(link)) {
+      return;
+    }
+    const url = link;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      setPreview({ url, channelId, controller });
+      void import("../lib/link-preview.js")
+        .then((module) => module.buildLinkPreview(channelId, url, controller.signal))
+        .then((built) => {
+          if (controller.signal.aborted) {
+            if (built?.imageUrl) URL.revokeObjectURL(built.imageUrl);
+            return;
+          }
+          if (!built) {
+            skippedLinksRef.current.add(url);
+            setPreview(null);
+            return;
+          }
+          setPreview({ url, channelId, controller, embed: built.embed, imageUrl: built.imageUrl });
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setPreview(null);
+          }
+        });
+    }, PREVIEW_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+    // The preview depends only on the link and the channel.
+  }, [link, channelId]);
+
+  function removePreview(): void {
+    if (preview) {
+      skippedLinksRef.current.add(preview.url);
+    }
+    clearPreview();
+  }
 
   useEffect(() => {
     if (editTarget) {
@@ -305,9 +383,12 @@ export function Composer(props: ComposerProps) {
       void messagesStore.getState().editMessage(channelId, editTarget.id, body, mentions);
       props.onCancelEdit();
     } else {
-      void messagesStore.getState().sendMessage(channelId, body, mentions, props.replyTarget?.id, ready);
+      const embeds = preview?.embed && findFirstLink(body) === preview.url ? [preview.embed] : [];
+      void messagesStore.getState().sendMessage(channelId, body, mentions, props.replyTarget?.id, ready, embeds);
       props.onCancelReply();
       setUploads([]);
+      clearPreview();
+      skippedLinksRef.current.clear();
     }
     setText("");
     closeMentionMenu();
@@ -413,6 +494,22 @@ export function Composer(props: ComposerProps) {
               )}
             </div>
           ))}
+        </div>
+      )}
+      {preview && (
+        <div className="mb-1" data-link-preview-state={preview.embed ? "ready" : "loading"}>
+          {preview.embed ? (
+            <Suspense fallback={null}>
+              <LinkEmbedCard embed={preview.embed} localImageUrl={preview.imageUrl} onRemove={removePreview} />
+            </Suspense>
+          ) : (
+            <div className="flex items-center gap-2 text-xs" style={{ color: "var(--color-text-muted)" }}>
+              <span>Loading the link preview.</span>
+              <button type="button" onClick={removePreview} className="underline">
+                Remove preview
+              </button>
+            </div>
+          )}
         </div>
       )}
       {uploads.length > 0 && (
