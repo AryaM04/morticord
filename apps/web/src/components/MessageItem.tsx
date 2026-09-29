@@ -12,6 +12,7 @@ const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉"];
 
 // Most messages have no files, so the file views load only when one is needed.
 const AttachmentList = lazy(() => import("./AttachmentList.js").then((module) => ({ default: module.AttachmentList })));
+const LinkEmbedCard = lazy(() => import("./LinkEmbedCard.js"));
 
 function DeleteConfirmDialog({ open, onCancel, onConfirm }: { open: boolean; onCancel: () => void; onConfirm: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -136,6 +137,14 @@ export function MessageItem(props: MessageItemProps) {
         {!message.deleted && !message.cannotRead && message.attachments.length > 0 && (
           <Suspense fallback={null}>
             <AttachmentList attachments={message.attachments} />
+          </Suspense>
+        )}
+
+        {!message.deleted && !message.cannotRead && message.embeds.length > 0 && (
+          <Suspense fallback={null}>
+            {message.embeds.map((embed) => (
+              <LinkEmbedCard key={embed.url} embed={embed} />
+            ))}
           </Suspense>
         )}
 

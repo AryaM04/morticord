@@ -12,6 +12,7 @@ import { session } from "../lib/session.js";
 
 // The notification part loads only when the dialog opens, to keep the main bundle small.
 const NotificationSettings = lazy(() => import("./NotificationSettings.js"));
+const MessageSettings = lazy(() => import("./MessageSettings.js"));
 const SecurityDialog = lazy(() => import("./SecurityDialog.js"));
 
 const MAX_AVATAR_BYTES = 1024 * 1024;
@@ -143,6 +144,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
       {open && (
         <Suspense fallback={null}>
           <NotificationSettings />
+          <MessageSettings />
         </Suspense>
       )}
 

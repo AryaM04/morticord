@@ -10,7 +10,7 @@ import type { Attachment } from "@discord-clone/shared";
 const loadFiles = () => import("../lib/attachment-files.js");
 
 /** Download and decrypt one file. The secrets never change for one id. */
-function useDecryptedUrl(id: string, secrets: FileSecrets, mime: string) {
+export function useDecryptedUrl(id: string, secrets: FileSecrets, mime: string) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {

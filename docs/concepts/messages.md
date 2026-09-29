@@ -30,8 +30,9 @@ Once a client decodes `ciphertext`, it gets one of three shapes,
 discriminated by `type`:
 
 - `message`: `body` (0 to 4000 characters), `mentions` (up to 50 user
-  IDs), `attachments` and `embeds` (both empty until milestone M6). A
-  message needs a body unless it has an attachment.
+  IDs), `attachments` (see `attachments.md`) and `embeds` (at most one
+  link preview, see `link-previews.md`). A message needs a body unless it
+  has an attachment.
 - `edit`: `body` and `mentions`, same limits as a message.
 - `reaction`: `key`, one emoji, 1 to 32 characters.
 
