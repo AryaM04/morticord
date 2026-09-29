@@ -53,9 +53,8 @@ function clean(text: string | undefined, max: number): string | undefined {
   if (text === undefined) {
     return undefined;
   }
-  // eslint-disable-next-line no-control-regex
   const value = decodeEntities(text)
-    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\p{Cc}+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (value.length === 0) {
