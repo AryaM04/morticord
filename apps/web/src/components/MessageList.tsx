@@ -92,7 +92,7 @@ export function MessageList({
       const event = channel.eventsById[id];
       if (!event) continue;
       const relations = channel.relationsByTarget[id] ?? [];
-      const aggregated = aggregateEvent(event, relations, channel.payloads, selfUserId);
+      const aggregated = aggregateEvent(event, relations, channel.payloads, selfUserId, channel.waiting);
 
       const day = new Date(event.createdAt).toDateString();
       if (day !== lastDay) {
@@ -166,7 +166,7 @@ export function MessageList({
       return { authorName: "", text: "Original message" };
     }
     const relations = channel!.relationsByTarget[message.relatesToId] ?? [];
-    const targetAgg = aggregateEvent(target, relations, channel!.payloads, selfUserId);
+    const targetAgg = aggregateEvent(target, relations, channel!.payloads, selfUserId, channel!.waiting);
     return { authorName: displayNameOf(realtimeState, guildId, target.senderId), text: targetAgg.body };
   }
 

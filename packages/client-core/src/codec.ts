@@ -1,18 +1,17 @@
 // The payload codec: turns a decrypted payload into wire bytes, and back.
-// In milestone M3 the only codec is `plain-v1` (plain JSON, no encryption).
-// From milestone M6 an encrypted codec (`megolm-v1`) implements the same
-// interface, so the message store never changes: it is given a codec, and
-// it does not know or care which one.
-import {
-  decodeBase64Url,
-  decodePlainPayload,
-  encodePlainPayload,
-  type DecryptedPayload,
-  type EventJson,
-} from "@discord-clone/shared";
+// The client sends only the encrypted codec `megolm-v1` (see
+// crypto/megolm.ts). The message store is given a codec, and it does not
+// know or care which one. Old development data can have events with the
+// plaintext codec `plain-v1`. The client can still read them, but it never
+// makes one.
+import { decodeBase64Url, decodePlainPayload, type DecryptedPayload, type EventJson } from "@discord-clone/shared";
 
-/** The result of decoding one event's ciphertext back to a payload. */
-export type DecodeResult = { ok: true; payload: DecryptedPayload } | { ok: false; reason: string };
+/**
+ * The result of decoding one event's ciphertext back to a payload. When
+ * `waiting` is true, the key is not here yet: the codec asks for it, and
+ * calls the `onKeys` listeners when it arrives.
+ */
+export type DecodeResult = { ok: true; payload: DecryptedPayload } | { ok: false; reason: string; waiting?: boolean };
 
 /**
  * Turns a decrypted payload into wire bytes for one channel, and turns an
@@ -24,29 +23,23 @@ export interface PayloadCodec {
   encode(
     channelId: string,
     payload: DecryptedPayload,
-  ): Promise<{ codec: string; ciphertext: Uint8Array; megolmSessionId: string | null }>;
+  ): Promise<{ codec: "plain-v1" | "megolm-v1"; ciphertext: Uint8Array; megolmSessionId: string | null }>;
   decode(event: EventJson): Promise<DecodeResult>;
+  /** Watch the arrival of keys, so that waiting events can decode again. Returns a function that stops the watch. */
+  onKeys?(listener: (channelId: string, sessionId: string) => void): () => void;
 }
 
-/** The plaintext codec (`plain-v1`): the payload bytes are plain UTF-8 JSON. */
-export const plainCodec: PayloadCodec = {
-  async encode(_channelId, payload) {
-    return { codec: "plain-v1", ciphertext: encodePlainPayload(payload), megolmSessionId: null };
-  },
-
-  async decode(event) {
-    if (event.codec !== "plain-v1") {
-      return { ok: false, reason: `This client cannot read the "${event.codec}" codec yet.` };
-    }
-    if (event.redactedAt) {
-      return { ok: false, reason: "This message was deleted." };
-    }
-    try {
-      const bytes = decodeBase64Url(event.ciphertext);
-      const payload = decodePlainPayload(bytes);
-      return { ok: true, payload };
-    } catch {
-      return { ok: false, reason: "This message cannot be read." };
-    }
-  },
-};
+/** Read an old event with the plaintext codec (`plain-v1`). It never throws. */
+export function decodePlainEvent(event: EventJson): DecodeResult {
+  if (event.redactedAt) {
+    return { ok: false, reason: "This message was deleted." };
+  }
+  if (event.codec !== "plain-v1") {
+    return { ok: false, reason: "This message cannot be read." };
+  }
+  try {
+    return { ok: true, payload: decodePlainPayload(decodeBase64Url(event.ciphertext)) };
+  } catch {
+    return { ok: false, reason: "This message cannot be read." };
+  }
+}

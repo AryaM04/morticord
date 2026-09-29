@@ -1,12 +1,14 @@
 // The network side of the crypto layer: the key server routes, the
-// to-device route and the TO_DEVICE_ACK gateway op. Tests use a fake in
-// place of the HTTP one.
+// to-device route, the channel members route and the TO_DEVICE_ACK
+// gateway op. Tests use a fake in place of the HTTP one.
 import {
   GatewayOpcode,
+  channelMembersResponseSchema,
   claimKeysResponseSchema,
   queryKeysResponseSchema,
   sendToDeviceResponseSchema,
   uploadKeysResponseSchema,
+  type ChannelMembersResponse,
   type ClaimKeysResponse,
   type DeviceRef,
   type PutMasterKeyRequest,
@@ -24,6 +26,8 @@ export interface CryptoTransport {
   queryKeys(userIds: string[]): Promise<QueryKeysResponse>;
   claimKeys(devices: DeviceRef[]): Promise<ClaimKeysResponse>;
   sendToDevice(messages: ToDeviceMessage[]): Promise<SendToDeviceResponse>;
+  /** The users who can view a channel, with the inputs to check their permissions. */
+  channelMembers(channelId: string): Promise<ChannelMembersResponse>;
   /** Send TO_DEVICE_ACK over the gateway. It does nothing while the gateway is down. */
   ackToDevice(upToId: string, resync: boolean): void;
 }
@@ -39,6 +43,8 @@ export function createHttpCryptoTransport(
     claimKeys: (devices) => api.request("POST", "/keys/claim", { body: { devices }, schema: claimKeysResponseSchema }),
     sendToDevice: (messages) =>
       api.request("POST", "/to-device", { body: { messages }, schema: sendToDeviceResponseSchema }),
+    channelMembers: (channelId) =>
+      api.request("GET", `/channels/${channelId}/members`, { schema: channelMembersResponseSchema }),
     ackToDevice: (upToId, resync) => gatewaySend(GatewayOpcode.TO_DEVICE_ACK, { upToId, ...(resync ? { resync } : {}) }),
   };
 }

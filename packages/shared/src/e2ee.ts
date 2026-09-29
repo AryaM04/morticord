@@ -45,6 +45,15 @@ export function oneTimeKeySignedText(
   return canonicalJson({ type: kind, userId, deviceId, keyId, key });
 }
 
+/**
+ * The text that the device Ed25519 key of a sender signs for one of its
+ * Megolm sessions. It binds the session to one channel and one sender
+ * device, so a different device cannot say that it made the session.
+ */
+export function megolmSessionSignedText(channelId: string, sessionId: string, userId: string, deviceId: string): string {
+  return canonicalJson({ type: "megolm_session", channelId, sessionId, userId, deviceId });
+}
+
 /** The text that a device Ed25519 key signs to vouch for the master key of its user. */
 export function masterKeySignedText(userId: string, publicKey: string): string {
   return canonicalJson({ type: "master_key", userId, publicKey });
