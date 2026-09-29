@@ -1,10 +1,8 @@
-// The signal transport: the one module in the voice package that knows
-// about the gateway. It sends and receives VOICE_SIGNAL messages for one
-// voice channel. `VoiceEngine` never imports the gateway directly; it
-// depends only on the `SignalTransport` interface below. This keeps a
-// later milestone free to wrap this transport in Olm encryption without a
-// change to the engine (see docs/concepts/voice.md).
-import { GatewayOpcode } from "@discord-clone/shared";
+// The signal transport: the one module in the voice package that knows how
+// signals travel. `VoiceEngine` depends only on the `SignalTransport`
+// interface below. The real transport sends each signal as an Olm
+// to-device message to the exact peer device, so the server cannot read
+// or change SDP and ICE data (see docs/concepts/voice.md).
 
 /** One live voice session: one user, connected from one device. */
 export interface PeerKey {
@@ -12,7 +10,7 @@ export interface PeerKey {
   deviceId: string;
 }
 
-/** One signaling message carried over `VOICE_SIGNAL`. The server never reads this payload. */
+/** One signaling message. It travels inside an Olm envelope. */
 export type SignalPayload =
   | { kind: "description"; description: RTCSessionDescriptionInit }
   | { kind: "candidate"; candidate: RTCIceCandidateInit }
@@ -22,80 +20,130 @@ export interface SignalTransport {
   send(target: PeerKey, payload: SignalPayload): void;
   /** Register a handler for an incoming signal. Returns a function that removes the handler. */
   onSignal(handler: (from: PeerKey, payload: SignalPayload) => void): () => void;
-  /**
-   * Stop listening for dispatches and release the underlying gateway
-   * subscription. Optional on the interface, since a fake transport used
-   * in a test may have nothing to release, but `createGatewaySignalTransport`
-   * always provides one. The engine calls this once per call, on `leave()`.
-   */
+  /** Stop and release the subscription. The engine calls this one time per call, on `leave()`. */
   close?(): void;
 }
 
-/** A generic gateway dispatch, decoded and validated by the caller. */
-export interface GatewayDispatchLike {
-  t: string;
-  d: unknown;
+/** The to-device envelope type of a voice signal. See docs/concepts/olm-megolm.md section 6. */
+export const VOICE_SIGNAL_TYPE = "voice.signal";
+
+/** The part of the crypto layer that the transport uses. The voice package does not import the crypto package. */
+export interface SignalCrypto {
+  /** Encrypt one envelope for one device and send it over the gateway at once. */
+  sendToDevice(target: PeerKey, type: string, content: Record<string, unknown>): Promise<void>;
+  /** Watch decrypted envelopes. The sender is the verified device of the Olm session. */
+  onToDevice(handler: (event: { type: string; content: Record<string, unknown>; sender: PeerKey }) => void): () => void;
 }
 
-export interface GatewaySignalTransportDeps {
+/** The voice state of a peer, as this client knows it now. */
+export interface PeerVoiceState {
+  deviceId: string;
+  callId?: string;
+}
+
+export interface OlmSignalTransportDeps {
   channelId: string;
-  send(op: number, d?: unknown): void;
-  /** Subscribe to every gateway dispatch. Returns a function that removes the subscription. */
-  subscribe(listener: (dispatch: GatewayDispatchLike) => void): () => void;
+  /** The random id of this join. The server puts it in the voice state of this device. */
+  callId: string;
+  crypto: SignalCrypto;
+  /** The current voice state of a user in this channel, or null when the user is not in it. */
+  peerState(userId: string): PeerVoiceState | null;
+  log?(message: string): void;
 }
 
-interface VoiceSignalDispatchPayload {
+/** The content of a `voice.signal` envelope. */
+interface SignalContent {
   channelId: string;
-  fromUserId: string;
-  fromDeviceId: string;
-  payload: unknown;
+  /** The call id of the sender. */
+  callId: string;
+  /** The call id of the receiver, as the sender knows it. */
+  targetCallId: string;
+  payload: SignalPayload;
 }
 
-function isVoiceSignalDispatchPayload(value: unknown): value is VoiceSignalDispatchPayload {
-  if (typeof value !== "object" || value === null) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSignalPayload(value: unknown): value is SignalPayload {
+  if (!isRecord(value)) {
     return false;
   }
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record.channelId === "string" &&
-    typeof record.fromUserId === "string" &&
-    typeof record.fromDeviceId === "string"
-  );
+  switch (value.kind) {
+    case "description":
+      return isRecord(value.description) && typeof value.description.type === "string";
+    case "candidate":
+      return isRecord(value.candidate);
+    case "media":
+      return isRecord(value.streams);
+    default:
+      return false;
+  }
+}
+
+/** Make a random call id for one join. */
+export function newCallId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 /**
- * Build a `SignalTransport` for one voice channel, backed by the gateway.
- * It sends `VOICE_SIGNAL` ops and listens for `VOICE_SIGNAL` dispatches
- * scoped to `deps.channelId`, and ignores every other dispatch.
+ * Build a `SignalTransport` for one voice channel that sends each signal
+ * as an Olm to-device message. The receiver accepts a signal only when all
+ * of these are true: the channel is this channel, the target call id is
+ * the call id of this join, the sender device is the device in the voice
+ * state of the sender in this channel, and the sender call id is the call
+ * id in that voice state. Thus the server cannot inject, redirect or replay
+ * a signal, and the DTLS fingerprints in the SDP are authentic.
  */
-export function createGatewaySignalTransport(deps: GatewaySignalTransportDeps): SignalTransport {
+export function createOlmSignalTransport(deps: OlmSignalTransportDeps): SignalTransport {
   const handlers = new Set<(from: PeerKey, payload: SignalPayload) => void>();
+  const log = deps.log ?? (() => {});
+  // One chain for all sends, so that a peer gets the signals in the order of the calls.
+  let chain: Promise<void> = Promise.resolve();
+  let closed = false;
 
-  const unsubscribe = deps.subscribe((dispatch) => {
-    if (dispatch.t !== "VOICE_SIGNAL") {
+  const unsubscribe = deps.crypto.onToDevice((event) => {
+    if (closed || event.type !== VOICE_SIGNAL_TYPE) {
       return;
     }
-    if (!isVoiceSignalDispatchPayload(dispatch.d)) {
+    const content = event.content as Partial<SignalContent>;
+    if (content.channelId !== deps.channelId) {
       return;
     }
-    if (dispatch.d.channelId !== deps.channelId) {
+    if (content.targetCallId !== deps.callId) {
+      log(`A voice signal from device ${event.sender.deviceId} is for a different call. It was dropped.`);
       return;
     }
-    const from: PeerKey = { userId: dispatch.d.fromUserId, deviceId: dispatch.d.fromDeviceId };
-    const payload = dispatch.d.payload as SignalPayload;
+    const state = deps.peerState(event.sender.userId);
+    if (!state || state.deviceId !== event.sender.deviceId) {
+      log(`A voice signal came from device ${event.sender.deviceId}, which is not in this call. It was dropped.`);
+      return;
+    }
+    if (!state.callId || content.callId !== state.callId) {
+      log(`A voice signal from device ${event.sender.deviceId} has a stale call id. It was dropped.`);
+      return;
+    }
+    if (!isSignalPayload(content.payload)) {
+      return;
+    }
+    const from: PeerKey = { userId: event.sender.userId, deviceId: event.sender.deviceId };
     for (const handler of handlers) {
-      handler(from, payload);
+      handler(from, content.payload);
     }
   });
 
   return {
     send(target, payload) {
-      deps.send(GatewayOpcode.VOICE_SIGNAL, {
-        channelId: deps.channelId,
-        targetUserId: target.userId,
-        targetDeviceId: target.deviceId,
-        payload,
-      });
+      const state = deps.peerState(target.userId);
+      if (!state?.callId || state.deviceId !== target.deviceId) {
+        log(`Device ${target.deviceId} is not in this call. The voice signal was not sent.`);
+        return;
+      }
+      const content: SignalContent = { channelId: deps.channelId, callId: deps.callId, targetCallId: state.callId, payload };
+      chain = chain
+        .then(() => deps.crypto.sendToDevice(target, VOICE_SIGNAL_TYPE, content as unknown as Record<string, unknown>))
+        .catch((error: unknown) => log(`A voice signal could not be sent: ${String(error)}`));
     },
     onSignal(handler) {
       handlers.add(handler);
@@ -104,6 +152,7 @@ export function createGatewaySignalTransport(deps: GatewaySignalTransportDeps): 
       };
     },
     close() {
+      closed = true;
       handlers.clear();
       unsubscribe();
     },

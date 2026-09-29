@@ -30,12 +30,15 @@ export {
 } from "./engine.js";
 
 export {
-  createGatewaySignalTransport,
+  createOlmSignalTransport,
+  newCallId,
+  VOICE_SIGNAL_TYPE,
   type SignalTransport,
+  type SignalCrypto,
   type PeerKey,
+  type PeerVoiceState,
   type SignalPayload,
-  type GatewayDispatchLike,
-  type GatewaySignalTransportDeps,
+  type OlmSignalTransportDeps,
 } from "./signal-transport.js";
 
 export { preferOpusFec, applyOpusFec, capOpusBitrate } from "./sdp.js";

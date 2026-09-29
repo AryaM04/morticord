@@ -1,5 +1,6 @@
-// Validate and forward the four voice gateway ops (VOICE_JOIN, VOICE_LEAVE,
-// VOICE_STATE, VOICE_SIGNAL). Each function loads permissions, calls
+// Validate and forward the three voice gateway ops (VOICE_JOIN, VOICE_LEAVE,
+// VOICE_STATE). Voice signals are Olm to-device messages, so the server
+// cannot read them (see docs/concepts/voice.md). Each function loads permissions, calls
 // VoiceService, and sends the right dispatch through the gateway. A
 // rejected op throws VoiceError; the gateway handler turns that into a
 // VOICE_ERROR sent back to the caller.
@@ -14,7 +15,6 @@ import {
   hasPermission,
   Permission,
   type VoiceJoinPayload,
-  type VoiceSignalPayload,
   type VoiceStatePayload,
 } from "@discord-clone/shared";
 import type { DbClient } from "../../db/client.js";
@@ -23,13 +23,7 @@ import { isMessagingBlocked, isPrivateChannelType, isRecipient } from "../dms/ac
 import { channelPermissions, loadMemberContext } from "../guilds/member-context.js";
 import { loadRecipientIds, type GatewayService } from "../gateway/service.js";
 import type { CallRinger } from "./calls.js";
-import {
-  MAX_SIGNAL_PAYLOAD_BYTES,
-  VoiceError,
-  toVoiceStateUpdate,
-  type VoiceService,
-  type VoiceState,
-} from "./service.js";
+import { VoiceError, toVoiceStateUpdate, type VoiceService, type VoiceState } from "./service.js";
 
 export interface VoiceOpsDeps {
   db: DbClient;
@@ -123,6 +117,7 @@ export async function handleVoiceJoin(
     selfMute: payload.selfMute,
     selfDeaf: payload.selfDeaf,
     forceMute: target.forceMute,
+    callId: payload.callId,
   });
 
   if (previous) {
@@ -170,32 +165,6 @@ export async function handleVoiceState(
 
   const state = deps.voice.updateState(userId, deviceId, payload, hasSpeak);
   await broadcastVoiceState(deps, state);
-}
-
-/** Measure a signal payload the same way it goes over the wire, in UTF-8 bytes. */
-function jsonByteSize(value: unknown): number {
-  return Buffer.byteLength(JSON.stringify(value ?? null), "utf8");
-}
-
-export function handleVoiceSignal(
-  deps: Pick<VoiceOpsDeps, "gateway" | "voice">,
-  userId: bigint,
-  deviceId: string,
-  payload: VoiceSignalPayload,
-): void {
-  if (jsonByteSize(payload.payload) > MAX_SIGNAL_PAYLOAD_BYTES) {
-    throw new VoiceError("PAYLOAD_TOO_LARGE", "The signaling payload is too large.");
-  }
-  const channelId = BigInt(payload.channelId);
-  const targetUserId = BigInt(payload.targetUserId);
-  deps.voice.validateSignal(userId, deviceId, channelId, targetUserId, payload.targetDeviceId);
-
-  deps.gateway.sendToDevice(targetUserId, payload.targetDeviceId, "VOICE_SIGNAL", {
-    channelId: payload.channelId,
-    fromUserId: userId.toString(),
-    fromDeviceId: deviceId,
-    payload: payload.payload,
-  });
 }
 
 /**

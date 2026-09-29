@@ -39,6 +39,8 @@ const MEMBER_LEFT_EVENTS = new Set([
 
 /** Send at most one TO_DEVICE_ACK in this time, unless the local queue is empty for longer. */
 const ACK_INTERVAL_MS = 2000;
+/** Send a TO_DEVICE_ACK at once after this many messages. The server sends at most 100 before an ACK. */
+const ACK_BATCH = 50;
 
 export interface StartCryptoOptions {
   userId: string;
@@ -67,8 +69,13 @@ export interface CryptoHandle {
   hasMegolmSession(sessionId: string): Promise<boolean>;
   /** Feed every gateway dispatch here. It uses READY, RESUMED, TO_DEVICE, DEVICE_LIST_UPDATE and the membership events. */
   handleDispatch(dispatch: { t: string; d: unknown }): void;
-  /** Encrypt and send one envelope to each device. */
-  encryptToDevices(targets: DeviceRef[], type: string, content: Record<string, unknown>): Promise<EncryptResult>;
+  /** Encrypt and send one envelope to each device. With `live`, it goes over the gateway with no reply (voice signals). */
+  encryptToDevices(
+    targets: DeviceRef[],
+    type: string,
+    content: Record<string, unknown>,
+    options?: { live?: boolean },
+  ): Promise<EncryptResult>;
   /** Encrypt and send one envelope to every device of these users, except this device. */
   encryptToUsers(userIds: string[], type: string, content: Record<string, unknown>): Promise<EncryptResult>;
   onToDevice(handler: ToDeviceHandler): () => void;
@@ -176,9 +183,14 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
   let lastAckedId = await olm.lastProcessed();
   let lastAckAt = 0;
   let ackTimer: ReturnType<typeof setTimeout> | null = null;
+  let sinceAck = 0;
 
   function sendAck(): void {
+    if (ackTimer) {
+      clearTimeout(ackTimer);
+    }
     ackTimer = null;
+    sinceAck = 0;
     void olm.lastProcessed().then((processed) => {
       if (stopped || BigInt(processed) <= BigInt(lastAckedId)) {
         return;
@@ -201,6 +213,10 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
     draining ??= (async () => {
       while (inbox.length > 0 && !stopped) {
         await olm.handleToDevice(inbox.shift()!);
+        sinceAck += 1;
+        if (sinceAck >= ACK_BATCH) {
+          sendAck();
+        }
       }
       draining = null;
       scheduleAck();
@@ -259,7 +275,7 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
     codec,
     hasMegolmSession: (sessionId) => megolm.hasSession(sessionId),
     handleDispatch,
-    encryptToDevices: (targets, type, content) => olm.encryptToDevices(targets, type, content),
+    encryptToDevices: (targets, type, content, options) => olm.encryptToDevices(targets, type, content, options?.live),
     async encryptToUsers(userIds, type, content) {
       const targets: DeviceRef[] = [];
       for (const target of userIds) {

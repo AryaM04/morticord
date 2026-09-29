@@ -14,14 +14,11 @@ jobs only:
 
 1. Keep voice state in memory: who is in which channel, and their mute,
    deafen, video and screen-share flags.
-2. Relay signaling messages (offers, answers and ICE candidates) between
-   the participants that are setting up a connection.
+2. Carry signaling messages (offers, answers and ICE candidates) between
+   the participants as Olm to-device messages. The server cannot read
+   them (see "Encrypted signaling" below).
 
-The server never decodes, stores or forwards audio or video. A signaling
-payload is opaque to it: it checks only the size and the routing (who
-may send to whom), never the content. In milestone M6 this payload
-becomes Olm ciphertext; the server code does not change, because it
-never read the payload in the first place.
+The server never decodes, stores or forwards audio or video.
 
 ## A peer is a (user, device) pair
 
@@ -40,31 +37,58 @@ time, not two.
 
 ## The gateway ops
 
-Voice uses four gateway ops from the client, and two kinds of dispatch
+Voice uses three gateway ops from the client, and two kinds of dispatch
 back:
 
 | Client sends | Meaning |
 | --- | --- |
-| `VOICE_JOIN` | Join a voice channel, or move to it. |
+| `VOICE_JOIN` | Join a voice channel, or move to it. It has a random `callId`. |
 | `VOICE_LEAVE` | Leave voice. |
 | `VOICE_STATE` | Change self-mute, self-deafen, video or screen-share. |
-| `VOICE_SIGNAL` | Relay one signaling message to one other peer. |
 
 | Server sends | Meaning |
 | --- | --- |
 | `VOICE_STATE_UPDATE` | A peer's voice state changed (including a leave). |
-| `VOICE_SIGNAL` | A relayed signaling message, with the sender's identity attached. |
 | `VOICE_ERROR` | The op above was rejected, with a stable `code`. |
 
 `VOICE_STATE_UPDATE` goes to every guild member who can currently view
 the channel, the same rule the gateway already uses for channel events.
-`VOICE_SIGNAL` goes to exactly one device: the target peer's live
-session, found by user ID and device ID together.
+The voice state has the `callId` of the join.
 
 A rejected op gets one `VOICE_ERROR` sent back to the caller alone. The
 codes are: `CHANNEL_FULL`, `NO_PERMISSION`, `NOT_A_VOICE_CHANNEL`,
-`STREAM_IN_USE`, `NOT_IN_VOICE`, `TARGET_NOT_IN_CHANNEL`, and
-`PAYLOAD_TOO_LARGE`.
+`STREAM_IN_USE` and `NOT_IN_VOICE`.
+
+## Encrypted signaling
+
+Each signal is an Olm to-device message (envelope type `voice.signal`,
+see `docs/concepts/olm-megolm.md` section 6) to the exact device of the
+peer. The client sends it with the gateway op `TO_DEVICE_SEND`. This op
+has the same rules as `POST /to-device` (visibility, size, queue), and the
+server keeps the order of the ops of one connection. The op has no
+reply. The route and the op had almost the same delay in a local test
+(median 14 ms and 13 ms). The op has no per-user request limit, and it
+keeps the order of the signals.
+
+The envelope content is `{ channelId, callId, targetCallId, payload }`.
+Each join has a new random `callId`. The receiver drops a signal when one
+of these is true:
+
+- `channelId` is not the channel of the current call.
+- `targetCallId` is not the `callId` of the current join of the receiver.
+  Thus a queued signal for an earlier call does nothing.
+- The Olm sender device is not the device in the voice state of the
+  sender in this channel.
+- `callId` is not the `callId` in that voice state.
+
+Olm proves the sender device. Thus the server cannot read, change, add
+or send again a signal. The DTLS fingerprints in the SDP are authentic,
+so the server cannot put itself between two peers. The server can still
+drop signals, or give a wrong `callId` in a voice state. Both only stop
+the call.
+
+The earlier plaintext relay (op 14, `VOICE_SIGNAL`) is removed. The
+gateway closes a connection that sends it with `UNKNOWN_OPCODE`.
 
 ## Permissions
 
@@ -77,15 +101,11 @@ gets `STREAM_IN_USE`.
 
 ## Signaling is never buffered for resume
 
-The gateway keeps a short buffer of recent dispatches per session, so a
-brief network drop can `RESUME` without a full reload (see
-`docs/concepts/gateway.md`). `VOICE_SIGNAL` is the one dispatch that
-skips this buffer on purpose: it carries no sequence number, and a
-`RESUME` never replays it. An old SDP offer or ICE candidate, replayed
-minutes later, would not just be redundant: it would describe a
-connection attempt that no longer matches either side's real state, and
-WebRTC has no way to safely ignore a stale one of these. Dropping it
-and asking the client to retry is simpler and safer.
+To-device messages are not in the resume buffer. The queue table keeps
+them (see `docs/concepts/olm-megolm.md` section 6). A client that comes
+back later gets old signals from the queue. The call id check drops them,
+because an old SDP offer or ICE candidate does not match the state of
+either side now.
 
 ## The disconnect grace period
 

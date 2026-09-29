@@ -40,7 +40,8 @@ export function setCryptoHandle(next: CryptoHandle | null): void {
   }
 }
 
-function cryptoReady(): Promise<CryptoHandle> {
+/** Wait for the crypto layer of this tab. */
+export function cryptoReady(): Promise<CryptoHandle> {
   return handle ? Promise.resolve(handle) : new Promise((resolve, reject) => waiters.push({ resolve, reject }));
 }
 

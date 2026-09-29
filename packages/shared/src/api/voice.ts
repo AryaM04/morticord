@@ -37,5 +37,7 @@ export const voiceStateSchema = z.object({
   /** Set by a moderator with DEAFEN_MEMBERS. */
   serverDeaf: z.boolean(),
   joinedAt: z.string(),
+  /** The random id that the client chose for this join. Peers use it to drop stale voice signals. */
+  callId: z.string().max(64).optional(),
 });
 export type VoiceStateJson = z.infer<typeof voiceStateSchema>;

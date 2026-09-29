@@ -110,9 +110,16 @@ export class OlmMachine {
   /**
    * Encrypt one envelope for each target device and send them. Devices
    * without a session get one from a claimed one-time key. Devices that are
-   * unknown, unverified or without keys are in `failed`.
+   * unknown, unverified or without keys are in `failed`. With `live`, the
+   * messages go over the gateway op with no reply, so every encrypted
+   * message counts as sent.
    */
-  async encryptToDevices(targets: DeviceRef[], type: string, content: Record<string, unknown>): Promise<EncryptResult> {
+  async encryptToDevices(
+    targets: DeviceRef[],
+    type: string,
+    content: Record<string, unknown>,
+    live = false,
+  ): Promise<EncryptResult> {
     const failed: DeviceRef[] = [];
     const devices: DeviceRecord[] = [];
     const seen = new Set<string>();
@@ -129,7 +136,7 @@ export class OlmMachine {
         failed.push(refOf(target));
       }
     }
-    return this.send(await this.ensureSessions(devices, false, failed), type, content, failed);
+    return this.send(await this.ensureSessions(devices, false, failed), type, content, failed, live);
   }
 
   /** Handle one TO_DEVICE dispatch. It never throws: a message that fails is dropped. */
@@ -260,6 +267,7 @@ export class OlmMachine {
     type: string,
     content: Record<string, unknown>,
     failed: DeviceRef[],
+    live = false,
   ): Promise<EncryptResult> {
     const messages: ToDeviceMessage[] = [];
     const encrypted: DeviceRef[] = [];
@@ -277,6 +285,11 @@ export class OlmMachine {
     for (let start = 0; start < messages.length; start += MAX_TO_DEVICE_MESSAGES) {
       const batch = messages.slice(start, start + MAX_TO_DEVICE_MESSAGES);
       const refs = encrypted.slice(start, start + MAX_TO_DEVICE_MESSAGES);
+      if (live) {
+        this.deps.transport.sendToDeviceLive(batch);
+        sent.push(...refs);
+        continue;
+      }
       try {
         const { skipped } = await this.deps.transport.sendToDevice(batch);
         for (const ref of refs) {
