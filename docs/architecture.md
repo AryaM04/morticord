@@ -39,6 +39,7 @@ The full plan is in the plan file that `CLAUDE.md` names.
 - The **refresh token** is 32 random bytes as base64url. The server keeps only its SHA-256 hash. It is valid for 30 days. Each refresh gives a new refresh token and revokes the old one (rotation).
   If a client sends a revoked refresh token again, the server revokes all refresh tokens of that device, because the token was possibly stolen.
 - Tokens go in the response body. The client keeps them in `platform.secureStore`. We do not use cookies, because the desktop shells use a different origin from the API.
+- The desktop app has its own origin (`http://tauri.localhost` on Windows, `tauri://localhost` on macOS). The server sends CORS headers, without credentials, only to the origins in `CORS_ALLOWED_ORIGINS`. The gateway refuses a WebSocket upgrade from an origin that is not the web origin, the same host or an allowed origin.
 - Passwords use argon2id through `@node-rs/argon2` (it has prebuilt binaries for all platforms, including Alpine).
 - Auth routes have a rate limit (`@fastify/rate-limit`, in memory).
 

@@ -1,9 +1,8 @@
 // A platform gives client-core the things it needs from the host: a
 // secure place to keep the session and the crypto pickle key, and desktop
-// notifications. The web
-// app uses IndexedDB and the Notification API. A desktop shell (M7) will
-// supply its own OS key store and notification service here, and its own
-// link preview fetch.
+// notifications. The web app uses IndexedDB and the Notification API. The
+// desktop app (apps/web/src/desktop/tauri-platform.ts) supplies the OS key
+// store, system notifications and its own link preview fetch.
 import type { FetchLinkPreview } from "./link-preview.js";
 
 /** A small secure key-value store. Values are text (JSON, in practice). */
@@ -31,7 +30,7 @@ export interface Platform {
    * Make the preview of a link, for a message that this device sends.
    * The limits: 3 s, 512 KiB of HTML, a 2 MiB image, and no private
    * network address. The web app supplies a version that asks its own
-   * server (see `createServerLinkPreviewFetcher`). A desktop shell (M7)
+   * server (see `createServerLinkPreviewFetcher`). The desktop app
    * fetches the page itself.
    */
   fetchLinkPreview?: FetchLinkPreview;
