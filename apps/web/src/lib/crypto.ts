@@ -3,9 +3,10 @@
 // dynamic import, so they are not in the main bundle. Only one tab of a
 // device runs the crypto layer: it holds a Web Lock. A different tab waits
 // for the lock. See docs/concepts/olm-megolm.md.
-import type { CryptoHandle } from "@discord-clone/client-core/crypto";
+import type { BackupStatus, CryptoHandle, VerificationView } from "@discord-clone/client-core/crypto";
 import { ApiError, postEvent, webPlatform } from "@discord-clone/client-core";
 import { encodeBase64Url } from "@discord-clone/shared";
+import { createStore } from "zustand/vanilla";
 import { messageCodec, setCryptoHandle } from "./messages.js";
 import { gatewaySend, realtimeStore, subscribeDispatch } from "./realtime.js";
 import { session } from "./session.js";
@@ -23,6 +24,63 @@ export interface CryptoDebug {
   hasMegolmSession(sessionId: string): Promise<boolean>;
   /** Encrypt and post many messages fast, with the real codec. It waits and tries again after a 429. */
   seedMessages(channelId: string, bodies: string[]): Promise<void>;
+  /** The security state that the UI shows. */
+  security(): SecuritySnapshot;
+}
+
+/** The trust state of this device for the UI: verification, key backup and identity changes. */
+export interface SecuritySnapshot {
+  /** True after the crypto layer started. */
+  ready: boolean;
+  deviceVerified: boolean;
+  holdsMasterKey: boolean;
+  backup: BackupStatus | null;
+  /** Users whose identity (master key) changed. The UI warns about each one. */
+  changedUsers: string[];
+  verifications: VerificationView[];
+}
+
+const EMPTY_SECURITY: SecuritySnapshot = {
+  ready: false,
+  deviceVerified: true,
+  holdsMasterKey: false,
+  backup: null,
+  changedUsers: [],
+  verifications: [],
+};
+
+export const securityStore = createStore<SecuritySnapshot>(() => EMPTY_SECURITY);
+
+/** The crypto layer of this tab, or null before it starts. The security UI uses it. */
+export function currentCrypto(): CryptoHandle | null {
+  return handle;
+}
+
+/** Read the security state again. Several changes in a short time give one read. */
+function watchSecurity(started: CryptoHandle): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const read = async () => {
+    timer = null;
+    const [state, changedUsers] = await Promise.all([started.security.state(), started.changedMasterKeys()]);
+    if (handle === started) {
+      securityStore.setState({ ready: true, ...state, changedUsers, verifications: started.verification.list() });
+    }
+  };
+  const schedule = () => {
+    timer ??= setTimeout(() => void read().catch(() => undefined), 50);
+  };
+  const stopSecurity = started.security.onChange(schedule);
+  const stopVerification = started.verification.onChange(() => {
+    securityStore.setState({ verifications: started.verification.list() });
+  });
+  schedule();
+  return () => {
+    stopSecurity();
+    stopVerification();
+    if (timer) {
+      clearTimeout(timer);
+    }
+  };
 }
 
 const MAX_RECEIVED = 100;
@@ -58,6 +116,7 @@ function start(userId: string, deviceId: string): void {
       handle = started;
       setCryptoHandle(started);
       const unsubscribe = subscribeDispatch((event) => started.handleDispatch(event));
+      const stopSecurity = watchSecurity(started);
       started.onToDevice((event) => {
         if (event.type === "debug.ping" && typeof event.content.text === "string") {
           received.push({ fromUserId: event.sender.userId, fromDeviceId: event.sender.deviceId, text: event.content.text });
@@ -69,6 +128,7 @@ function start(userId: string, deviceId: string): void {
         releaseLock = resolve;
       });
       unsubscribe();
+      stopSecurity();
       started.stop();
     })
     .catch((error: unknown) => {
@@ -80,6 +140,7 @@ function stop(): void {
   run += 1;
   handle = null;
   setCryptoHandle(null);
+  securityStore.setState(EMPTY_SECURITY);
   received.length = 0;
   releaseLock?.();
   releaseLock = null;
@@ -112,6 +173,7 @@ export const cryptoDebug: CryptoDebug = {
     return result.sent.length;
   },
   received: () => [...received],
+  security: () => securityStore.getState(),
   hasMegolmSession: (sessionId) => handle?.hasMegolmSession(sessionId) ?? Promise.resolve(false),
   async seedMessages(channelId, bodies) {
     for (const [index, body] of bodies.entries()) {

@@ -53,6 +53,12 @@ async function read(client: TestClient, event: EventJson): Promise<string> {
   return result.waiting ? "waiting" : "unreadable";
 }
 
+async function setUpBackup(client: TestClient, passphrase?: string): Promise<{ recoveryKey: string }> {
+  const prepared = await client.handle!.security.setUpBackup(passphrase);
+  await prepared.create();
+  return prepared;
+}
+
 async function isVerified(client: TestClient): Promise<boolean> {
   return (await client.handle!.security.state()).deviceVerified;
 }
@@ -87,7 +93,7 @@ describe("key backup", () => {
   it("backs up sessions and secrets, and a new device restores the history and signs itself", async () => {
     const { server, a1, b1 } = await twoUsers();
     const sealed = await a1.handle!.settings.seal(settingsText, null);
-    const { recoveryKey } = await a1.handle!.security.setUpBackup();
+    const { recoveryKey } = await setUpBackup(a1);
     const first = await send(a1, "first secret");
     const second = await send(b1, "second secret");
     await settleClients([a1, b1]);
@@ -128,7 +134,7 @@ describe("key backup", () => {
 
   it("restores with the passphrase and rejects a wrong key or passphrase", async () => {
     const { server, a1 } = await twoUsers();
-    await a1.handle!.security.setUpBackup("a long passphrase for tests");
+    await setUpBackup(a1, "a long passphrase for tests");
     const event = await send(a1, "passphrase secret");
     await settleClients([a1]);
     expect(server.backups.get("1")!.version.authData.passphrase).toMatchObject({ algorithm: "argon2id", memoryKiB: 65536, iterations: 3 });
@@ -149,7 +155,7 @@ describe("key backup", () => {
 
   it("does not upload to a backup version that no verified device signed", async () => {
     const { server, a1 } = await twoUsers();
-    await a1.handle!.security.setUpBackup();
+    await setUpBackup(a1);
     await settleClients([a1]);
     const real = server.backups.get("1")!;
     // A malicious server puts in a version with its own public key.
@@ -172,7 +178,7 @@ describe("key backup", () => {
 
   it("changes nothing for other users when a sender restores, and marks restored sessions as backed up", async () => {
     const { server, a1 } = await twoUsers();
-    const { recoveryKey } = await a1.handle!.security.setUpBackup();
+    const { recoveryKey } = await setUpBackup(a1);
     await send(a1, "one");
     await settleClients([a1]);
     const before = [...server.backups.get("1")!.sessions.values()];

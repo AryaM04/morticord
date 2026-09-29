@@ -27,6 +27,7 @@ import { describeError } from "../lib/errors.js";
 import { realtimeStore } from "../lib/realtime.js";
 import { useRealtime } from "../lib/useRealtime.js";
 import { openDmWith } from "../lib/dms.js";
+import { currentCrypto } from "../lib/crypto.js";
 
 // A stable fallback: a fresh `[]` on every render would break the store
 // subscription (it always looks "changed"), causing a render loop.
@@ -36,6 +37,29 @@ export interface VoiceContext {
   channelId: string;
   serverMute: boolean;
   serverDeaf: boolean;
+}
+
+/** The identity state of a user (docs/concepts/olm-megolm.md section 10), and a button that starts a SAS verification. */
+function IdentityRow({ userId }: { userId: string }) {
+  const [trust, setTrust] = useState<{ verified: boolean; changed: boolean } | null>(null);
+  useEffect(() => {
+    void currentCrypto()?.security.userTrust(userId).then(setTrust);
+  }, [userId]);
+  if (!trust) {
+    return null;
+  }
+  return (
+    <div className="flex items-center justify-between px-2 py-1 text-sm">
+      <span style={{ color: trust.verified ? "#3ba55d" : trust.changed ? "#e05252" : "var(--color-text-muted)" }}>
+        {trust.changed ? "Identity changed" : trust.verified ? "Identity verified" : "Identity not verified"}
+      </span>
+      {!trust.verified && (
+        <button type="button" className="underline" onClick={() => void currentCrypto()?.verification.requestUser(userId).catch(() => undefined)}>
+          Verify
+        </button>
+      )}
+    </div>
+  );
 }
 
 function displayName(member: GuildMemberJson): string {
@@ -216,6 +240,7 @@ export function MemberContextMenu({
             {relationship.status === "accepted" ? "Friend" : "Friend request pending"}
           </span>
         )}
+        {!isSelf && <IdentityRow userId={member.userId} />}
         {canChangeNickname && !editingNickname && (
           <button
             type="button"

@@ -225,11 +225,13 @@ export class KeyBackup {
   // ---- set up and delete --------------------------------------------------------
 
   /**
-   * Make a new backup. Without a passphrase the recovery key is random.
+   * Prepare a new backup. Without a passphrase the recovery key is random.
    * With a passphrase it is Argon2id of the passphrase. Returns the recovery
-   * key text to show one time. The upload of the keys starts in the background.
+   * key text to show one time. `create` makes the backup on the server (after
+   * the user wrote down the key). Then the upload starts in the background.
+   * A new backup replaces the old one.
    */
-  async setUp(passphrase?: string): Promise<{ recoveryKey: string }> {
+  async setUp(passphrase?: string): Promise<{ recoveryKey: string; create: () => Promise<void> }> {
     const { wasm, transport, account, manager, userId, deviceId } = this.deps;
     let recovery: Uint8Array;
     let params: BackupPassphraseParams | null = null;
@@ -254,13 +256,15 @@ export class KeyBackup {
       signature: account.sign(text),
       masterSignature: await manager.signWithMasterKey(text),
     };
-    const { version } = await transport.createBackupVersion({ publicKey, authData });
-    this.current = { version, publicKey, authData, secrets: {} };
-    this.trusted = true;
-    await this.rememberTrust(this.current);
-    this.changed();
-    this.scheduleUpload(0);
-    return { recoveryKey: encodeRecoveryKey(recovery) };
+    const create = async () => {
+      const { version } = await transport.createBackupVersion({ publicKey, authData });
+      this.current = { version, publicKey, authData, secrets: {} };
+      this.trusted = true;
+      await this.rememberTrust(this.current);
+      this.changed();
+      this.scheduleUpload(0);
+    };
+    return { recoveryKey: encodeRecoveryKey(recovery), create };
   }
 
   /** Delete the current backup on the server. */

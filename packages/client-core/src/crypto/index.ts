@@ -101,8 +101,11 @@ export interface SecurityApi {
   userTrust(userId: string): Promise<UserTrust>;
   /** Accept the new master key of a user after an identity change. */
   acceptIdentityChange(userId: string): Promise<void>;
-  /** Make a new key backup. Returns the recovery key text, to show one time. */
-  setUpBackup(passphrase?: string): Promise<{ recoveryKey: string }>;
+  /**
+   * Prepare a new key backup. Returns the recovery key text, to show one
+   * time, and `create`, which makes the backup on the server.
+   */
+  setUpBackup(passphrase?: string): Promise<{ recoveryKey: string; create: () => Promise<void> }>;
   restoreBackup(
     input: { recoveryKey: string } | { passphrase: string },
     onProgress?: (progress: RestoreProgress) => void,
