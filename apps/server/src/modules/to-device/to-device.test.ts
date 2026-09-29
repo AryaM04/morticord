@@ -130,7 +130,7 @@ describeWithDb("to-device queue", () => {
     expect(await client.never("TO_DEVICE", () => true, 300)).toBe(true);
     client.send(GatewayOpcode.TO_DEVICE_ACK, { upToId: firstWindow[99]!.id });
     const rest = await collect(client, 30);
-    expect(BigInt(rest[0]!.id) > BigInt(firstWindow[99]!.id)).toBe(true);
+    expect(BigInt(rest[0]!.id!) > BigInt(firstWindow[99]!.id!)).toBe(true);
     client.close();
   });
 
