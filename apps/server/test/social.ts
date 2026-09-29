@@ -26,6 +26,7 @@ export interface StartOptions {
   callRingMs?: number;
   voiceGraceMs?: number;
   rateLimit?: boolean;
+  toDeviceQueueLimit?: number;
 }
 
 export async function startTestServer(options: StartOptions = {}): Promise<TestServer> {
@@ -42,6 +43,7 @@ export async function startTestServer(options: StartOptions = {}): Promise<TestS
     voice,
     ringer,
     gatewayTiming: { heartbeatIntervalMs: 30_000, identifyTimeoutMs: 2_000 },
+    toDeviceQueueLimit: options.toDeviceQueueLimit,
   });
   await app.listen({ port: 0, host: "127.0.0.1" });
   const address = app.server.address();

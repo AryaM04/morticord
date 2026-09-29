@@ -29,6 +29,8 @@ export const GatewayOpcode = {
   INVALID_SESSION: 12,
   RECONNECT: 13,
   VOICE_SIGNAL: 14,
+  /** Sent by the client: to-device messages up to an id are processed. */
+  TO_DEVICE_ACK: 15,
 } as const;
 
 export type GatewayOpcodeValue = (typeof GatewayOpcode)[keyof typeof GatewayOpcode];
@@ -112,6 +114,10 @@ export const readyPayloadSchema = z.object({
   privateChannels: z.array(dmChannelSchema).default([]),
   /** The current voice state of every peer in a DM call of the caller. */
   privateVoiceStates: z.array(voiceStateSchema).default([]),
+  /** How many one-time keys the server has for this device. */
+  oneTimeKeyCount: z.number().int().nonnegative().default(0),
+  /** True when this device has no fallback key, or a claim used it. */
+  needsFallbackKey: z.boolean().default(false),
 });
 
 /** Sent by the server after a successful RESUME, once missed dispatches replay. */
@@ -292,6 +298,8 @@ export const DispatchEvent = {
   CALL_RING: "CALL_RING",
   CALL_RING_STOP: "CALL_RING_STOP",
   USER_SETTINGS_UPDATE: "USER_SETTINGS_UPDATE",
+  TO_DEVICE: "TO_DEVICE",
+  DEVICE_LIST_UPDATE: "DEVICE_LIST_UPDATE",
 } as const;
 
 export type DispatchEventName = (typeof DispatchEvent)[keyof typeof DispatchEvent];

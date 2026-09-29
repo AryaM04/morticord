@@ -8,3 +8,4 @@ export * from "./voice.js";
 export * from "./friends.js";
 export * from "./dms.js";
 export * from "./settings.js";
+export * from "./keys.js";

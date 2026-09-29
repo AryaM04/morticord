@@ -101,7 +101,7 @@ export const refreshTokens = pgTable(
 /**
  * One device is one login session (a browser tab or an app install). The
  * E2EE keys start empty and are filled in by the device once it sets up
- * end-to-end encryption (milestone M6).
+ * end-to-end encryption. See docs/concepts/olm-megolm.md.
  */
 export const devices = pgTable("devices", {
   id: text("id").primaryKey(),
@@ -111,7 +111,15 @@ export const devices = pgTable("devices", {
   name: text("name").notNull(),
   curve25519Key: text("curve25519_key"),
   ed25519Key: text("ed25519_key"),
-  signatureByUserSsk: text("signature_by_user_ssk"),
+  /** The device Ed25519 key signs its own identity keys. */
+  keySignature: text("key_signature"),
+  /** The user master key signs the identity keys of this device. */
+  masterSignature: text("master_signature"),
+  /**
+   * Set when the device signs out or is removed while it has keys. The
+   * row stays for old events, but the device is out of every device list.
+   */
+  removedAt: timestamp("removed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -121,10 +129,11 @@ export const oneTimeKeys = pgTable(
   {
     deviceId: text("device_id")
       .notNull()
-      .references(() => devices.id),
+      .references(() => devices.id, { onDelete: "cascade" }),
     keyId: text("key_id").notNull(),
     key: text("key").notNull(),
-    claimed: boolean("claimed").notNull().default(false),
+    /** The device Ed25519 key signs this key. */
+    signature: text("signature").notNull(),
   },
   (table) => [primaryKey({ columns: [table.deviceId, table.keyId] })],
 );
@@ -132,32 +141,44 @@ export const oneTimeKeys = pgTable(
 export const fallbackKeys = pgTable("fallback_keys", {
   deviceId: text("device_id")
     .primaryKey()
-    .references(() => devices.id),
+    .references(() => devices.id, { onDelete: "cascade" }),
   keyId: text("key_id").notNull(),
   key: text("key").notNull(),
+  signature: text("signature").notNull(),
+  /** Set when a claim returned this key. The device then uploads a new one. */
+  used: boolean("used").notNull().default(false),
 });
 
+/** The master key of a user. It signs the device keys of the user. */
 export const crossSigningKeys = pgTable("cross_signing_keys", {
   userId: snowflake("user_id")
     .primaryKey()
     .references(() => users.id),
   masterKey: text("master_key").notNull(),
-  selfSigningKey: text("self_signing_key").notNull(),
-  signatures: text("signatures").notNull(),
+  /** The device that uploaded the master key. Its Ed25519 key signed it. */
+  deviceId: text("device_id").notNull(),
+  deviceSignature: text("device_signature").notNull(),
 });
 
-export const toDeviceQueue = pgTable("to_device_queue", {
-  id: snowflake().primaryKey(),
-  recipientDeviceId: text("recipient_device_id")
-    .notNull()
-    .references(() => devices.id),
-  senderDeviceId: text("sender_device_id")
-    .notNull()
-    .references(() => devices.id),
-  type: text("type").notNull(),
-  ciphertext: bytea("ciphertext").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const toDeviceQueue = pgTable(
+  "to_device_queue",
+  {
+    id: snowflake().primaryKey(),
+    recipientDeviceId: text("recipient_device_id")
+      .notNull()
+      .references(() => devices.id, { onDelete: "cascade" }),
+    senderUserId: snowflake("sender_user_id")
+      .notNull()
+      .references(() => users.id),
+    senderDeviceId: text("sender_device_id")
+      .notNull()
+      .references(() => devices.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    ciphertext: bytea("ciphertext").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("to_device_queue_recipient_id_idx").on(table.recipientDeviceId, table.id)],
+);
 
 export const keyBackupVersions = pgTable(
   "key_backup_versions",

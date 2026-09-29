@@ -10,6 +10,7 @@ import {
   identifyPayloadSchema,
   presenceSetPayloadSchema,
   resumePayloadSchema,
+  toDeviceAckPayloadSchema,
   typingPayloadSchema,
   voiceJoinPayloadSchema,
   voiceSignalPayloadSchema,
@@ -25,6 +26,7 @@ import { verifyAccessToken } from "../auth/tokens.js";
 import { buildPrivateReadyData } from "../dms/service.js";
 import { listRelationships } from "../friends/service.js";
 import { buildGuildView } from "../guilds/service.js";
+import { keyCounts } from "../keys/service.js";
 import { handleTyping } from "../messages/typing.js";
 import { loadReadStates } from "../messages/service.js";
 import {
@@ -34,6 +36,7 @@ import {
   handleVoiceSignal,
   handleVoiceState,
 } from "../voice/gateway-ops.js";
+import type { ToDeviceDelivery } from "../to-device/service.js";
 import type { CallRinger } from "../voice/calls.js";
 import { VoiceError, type VoiceService, type VoiceState } from "../voice/service.js";
 import { GatewayService, loadGuildIdsForUser, type GatewaySocket } from "./service.js";
@@ -65,6 +68,7 @@ async function buildReadyPayload(
   gateway: GatewayService,
   voice: VoiceService,
   userId: bigint,
+  deviceId: string,
   sessionId: string,
 ): Promise<ReadyPayload> {
   const userRows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
@@ -74,6 +78,7 @@ async function buildReadyPayload(
   const readStateRows = await loadReadStates(db, userId);
   const relationships = await listRelationships(db, userId);
   const { privateChannels, privateVoiceStates } = await buildPrivateReadyData(db, voice, userId);
+  const { oneTimeKeyCount, needsFallbackKey } = await keyCounts(db, deviceId);
 
   return {
     sessionId,
@@ -87,17 +92,26 @@ async function buildReadyPayload(
     relationships,
     privateChannels,
     privateVoiceStates,
+    oneTimeKeyCount,
+    needsFallbackKey,
   };
 }
 
 export function registerGatewayRoute(
   app: FastifyInstance,
-  deps: { db: DbClient; config: AppConfig; gateway: GatewayService; voice: VoiceService; ringer?: CallRinger },
+  deps: {
+    db: DbClient;
+    config: AppConfig;
+    gateway: GatewayService;
+    voice: VoiceService;
+    ringer?: CallRinger;
+    delivery?: ToDeviceDelivery;
+  },
   timing: GatewayTimingOptions = {},
 ): void {
   const heartbeatIntervalMs = timing.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
   const identifyTimeoutMs = timing.identifyTimeoutMs ?? DEFAULT_IDENTIFY_TIMEOUT_MS;
-  const { db, config, gateway, voice, ringer } = deps;
+  const { db, config, gateway, voice, ringer, delivery } = deps;
   const voiceOpsDeps = { db, gateway, voice, ringer };
 
   app.get("/gateway", { websocket: true }, (rawSocket) => {
@@ -134,6 +148,7 @@ export function registerGatewayRoute(
         clearTimeout(state.heartbeatTimer);
       }
       if (state.sessionId) {
+        delivery?.stop(state.sessionId);
         gateway.disconnectSession(state.sessionId);
         const info = gateway.getSession(state.sessionId);
         if (info) {
@@ -191,8 +206,11 @@ export function registerGatewayRoute(
       state.sessionId = session.id;
       gateway.notifyConnectionCountChanged(claims.userId);
 
-      const ready = await buildReadyPayload(db, gateway, voice, claims.userId, session.id);
+      const ready = await buildReadyPayload(db, gateway, voice, claims.userId, claims.deviceId, session.id);
       send(GatewayOpcode.DISPATCH, ready, { t: "READY" });
+      if (!state.closed) {
+        delivery?.start(session.id, claims.deviceId);
+      }
       scheduleHeartbeatTimeout();
     }
 
@@ -226,6 +244,9 @@ export function registerGatewayRoute(
             send(GatewayOpcode.DISPATCH, entry.d, { t: entry.t, s: entry.seq });
           }
           send(GatewayOpcode.DISPATCH, {}, { t: "RESUMED" });
+          if (!state.closed) {
+            delivery?.start(parsed.data.sessionId, claims.deviceId);
+          }
           scheduleHeartbeatTimeout();
         })
         .catch(() => {
@@ -358,6 +379,21 @@ export function registerGatewayRoute(
       }
     }
 
+    function handleToDeviceAck(payload: unknown): void {
+      if (!state.sessionId) {
+        closeConnection(GatewayCloseCode.NOT_AUTHENTICATED, "Identify before you acknowledge messages.");
+        return;
+      }
+      const parsed = toDeviceAckPayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        closeConnection(GatewayCloseCode.DECODE_ERROR, "The TO_DEVICE_ACK payload is not valid.");
+        return;
+      }
+      delivery?.ack(state.sessionId, BigInt(parsed.data.upToId), parsed.data.resync ?? false).catch((error) => {
+        app.log.error(error, "The server could not delete acknowledged to-device messages.");
+      });
+    }
+
     socket.on("message", (raw) => {
       if (state.closed) {
         return;
@@ -413,6 +449,9 @@ export function registerGatewayRoute(
         case GatewayOpcode.VOICE_SIGNAL:
           handleVoiceSignalOp(envelope.d);
           break;
+        case GatewayOpcode.TO_DEVICE_ACK:
+          handleToDeviceAck(envelope.d);
+          break;
         default:
           closeConnection(GatewayCloseCode.UNKNOWN_OPCODE, "Unknown opcode.");
       }
@@ -427,6 +466,7 @@ export function registerGatewayRoute(
         clearTimeout(state.heartbeatTimer);
       }
       if (state.sessionId) {
+        delivery?.stop(state.sessionId);
         const info = gateway.getSession(state.sessionId);
         gateway.disconnectSession(state.sessionId);
         if (info) {
