@@ -9,6 +9,7 @@ import { MemberList } from "../components/MemberList.js";
 import { VerifyBanner } from "../components/VerifyBanner.js";
 import { NoticeBanner } from "../components/NoticeBanner.js";
 import { SecurityBanner } from "../components/SecurityBanner.js";
+import { CryptoTabBanner } from "../components/ConnectionBanner.js";
 import { HomeView } from "./HomeView.js";
 import { useRealtime } from "../lib/useRealtime.js";
 import { clearLastLocation, readLastLocation, rememberLastLocation } from "../lib/lastLocation.js";
@@ -101,6 +102,7 @@ export function AppShell() {
       <VerifyBanner />
       <SecurityBanner />
       <NoticeBanner />
+      <CryptoTabBanner />
       <div className="flex flex-1">
         <ServerRail activeGuildId={params.guildId} />
         {params.guildId === "@me" ? (
