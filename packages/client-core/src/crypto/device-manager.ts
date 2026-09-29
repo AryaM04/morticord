@@ -1,7 +1,8 @@
 // The device manager: it sets up the keys of this device on the server
 // and keeps the one-time keys and the fallback key topped up. It also
-// makes the user master key when the user has none. See
-// docs/concepts/olm-megolm.md sections 3 and 4.
+// makes the user master key when the user has none, and signs devices
+// with it when this device holds it. See docs/concepts/olm-megolm.md
+// sections 3 and 4.
 import {
   deviceKeysSignedText,
   masterKeySignedText,
@@ -17,6 +18,8 @@ import type { Wasm } from "./wasm.js";
 
 const DEVICE_KEYS_UPLOADED_VALUE = "deviceKeysUploaded";
 const MASTER_KEY_VALUE = "masterKey";
+
+type SigningKey = InstanceType<Wasm["SigningKey"]>;
 
 export interface DeviceManagerDeps {
   wasm: Wasm;
@@ -133,6 +136,113 @@ export class DeviceManager {
       await account.save();
       this.estimate = result.oneTimeKeyCount;
     });
+  }
+
+  /** True when this device holds the master private key. */
+  async hasMasterKey(): Promise<boolean> {
+    return Boolean(await this.deps.store.getValue<string | null>(MASTER_KEY_VALUE));
+  }
+
+  /** Run `task` with the master key of this device, or return null when this device does not hold it. */
+  private async withMasterKey<T>(task: (master: SigningKey) => Promise<T> | T): Promise<T | null> {
+    const pickle = await this.deps.store.getValue<string | null>(MASTER_KEY_VALUE);
+    if (!pickle) {
+      return null;
+    }
+    const master = this.deps.wasm.SigningKey.from_pickle(pickle, this.deps.pickleKey);
+    try {
+      return await task(master);
+    } finally {
+      master.free();
+    }
+  }
+
+  /** The 32 secret bytes of the master key, for the key backup, or null. */
+  exportMasterSecret(): Promise<Uint8Array | null> {
+    return this.withMasterKey((master) => master.export_secret());
+  }
+
+  /**
+   * Sign a different device of this user with the master key. Call this
+   * only after a verification of that device (SAS). Returns false when this
+   * device does not hold the master key or does not know that device.
+   */
+  async signOwnDevice(deviceId: string): Promise<boolean> {
+    const { deviceList, transport, userId } = this.deps;
+    await deviceList.refresh([userId]);
+    const device = (await deviceList.getDevices(userId)).find((entry) => entry.deviceId === deviceId);
+    const user = await deviceList.getUser(userId);
+    if (!device || !user?.masterKey || user.changedMasterKey !== null) {
+      return false;
+    }
+    const signature = await this.withMasterKey((master) => {
+      if (master.public_key !== user.masterKey) {
+        return null;
+      }
+      return master.sign(deviceKeysSignedText(userId, deviceId, device.curve25519, device.ed25519));
+    });
+    if (!signature) {
+      return false;
+    }
+    await transport.uploadSignature({ deviceId, signature });
+    await deviceList.refresh([userId]);
+    return true;
+  }
+
+  /**
+   * Take the master key from the key backup. It must be the master key that
+   * the server shows for this user and that this device trusts. Then this
+   * device signs itself. Returns false when the key does not match.
+   */
+  async importMasterKey(secret: Uint8Array): Promise<boolean> {
+    const { wasm, store, transport, account, deviceList, pickleKey, userId, deviceId } = this.deps;
+    const master = wasm.SigningKey.from_secret(secret);
+    try {
+      const publicKey = master.public_key;
+      await deviceList.refresh([userId]);
+      const [own] = (await transport.queryKeys([userId])).users;
+      const user = await deviceList.getUser(userId);
+      if (own?.masterKey?.publicKey !== publicKey || (user?.masterKey && user.masterKey !== publicKey)) {
+        return false;
+      }
+      await store.commit({ values: { [MASTER_KEY_VALUE]: master.pickle(pickleKey) } });
+      const text = deviceKeysSignedText(userId, deviceId, account.curve25519, account.ed25519);
+      await transport.uploadKeys({ masterSignature: master.sign(text) });
+      await deviceList.trustOwnMasterKey(userId, publicKey);
+      await deviceList.refresh([userId]);
+      return true;
+    } finally {
+      master.free();
+    }
+  }
+
+  /**
+   * Make a new master key for a user who lost the old one. The server
+   * needs the account password. The other devices of the user lose their
+   * signature, and other users see an identity change.
+   */
+  async resetMasterKey(password: string): Promise<void> {
+    const { wasm, store, transport, account, deviceList, pickleKey, userId, deviceId } = this.deps;
+    const master = new wasm.SigningKey();
+    try {
+      const publicKey = master.public_key;
+      await transport.resetMasterKey({
+        publicKey,
+        deviceSignature: account.sign(masterKeySignedText(userId, publicKey)),
+        masterSignature: master.sign(deviceKeysSignedText(userId, deviceId, account.curve25519, account.ed25519)),
+        password,
+      });
+      await store.commit({ values: { [MASTER_KEY_VALUE]: master.pickle(pickleKey) } });
+      await deviceList.trustOwnMasterKey(userId, publicKey);
+      await deviceList.refresh([userId]);
+    } finally {
+      master.free();
+    }
+  }
+
+  /** Sign a text with the master key, or return null when this device does not hold it. */
+  signWithMasterKey(text: string): Promise<string | null> {
+    return this.withMasterKey((master) => master.sign(text));
   }
 
   /**

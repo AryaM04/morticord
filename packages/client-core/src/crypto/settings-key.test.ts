@@ -2,7 +2,7 @@
 // server: the share to the own devices, the request of a new device, and
 // the rule that only devices of the same user count.
 import { beforeAll, describe, expect, it } from "vitest";
-import { FakeServer, initWasmForTests, newClient, type TestClient } from "./test/fake-server.js";
+import { FakeServer, initWasmForTests, newClient, verifyWithSas, type TestClient } from "./test/fake-server.js";
 import { SettingsKeyMissingError, SETTINGS_KEY_TYPE } from "./settings-key.js";
 
 beforeAll(() => {
@@ -28,6 +28,7 @@ describe("settings key", () => {
     for (const client of [a1, a2, b1]) {
       await server.start(client);
     }
+    await verifyWithSas(a1, a2);
     const sealed = await a1.handle!.settings.seal(plaintext, null);
     await settle(a1, a2, b1);
 
@@ -56,7 +57,13 @@ describe("settings key", () => {
     await server.start(a3);
     const arrived: string[] = [];
     a3.handle!.settings.onKey((keyId) => arrived.push(keyId));
+    // Before the owner verifies A3, A1 does not answer it.
     await expect(a3.handle!.settings.open(sealed.blob)).rejects.toBeInstanceOf(SettingsKeyMissingError);
+    await settle(a1, a3);
+    expect(arrived).toEqual([]);
+
+    // After the verification, A3 asks again by itself.
+    await verifyWithSas(a3, a1);
     await expect.poll(async () => {
       await settle(a1, a3);
       return arrived;

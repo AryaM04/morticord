@@ -12,7 +12,7 @@ import {
 } from "@discord-clone/shared";
 import { Account, GroupSession, InboundGroupSession } from "@discord-clone/crypto-wasm";
 import { cryptoStoreName, openCryptoStore } from "./store.js";
-import { FakeServer, initWasmForTests, newClient, type TestClient } from "./test/fake-server.js";
+import { FakeServer, initWasmForTests, newClient, verifyWithSas, type TestClient } from "./test/fake-server.js";
 
 beforeAll(() => {
   initWasmForTests();
@@ -90,6 +90,16 @@ async function setup(eligible = ["1", "2", "3"], startUsers = ["1", "2", "3"]) {
   const all = Object.values(clients);
   for (const client of all.filter((entry) => startUsers.includes(entry.userId))) {
     await server.start(client);
+  }
+  // The first device of each user made the master key. It verifies the second device, so that one gets keys too.
+  for (const [first, second] of [
+    [clients.a1, clients.a2],
+    [clients.b1, clients.b2],
+    [clients.c1, clients.c2],
+  ] as const) {
+    if (startUsers.includes(first.userId)) {
+      await verifyWithSas(first, second);
+    }
   }
   return { server, ...clients, all };
 }
@@ -347,11 +357,29 @@ describe("Megolm channel encryption", () => {
     const b3 = newClient("2", "B3");
     await server.start(b3);
     server.broadcast("DEVICE_LIST_UPDATE", { userId: "2" });
+    // The owner did not verify B3 yet: it gets no key, and nobody answers its key request.
+    const unsigned = await send(a1, "not for B3");
+    await settle([...all, b3]);
+    expect(received(b3, "megolm.session")).toBe(0);
+    expect(await read(b3, unsigned)).toBe("waiting");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await settle([...all, b3]);
+    expect(received(b3, "megolm.forward")).toBe(0);
+
+    // B1 verifies B3 with SAS and signs it. The next message shares the current key with B3.
+    await verifyWithSas(b3, all[2]!);
     const second = await send(a1, "second");
     expect(second.megolmSessionId).toBe(first.megolmSessionId);
     await settle([...all, b3]);
     expect(received(b3, "megolm.session")).toBe(1);
     expect(await read(b3, second)).toBe("second");
+    // Now signed, B3 asks again for the key of the older message, and gets it.
+    await expect
+      .poll(async () => {
+        await settle([...all, b3]);
+        return read(b3, unsigned);
+      })
+      .toBe("not for B3");
   });
 
   it("keeps the sessions after a restart, and never crashes on bad input", async () => {

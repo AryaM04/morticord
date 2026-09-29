@@ -21,6 +21,8 @@ export interface DeviceListDeps {
   queue: KeyedQueue;
   /** Called when the server shows a master key that differs from the trusted one. */
   onMasterKeyChanged?: (userId: string) => void;
+  /** Called after the devices or the master key state of a user changed. */
+  onUserChanged?: (userId: string) => void;
   now?: () => number;
 }
 
@@ -108,6 +110,26 @@ export class DeviceList {
     return result;
   }
 
+  /**
+   * The devices that may get keys: the master key of the user signed them,
+   * and the master key did not change since this device trusted it. It
+   * fetches the new and outdated users first. See docs/concepts/olm-megolm.md section 4.
+   */
+  async trustedDevicesOfUsers(userIds: string[]): Promise<Map<string, DeviceRecord[]>> {
+    const result = await this.getDevicesOfUsers(userIds);
+    for (const [userId, devices] of result) {
+      const user = await this.deps.store.getUser(userId);
+      result.set(userId, user && user.changedMasterKey === null ? devices.filter((device) => device.ownerVerified) : []);
+    }
+    return result;
+  }
+
+  /** True when `device` may get keys (see `trustedDevicesOfUsers`). */
+  async isTrusted(device: DeviceRecord): Promise<boolean> {
+    const user = await this.deps.store.getUser(device.userId);
+    return device.ownerVerified && user !== undefined && user.changedMasterKey === null;
+  }
+
   /** One verified device. When it is not known, it fetches the user again (at most one time in 10 s). */
   async getDevice(userId: string, deviceId: string): Promise<DeviceRecord | undefined> {
     const devices = await this.getDevices(userId);
@@ -140,14 +162,47 @@ export class DeviceList {
     if (!user?.changedMasterKey) {
       return;
     }
-    await this.deps.store.putUser({ ...user, masterKey: user.changedMasterKey, changedMasterKey: null, outdated: true });
+    await this.deps.store.putUser({
+      ...user,
+      masterKey: user.changedMasterKey,
+      changedMasterKey: null,
+      verifiedMasterKey: null,
+      outdated: true,
+    });
     await this.refresh([userId]);
   }
 
-  /** Trust this master key for our own user. Only the device that made the key calls this. */
+  /**
+   * A SAS verification confirmed `publicKey` as the master key of `userId`.
+   * When it is the new key of an identity change, the change is accepted.
+   * Returns false when the key is neither the trusted key nor the new key.
+   */
+  async markMasterKeyVerified(userId: string, publicKey: string): Promise<boolean> {
+    const user = await this.deps.store.getUser(userId);
+    if (!user || (user.masterKey !== publicKey && user.changedMasterKey !== publicKey)) {
+      return false;
+    }
+    await this.deps.store.putUser({ ...user, masterKey: publicKey, changedMasterKey: null, verifiedMasterKey: publicKey, outdated: true });
+    await this.refresh([userId]);
+    return true;
+  }
+
+  /**
+   * Trust this master key for our own user. Only a device that holds the
+   * private key calls this: the device that made the key, a device that got
+   * it from the key backup, or a device after a master key reset.
+   */
   async trustOwnMasterKey(userId: string, publicKey: string): Promise<void> {
     const user = (await this.deps.store.getUser(userId)) ?? newUser(userId);
-    await this.deps.store.putUser({ ...user, tracked: true, outdated: true, masterKey: publicKey, changedMasterKey: null });
+    await this.deps.store.putUser({
+      ...user,
+      tracked: true,
+      outdated: true,
+      masterKey: publicKey,
+      changedMasterKey: null,
+      verifiedMasterKey: publicKey,
+    });
+    this.deps.onUserChanged?.(userId);
   }
 
   private verify(publicKey: string, text: string, signature: string): boolean {
@@ -210,5 +265,6 @@ export class DeviceList {
     if (changedMasterKey !== null && changedMasterKey !== user.changedMasterKey) {
       this.deps.onMasterKeyChanged?.(userId);
     }
+    this.deps.onUserChanged?.(userId);
   }
 }

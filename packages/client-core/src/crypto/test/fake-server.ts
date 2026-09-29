@@ -3,18 +3,31 @@
 // with acknowledgements), but in memory, and every user sees every user.
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { IDBFactory } from "fake-indexeddb";
-import type {
-  ChannelMembersResponse,
-  ClaimedKey,
-  QueriedUser,
-  ToDeviceDispatchPayload,
-  UploadKeysRequest,
-  UploadKeysResponse,
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
+import {
+  deviceKeysSignedText,
+  type BackupSession,
+  type BackupVersion,
+  type ChannelMembersResponse,
+  type ClaimedKey,
+  type QueriedUser,
+  type ToDeviceDispatchPayload,
+  type UploadKeysRequest,
+  type UploadKeysResponse,
 } from "@discord-clone/shared";
-import { initSync } from "@discord-clone/crypto-wasm";
+import { initSync, verify } from "@discord-clone/crypto-wasm";
 import type { SecureStore } from "../../platform.js";
-import { startCrypto, type CryptoHandle, type CryptoTransport } from "../index.js";
+import { startCrypto, type CryptoHandle, type CryptoTransport, type StartCryptoOptions } from "../index.js";
+
+// The crypto store uses the global IDBKeyRange, as in a browser.
+globalThis.IDBKeyRange ??= IDBKeyRange;
+
+/** The password that the fake server accepts for a master key reset. */
+export const TEST_PASSWORD = "correct-password";
+
+function codeError(code: string, status = 400): Error {
+  return Object.assign(new Error(code), { code, status });
+}
 
 /** Load the WASM file from disk, as the browser loads it from a URL. */
 export function initWasmForTests(): void {
@@ -72,6 +85,9 @@ export class FakeServer {
   readonly channels = new Map<string, ChannelMembersResponse>();
   /** Users that the clients see as offline. */
   readonly offline = new Set<string>();
+  /** The key backup of each user: the current version and its sessions. */
+  readonly backups = new Map<string, { version: BackupVersion; sessions: Map<string, BackupSession> }>();
+  private nextBackupVersion = 1;
   /** Change a TO_DEVICE dispatch before it goes out. Tests use it to act as a malicious server. */
   tamper: ((payload: ToDeviceDispatchPayload) => ToDeviceDispatchPayload) | null = null;
 
@@ -105,7 +121,13 @@ export class FakeServer {
           device.fallback = { ...body.fallbackKey, used: false };
         }
         if (body.masterSignature) {
+          const master = this.masters.get(userId);
+          const text = deviceKeysSignedText(userId, deviceId, device.keys!.curve25519, device.keys!.ed25519);
+          if (!master || !verify(master.publicKey, text, body.masterSignature)) {
+            throw codeError("INVALID_SIGNATURE");
+          }
           device.masterSignature = body.masterSignature;
+          this.broadcast("DEVICE_LIST_UPDATE", { userId });
         }
         return this.counts(device);
       },
@@ -116,6 +138,77 @@ export class FakeServer {
         }
         this.masters.set(userId, { publicKey: body.publicKey, deviceId, deviceSignature: body.deviceSignature });
         this.device(userId, deviceId).masterSignature = body.masterSignature;
+      },
+      uploadSignature: async ({ deviceId: target, signature }) => {
+        const device = this.devices.get(key(userId, target));
+        const master = this.masters.get(userId);
+        if (!device?.keys || !master) {
+          throw codeError("DEVICE_KEYS_MISSING");
+        }
+        const text = deviceKeysSignedText(userId, target, device.keys.curve25519, device.keys.ed25519);
+        if (!verify(master.publicKey, text, signature)) {
+          throw codeError("INVALID_SIGNATURE");
+        }
+        device.masterSignature = signature;
+        this.broadcast("DEVICE_LIST_UPDATE", { userId });
+      },
+      resetMasterKey: async ({ password, publicKey, deviceSignature, masterSignature }) => {
+        if (password !== TEST_PASSWORD) {
+          throw codeError("INVALID_PASSWORD", 401);
+        }
+        this.masters.set(userId, { publicKey, deviceId, deviceSignature });
+        for (const device of this.devices.values()) {
+          if (device.userId === userId) {
+            device.masterSignature = device.deviceId === deviceId ? masterSignature : null;
+          }
+        }
+        this.backups.delete(userId);
+        this.broadcast("DEVICE_LIST_UPDATE", { userId });
+      },
+      createBackupVersion: async ({ publicKey, authData }) => {
+        const version = this.nextBackupVersion++;
+        this.backups.set(userId, { version: { version, publicKey, authData, secrets: {} }, sessions: new Map() });
+        return { version };
+      },
+      getBackupVersion: async () => structuredClone(this.backups.get(userId)?.version ?? null),
+      deleteBackupVersion: async (version) => {
+        if (this.backups.get(userId)?.version.version !== version) {
+          throw codeError("BACKUP_NOT_FOUND", 404);
+        }
+        this.backups.delete(userId);
+      },
+      putBackupSessions: async ({ version, sessions }) => {
+        const backup = this.backups.get(userId);
+        if (backup?.version.version !== version) {
+          throw codeError("BACKUP_NOT_FOUND", 404);
+        }
+        let stored = 0;
+        for (const session of sessions) {
+          const known = backup.sessions.get(session.sessionId);
+          if (!known || session.firstIndex < known.firstIndex) {
+            backup.sessions.set(session.sessionId, session);
+            stored += 1;
+          }
+        }
+        return { stored };
+      },
+      getBackupSessions: async ({ version, channelId, after, limit = 200 }) => {
+        const backup = this.backups.get(userId);
+        if (backup?.version.version !== version) {
+          throw codeError("BACKUP_NOT_FOUND", 404);
+        }
+        const all = [...backup.sessions.values()]
+          .filter((entry) => (!channelId || entry.channelId === channelId) && (!after || entry.sessionId > after))
+          .sort((a, b) => (a.sessionId < b.sessionId ? -1 : 1));
+        const page = all.slice(0, limit);
+        return { sessions: structuredClone(page), next: all.length > limit ? page.at(-1)!.sessionId : null };
+      },
+      putBackupSecrets: async (version, secrets) => {
+        const backup = this.backups.get(userId);
+        if (backup?.version.version !== version) {
+          throw codeError("BACKUP_NOT_FOUND", 404);
+        }
+        backup.version.secrets = { ...backup.version.secrets, ...secrets };
       },
       queryKeys: async (userIds) => ({ users: userIds.map((id) => this.queried(id)) }),
       claimKeys: async (targets) => {
@@ -219,7 +312,7 @@ export class FakeServer {
   }
 
   /** Start (or restart) the crypto layer of a client and mark it online. */
-  async start(client: TestClient): Promise<CryptoHandle> {
+  async start(client: TestClient, extra: Partial<StartCryptoOptions> = {}): Promise<CryptoHandle> {
     const recipient = key(client.userId, client.deviceId);
     const handle = await startCrypto({
       userId: client.userId,
@@ -229,6 +322,8 @@ export class FakeServer {
       indexedDb: client.indexedDb,
       isOnline: (userId) => !this.offline.has(userId),
       megolmTimings: { requestDelaysMs: [0, 20, 40], backupForwardDelayMs: [30, 60], membershipDebounceMs: 5 },
+      backupTimings: { batchDelayMs: 0, debounceMs: 5 },
+      ...extra,
     });
     handle.onToDevice((event) => {
       client.received.push({ type: event.type, content: event.content, from: key(event.sender.userId, event.sender.deviceId) });
@@ -266,4 +361,41 @@ export class FakeServer {
 
 export function newClient(userId: string, deviceId: string): TestClient {
   return { userId, deviceId, indexedDb: new IDBFactory(), secureStore: memorySecureStore(), handle: null, received: [] };
+}
+
+/** Wait until the clients processed every message, a few rounds, because an answer can start new work. */
+export async function settleClients(clients: TestClient[]): Promise<void> {
+  for (let round = 0; round < 4; round += 1) {
+    for (const client of clients) {
+      await client.handle?.whenIdle();
+    }
+  }
+}
+
+/**
+ * Run a full SAS verification: `first` asks, `second` accepts, both see the
+ * same emojis and both confirm. For two devices of one user, the device
+ * with the master key signs the other one. Returns the emojis.
+ */
+export async function verifyWithSas(first: TestClient, second: TestClient, others: TestClient[] = []): Promise<string[]> {
+  const clients = [first, second, ...others];
+  const txnId =
+    first.userId === second.userId
+      ? await first.handle!.verification.requestOwnDevices(second.deviceId)
+      : await first.handle!.verification.requestUser(second.userId);
+  await settleClients(clients);
+  await second.handle!.verification.accept(txnId);
+  await settleClients(clients);
+  const view = (client: TestClient) => client.handle!.verification.list().find((entry) => entry.txnId === txnId)!;
+  const [a, b] = [view(first), view(second)];
+  if (a.phase !== "emojis" || b.phase !== "emojis" || JSON.stringify(a.emojis) !== JSON.stringify(b.emojis)) {
+    throw new Error(`The SAS did not reach equal emojis: ${a.phase} ${b.phase} ${a.cancelReason ?? b.cancelReason ?? ""}`);
+  }
+  await first.handle!.verification.confirm(txnId, true);
+  await second.handle!.verification.confirm(txnId, true);
+  await settleClients(clients);
+  if (view(first).phase !== "done" || view(second).phase !== "done") {
+    throw new Error(`The SAS did not finish: ${view(first).cancelReason ?? view(second).cancelReason ?? "no reason"}`);
+  }
+  return a.emojis!.map((entry) => entry.name);
 }

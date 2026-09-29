@@ -139,15 +139,40 @@ export class SettingsKeys {
     };
   }
 
-  /** The other devices of this user in the verified device list. None when the master key of the user changed. */
+  /**
+   * The other devices of this user that the master key signed. None when the
+   * master key of the user changed.
+   */
   private async ownDevices(): Promise<Array<{ userId: string; deviceId: string }>> {
-    if ((await this.deps.deviceList.changedMasterKeys()).includes(this.deps.userId)) {
-      this.deps.log?.("The master key of this user changed. The settings key is not shared.");
-      return [];
-    }
-    return (await this.deps.deviceList.getDevices(this.deps.userId))
-      .filter((device) => device.deviceId !== this.deps.deviceId)
+    const { userId, deviceId } = this.deps;
+    const devices = (await this.deps.deviceList.trustedDevicesOfUsers([userId])).get(userId) ?? [];
+    return devices
+      .filter((device) => device.deviceId !== deviceId)
       .map((device) => ({ userId: device.userId, deviceId: device.deviceId }));
+  }
+
+  /** Every settings key of this device: key id to raw key, as base64url. For the key backup. */
+  async allKeys(): Promise<Record<string, string>> {
+    return { ...(await this.load()) };
+  }
+
+  /**
+   * Add a key from the key backup. A known key id never gets a different
+   * value. Returns true when the key is new.
+   */
+  async importKey(keyId: string, key: string): Promise<boolean> {
+    if (!KEY_ID_PATTERN.test(keyId) || !KEY_PATTERN.test(key)) {
+      return false;
+    }
+    const known = (await this.load())[keyId];
+    if (known) {
+      return false;
+    }
+    await this.save(keyId, key);
+    for (const listener of this.listeners) {
+      listener(keyId);
+    }
+    return true;
   }
 
   /**
@@ -198,6 +223,16 @@ export class SettingsKeys {
     }
   }
 
+  /** Ask again for each key that this device asked for and did not get. Call it when this device becomes verified. */
+  async retryRequests(): Promise<void> {
+    const known = await this.load();
+    const missing = [...this.lastRequest.keys()].filter((keyId) => !known[keyId]);
+    for (const keyId of missing) {
+      this.lastRequest.delete(keyId);
+      await this.request(keyId);
+    }
+  }
+
   /** Handle `settings.key` and `settings.request` envelopes. Only devices of this user count. */
   async handleToDevice(event: DecryptedToDevice): Promise<void> {
     if (event.type !== SETTINGS_KEY_TYPE && event.type !== SETTINGS_REQUEST_TYPE) {
@@ -205,6 +240,11 @@ export class SettingsKeys {
     }
     if (event.sender.userId !== this.deps.userId) {
       this.deps.log?.(`A different user sent ${event.type}. It was dropped.`);
+      return;
+    }
+    // A device that the master key did not sign can be a device that the server added.
+    if (!(await this.deps.deviceList.isTrusted(event.sender))) {
+      this.deps.log?.(`Device ${event.sender.deviceId} sent ${event.type}, but it is not verified. It was dropped.`);
       return;
     }
     const { keyId, key } = event.content;
