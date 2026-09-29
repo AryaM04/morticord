@@ -371,18 +371,28 @@ export const events = pgTable(
   ],
 );
 
-export const attachments = pgTable("attachments", {
-  id: snowflake().primaryKey(),
-  uploaderId: snowflake("uploader_id")
-    .notNull()
-    .references(() => users.id),
-  channelId: snowflake("channel_id")
-    .notNull()
-    .references(() => channels.id),
-  size: integer("size").notNull(),
-  storagePath: text("storage_path").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+/**
+ * One encrypted file. The server keeps only the ciphertext on disk, under
+ * `${DATA_DIR}/attachments/<id>`. See docs/concepts/attachments.md.
+ */
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: snowflake().primaryKey(),
+    uploaderId: snowflake("uploader_id")
+      .notNull()
+      .references(() => users.id),
+    channelId: snowflake("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    size: integer("size").notNull(),
+    storagePath: text("storage_path").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Set when the client sent the message that holds the file. The cleanup deletes files that stay unclaimed. */
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  },
+  (table) => [index("attachments_uploader_idx").on(table.uploaderId), index("attachments_created_idx").on(table.createdAt)],
+);
 
 export const invites = pgTable("invites", {
   code: text("code").primaryKey(),

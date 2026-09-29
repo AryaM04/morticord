@@ -12,6 +12,8 @@ import { registerGatewayRoute, MAX_PAYLOAD_BYTES, type GatewayTimingOptions } fr
 import { GatewayService } from "./modules/gateway/service.js";
 import type { Mailer } from "./mailer.js";
 import { authGuardPlugin } from "./plugins/auth-guard.js";
+import { registerAttachmentRoutes } from "./modules/attachments/routes.js";
+import { startAttachmentCleanup } from "./modules/attachments/service.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
 import { registerDmRoutes } from "./modules/dms/routes.js";
 import { registerFriendRoutes } from "./modules/friends/routes.js";
@@ -61,6 +63,8 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
   const deps: AppDeps = { ...rawDeps, gateway, voice, ringer };
   const delivery = new ToDeviceDelivery(deps.db, gateway, app.log);
   app.addHook("onClose", async () => ringer.dispose());
+  const stopCleanup = startAttachmentCleanup(deps.db, deps.config.dataDir, app.log);
+  app.addHook("onClose", async () => stopCleanup());
 
   // Raw image bytes for the avatar upload route. Fastify parses only JSON
   // and text by default, so image bodies need their own parser.
@@ -96,6 +100,7 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
   await app.register(async (instance) => registerMessageRoutes(instance, deps), { prefix: "/api/v1" });
   await app.register(async (instance) => registerVoiceRoutes(instance, deps), { prefix: "/api/v1" });
   await app.register(async (instance) => registerKeyRoutes(instance, deps), { prefix: "/api/v1" });
+  await app.register(async (instance) => registerAttachmentRoutes(instance, deps), { prefix: "/api/v1" });
   await app.register(
     async (instance) =>
       registerToDeviceRoutes(instance, { ...deps, delivery, toDeviceQueueLimit: deps.toDeviceQueueLimit ?? TO_DEVICE_QUEUE_LIMIT }),
