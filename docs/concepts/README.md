@@ -7,11 +7,11 @@ real code.
 Available notes:
 
 - `nat-turn.md`: why NAT traversal is hard, and how STUN and TURN help.
+- `olm-megolm.md`: the end-to-end encryption design used by this app.
 
 Planned notes:
 
 - `webrtc.md`: peer connections, offers, answers and ICE candidates.
-- `olm-megolm.md`: the end-to-end encryption design used by this app.
 - `permissions.md`: the permission bitflag and overwrite algorithm.
 - `gateway.md`: the WebSocket protocol between the client and the server.
 
