@@ -194,7 +194,7 @@ export class MegolmMachine {
   async encrypt(channelId: string, payload: DecryptedPayload): Promise<{ sessionId: string; ciphertext: Uint8Array }> {
     const plaintext = encodePlainPayload(payload);
     return this.deps.queue.run(`megolm-out:${channelId}`, async () => {
-      const { userIds } = await this.deps.membership.eligible(channelId);
+      const { guildId, userIds } = await this.deps.membership.eligible(channelId);
       const devicesByUser = await this.deps.deviceList.getDevicesOfUsers(userIds);
       let record = await this.deps.store.getOutbound(channelId);
       const reason = record ? this.rotationReason(record, devicesByUser) : null;
@@ -202,7 +202,7 @@ export class MegolmMachine {
         this.log(`A new Megolm session starts for channel ${channelId}, because ${reason}.`);
         record = undefined;
       }
-      record ??= await this.newOutbound(channelId);
+      record ??= await this.newOutbound(channelId, guildId);
       record = await this.share(record, devicesByUser);
 
       const { wasm, pickleKey } = this.deps;
@@ -224,7 +224,10 @@ export class MegolmMachine {
     if (this.now() - record.createdAt >= MAX_SESSION_AGE_MS) {
       return "the session is 7 days old";
     }
-    for (const key of record.sharedWith) {
+    if (record.rotate) {
+      return "a membership event can have removed a reader";
+    }
+    for (const key of record.seenDevices) {
       const split = key.indexOf(":");
       const devices = devicesByUser.get(key.slice(0, split));
       if (!devices) {
@@ -237,7 +240,26 @@ export class MegolmMachine {
     return null;
   }
 
-  private async newOutbound(channelId: string): Promise<OutboundRecord> {
+  /** Mark the outbound sessions in the scope, so that the next send starts a new session. */
+  private async markRotation(scope: MembershipScope): Promise<void> {
+    for (const record of await this.deps.store.allOutbound()) {
+      const hit =
+        scope === "all" ||
+        ("channelId" in scope ? record.channelId === scope.channelId : record.guildId === scope.guildId);
+      if (!hit) {
+        continue;
+      }
+      // In the queue of the channel: a send that is in progress can have made a new session.
+      await this.deps.queue.run(`megolm-out:${record.channelId}`, async () => {
+        const current = await this.deps.store.getOutbound(record.channelId);
+        if (current && !current.rotate) {
+          await this.deps.store.putOutbound({ ...current, rotate: true });
+        }
+      });
+    }
+  }
+
+  private async newOutbound(channelId: string, guildId: string | null): Promise<OutboundRecord> {
     const { wasm, pickleKey, account, userId, deviceId } = this.deps;
     const group = new wasm.GroupSession();
     try {
@@ -268,6 +290,8 @@ export class MegolmMachine {
         createdAt: this.now(),
         messageCount: 0,
         sharedWith: [],
+        seenDevices: [],
+        ...(guildId === null ? {} : { guildId }),
       };
       await this.deps.store.putOutbound(record);
       return record;
@@ -279,17 +303,23 @@ export class MegolmMachine {
   /** Share the session key, from its current index, with each device that may read the channel and has no key yet. */
   private async share(record: OutboundRecord, devicesByUser: Map<string, DeviceRecord[]>): Promise<OutboundRecord> {
     const shared = new Set(record.sharedWith);
+    const seen = new Set(record.seenDevices);
     const now = this.now();
     const targets: DeviceRef[] = [];
     for (const devices of devicesByUser.values()) {
       for (const device of devices) {
         const key = deviceKey(device);
+        seen.add(key);
         const failedAt = this.shareFailures.get(`${record.sessionId}:${key}`);
         if (shared.has(key) || this.isSelf(device) || (failedAt !== undefined && now - failedAt < SHARE_RETRY_MS)) {
           continue;
         }
         targets.push(refOf(device));
       }
+    }
+    if (seen.size !== record.seenDevices.length) {
+      record = { ...record, seenDevices: [...seen] };
+      await this.deps.store.putOutbound(record);
     }
     if (targets.length === 0) {
       return record;
@@ -699,10 +729,21 @@ export class MegolmMachine {
 
   // ---- history for new members -----------------------------------------------------
 
-  /** Handle a gateway event that can change who may read channels. */
-  onMembershipChange(scope: MembershipScope): void {
+  /**
+   * Handle a gateway event that can change who may read channels. When a
+   * member can have left (`memberLeft`), or when events can be lost (a new
+   * gateway session), the outbound sessions in the scope rotate at once:
+   * a different reader can have forwarded the key to that member.
+   */
+  onMembershipChange(scope: MembershipScope, memberLeft: boolean): void {
     this.deps.membership.invalidate(scope);
-    if (scope === "all" || this.stopped) {
+    if (this.stopped) {
+      return;
+    }
+    if (memberLeft || scope === "all") {
+      this.track(this.markRotation(scope));
+    }
+    if (scope === "all") {
       return;
     }
     const key = "channelId" in scope ? `channel:${scope.channelId}` : `guild:${scope.guildId}`;
@@ -757,7 +798,11 @@ export class MegolmMachine {
         guildId: eligible.guildId ?? undefined,
         userIds: eligible.userIds,
       });
-      if (!eligible.userIds.includes(this.deps.userId)) {
+      const now = new Set(eligible.userIds);
+      if (snapshot.userIds.some((id) => !now.has(id))) {
+        await this.markRotation({ channelId: snapshot.channelId });
+      }
+      if (!now.has(this.deps.userId)) {
         continue;
       }
       const before = new Set(snapshot.userIds);

@@ -6,18 +6,7 @@
 // Needs a real Postgres (see auth.spec.ts): skips itself when it is not
 // reachable.
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-
-declare global {
-  interface Window {
-    __cryptoDebug?: {
-      ready(): boolean;
-      identityKeys(): { curve25519: string; ed25519: string } | null;
-      sessionCount(): Promise<number>;
-      sendPing(userId: string, text: string): Promise<number>;
-      received(): Array<{ fromUserId: string; fromDeviceId: string; text: string }>;
-    };
-  }
-}
+import { waitForCrypto } from "../lib/crypto-debug.js";
 
 const WEB_ORIGIN = "http://localhost:5173";
 
@@ -58,10 +47,6 @@ async function loginThroughUi(page: Page, user: TestUser): Promise<void> {
   await page.getByLabel("Password").fill(user.password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).toHaveURL(/\/app(\/|$)/);
-}
-
-async function waitForCrypto(page: Page): Promise<void> {
-  await expect.poll(() => page.evaluate(() => window.__cryptoDebug?.ready() ?? false), { timeout: 20_000 }).toBe(true);
 }
 
 test("two users exchange an Olm to-device message through the key server", async ({ browser, request }) => {

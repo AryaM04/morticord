@@ -28,6 +28,15 @@ export type { DecryptedToDevice, EncryptResult, ToDeviceHandler } from "./olm-ma
 export type { DeviceRecord, UserRecord } from "./store.js";
 export { WAITING_TEXT, type MegolmTimings } from "./megolm.js";
 
+/** The gateway events that say that a user left a guild, a DM or a channel. */
+const MEMBER_LEFT_EVENTS = new Set([
+  "GUILD_MEMBER_REMOVE",
+  "GUILD_BAN_ADD",
+  "GUILD_DELETE",
+  "CHANNEL_DELETE",
+  "CHANNEL_RECIPIENT_REMOVE",
+]);
+
 /** Send at most one TO_DEVICE_ACK in this time, unless the local queue is empty for longer. */
 const ACK_INTERVAL_MS = 2000;
 
@@ -213,7 +222,7 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
     }
     const scope = membershipScope(dispatch);
     if (scope) {
-      megolm.onMembershipChange(scope);
+      megolm.onMembershipChange(scope, MEMBER_LEFT_EVENTS.has(dispatch.t));
     }
     if (dispatch.t === "TO_DEVICE") {
       const parsed = toDeviceDispatchPayloadSchema.safeParse(dispatch.d);
