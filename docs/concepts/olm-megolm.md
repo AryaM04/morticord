@@ -27,7 +27,10 @@ Clients reduce this risk:
 
 - Device keys are signed. The server cannot change the keys of a device.
 - The master key of each user is trusted on first use (TOFU). A change
-  shows a loud warning and is never accepted silently.
+  shows a loud warning and is never accepted silently. A SAS
+  verification (section 10) confirms a master key.
+- Only devices that the master key of their user signed get keys
+  (section 4). Thus a fake device of a real user gets nothing.
 - The channel shows a notice when a new member or a new device appears.
 
 The server **cannot** read message text, file bytes, reactions, edits,
@@ -158,13 +161,64 @@ devices of that user. There is no separate self-signing key.
   - `masterSignature`: the master key signs the device keys object of
     this device.
 - The master key is set one time. A different key gives 409
-  `MASTER_KEY_EXISTS`. A reset flow comes with the key backup (pass 4).
-- A device that holds the master private key can sign a different device
-  of the same user. It sends `masterSignature` for that device in a later
-  pass. In pass 1 only the first device is signed. Other devices show as
-  "not verified by the owner".
-- The master private key stays in the crypto store of the first device.
-  Pass 4 also puts it in the key backup, so a new device can get it.
+  `MASTER_KEY_EXISTS`. Only the reset (below) replaces it.
+- The master private key is **not** on every device. These devices hold
+  it, encrypted with the pickle key: the device that made it, a device
+  that got it from the key backup (section 9), and the device that did a
+  reset.
+
+### Signing the other devices of a user (pass 4)
+
+A new device of a user is not signed. It becomes signed in one of two
+ways:
+
+1. **Verification.** The user verifies the new device from a device that
+   holds the master key, with SAS (section 10). After the SAS, the device
+   with the master key signs the new device.
+2. **Recovery key.** The user enters the recovery key or the passphrase on
+   the new device. The device decrypts the master private key from the key
+   backup, checks that its public key is the master key of the user, keeps
+   it, and signs itself (`POST /keys/upload` with `masterSignature`).
+
+`POST /keys/signatures { deviceId, signature }` stores the master
+signature of a different device of the same user. The server checks the
+signature with the stored master key. It rejects a bad signature with 400
+and a device of a different user with 403. It sends
+`DEVICE_LIST_UPDATE`.
+
+### Master key reset
+
+A user who lost all signed devices and the recovery key cannot sign a new
+device. `POST /keys/master/reset` takes the body of `PUT /keys/master` and
+the account `password`:
+
+- The server checks the password. A wrong password gives 401
+  `INVALID_PASSWORD`. An account without a password (OAuth only) gives 403
+  `PASSWORD_REQUIRED`. The route allows 5 tries in 15 minutes.
+- It replaces the master key, removes the master signature of every other
+  device of the user, signs the calling device, and deletes the key
+  backup (the old master key is in it). It sends `DEVICE_LIST_UPDATE`.
+- Other users see a changed master key: the loud warning below. They send
+  no keys to that user until they accept the change.
+
+### Which devices get keys
+
+A device gets a Megolm key (`megolm.session`, `megolm.forward`, the
+answer to `megolm.request`) and the settings key only when:
+
+- the trusted master key of its user signed it (`ownerVerified`), and
+- the master key of its user did not change since this device trusted it.
+
+This rule is the same for the devices of other users and for the other
+devices of the same user. A device that the server added cannot get
+keys. The UI shows an unsigned device as "Not verified". A new sign-in
+shows the banner "Verify this device to read old messages" with two
+buttons: "Verify with a different device" and "Use the recovery key".
+When the device becomes signed, it asks again for each key that it did
+not get, and for the settings key.
+
+Keys that an unsigned device sends are still accepted. The binding
+signature of each session (section 8) still applies.
 
 ### Client verification
 
@@ -173,9 +227,9 @@ For each user in the query response, the client:
 1. Verifies the signature of each device. It drops a device with a bad
    signature, a wrong `userId` or a wrong `deviceId`.
 2. Keeps the first master key that it sees for this user (TOFU).
-3. If the master key changes, it sets `masterKeyChanged` for this user.
+3. If the master key changes, it sets `changedMasterKey` for this user.
    The UI shows a loud warning. The client never replaces the stored key
-   silently. The user must accept the new key.
+   silently. The user must accept the new key (or verify it with SAS).
 4. Marks a device as **owner-verified** when `masterSignature` verifies
    with the trusted master key.
 5. Keeps the known identity keys of a device. If a device id appears with
@@ -313,7 +367,8 @@ that it comes from a different device.
 Envelope types: `dummy` (session recovery), `debug.ping` (development
 only), and from pass 2: `megolm.session`, `megolm.forward`,
 `megolm.request`, `voice.signal` (see `docs/concepts/voice.md`),
-`settings.key` and `settings.request` (section 11).
+`settings.key` and `settings.request` (section 11), and from pass 4 the
+`verification.*` types (section 10).
 
 Voice signals use the gateway op `TO_DEVICE_SEND { messages }`. It has
 the same rules as `POST /to-device` (visibility, size, queue) and no
@@ -476,9 +531,12 @@ when the key arrives. No reload is necessary.
 - Tries: at once, then after 5 s, 30 s, 2 min and 10 min. It stops when
   the key arrives. After `READY` or `RESUMED`, the open requests go out
   again at once.
-- A device answers only when the requester user is a reader now, and at
-  most one time in 30 seconds for each requester device and session. The
-  answer is a `megolm.forward` to the requester device only.
+- A device answers only when the requester device may get keys (section
+  4), when the requester user is a reader now, and at most one time in 30
+  seconds for each requester device and session. The answer is a
+  `megolm.forward` to the requester device only.
+- A request with no answer after the last try is kept (at most 1000).
+  When the device becomes signed, it tries each one again.
 
 ### Storage and memory
 
@@ -524,22 +582,191 @@ They can still read old `plain-v1` events.
 
 ## 9. Key backup (pass 4)
 
-- A random 256-bit **recovery key** is shown one time. A recovery
-  passphrase can make the same key with Argon2id (salt and parameters in
-  the backup `auth_data`).
-- The recovery key gives a Curve25519 key pair. The client encrypts each
-  inbound Megolm session to the public key (HPKE) and uploads it to
-  `/keys/backup`. The server cannot decrypt the backup.
-- The master private key is also in the backup, encrypted with a key that
-  comes from the recovery key. A new device that enters the recovery key
-  can then sign itself.
-- A new device enters the recovery key or the passphrase, downloads the
-  backup and decrypts the full history.
+The code is `packages/client-core/src/crypto/key-backup.ts`,
+`recovery-key.ts` and `packages/crypto-wasm/src/backup.rs`.
 
-## 10. Verification (later)
+### Recovery key and passphrase
 
-Emoji SAS verification between two devices comes after pass 4. Until
-then, users compare nothing and trust the master key on first use.
+- The **recovery key** is 32 bytes. The app shows it one time.
+- Text form (the Matrix form): the bytes `0x8B 0x01`, the 32 key bytes,
+  and one parity byte (the XOR of all bytes before it), in base58
+  (Bitcoin alphabet), in groups of 4 characters. The parity byte finds a
+  wrong character before a download. Spaces do not count.
+- Without a passphrase, the key is random. With a passphrase, the key is
+  Argon2id (version 0x13) of the passphrase, with m = 64 MiB, t = 3,
+  p = 1, a random 16-byte salt and a 32-byte output. The app still shows
+  the key: it and the passphrase open the same backup. The client refuses
+  parameters above m = 256 MiB, t = 10, p = 4 (the server stores them).
+- To set up a backup, the user sees the key and types its last group
+  again. Only then does the client make the backup on the server.
+
+### Backup key pair and encryption
+
+- The backup secret key is HKDF-SHA256 of the recovery key (no salt,
+  info `discord-clone:backup-key:v1`, 32 bytes), used as an X25519
+  secret. The public key is in the backup version.
+- Encryption to the public key `P` (ECIES):
+  1. Make a new X25519 key `e` for each message. `E = e·G`.
+  2. `S = X25519(e, P)`. Refuse an all-zero result.
+  3. `okm = HKDF-SHA256(ikm = S, salt = E ‖ P, info =
+     "discord-clone:backup-ecies:v1", 44 bytes)`. The AES-256-GCM key is
+     the first 32 bytes, the nonce is the last 12 bytes. The key `e` is
+     new for each message, so a nonce never repeats for one AES key.
+  4. Output: the version byte `1`, `E` (32 bytes), then the AES-GCM
+     ciphertext and its 16-byte tag.
+- The associated data is canonical JSON:
+  - a session: `{type:"backup_session", userId, version, sessionId}`;
+  - a secret: `{type:"backup_secret", userId, version, name}`.
+  Thus the server cannot move an item to a different user, version,
+  session or secret name.
+- `packages/crypto-wasm/src/backup.rs` has test vectors. An independent
+  check with `node:crypto` and the Argon2 reference code gave the same
+  values.
+
+### What the backup holds
+
+- **Sessions.** Each inbound Megolm session, exported at its first known
+  index, as the JSON of a `megolm.forward` (`channelId`, `sessionId`,
+  `sessionKey`, `senderUserId`, `senderDeviceId`, `senderEd25519`,
+  `signature`). The server also sees `channelId`, `sessionId` and the
+  first index in clear text. It already knows them from the events.
+- **Secrets.** `master` (the 32 secret bytes of the master key) and
+  `settings:<keyId>` (each settings key). The plaintext is
+  `{name, value, signer, signature}`. The master key (`signer: "master"`)
+  or the uploader device signs `{type:"backup_secret", userId, name,
+  value}`. Anyone can encrypt to the public key, so this signature stops
+  the server from adding a settings key of its own. The master secret
+  proves itself: its public key must be the master key of the user.
+
+### Routes
+
+Only the owner reaches its backup. A version of a different user gives
+404 `BACKUP_NOT_FOUND`.
+
+- `POST /keys/backup/version { publicKey, authData }` → 201 `{ version }`.
+  `authData` is `{ passphrase, deviceId, signature, masterSignature }`.
+  The Ed25519 key of the device `deviceId` of the caller signs
+  `{type:"key_backup", userId, publicKey, passphrase}`. The master key
+  signs the same text when the device holds it (else null). The server
+  checks the device signature. A new version deletes the old version with
+  its sessions and secrets: there is one version for each user.
+- `GET /keys/backup/version` → `{ backup: { version, publicKey, authData,
+  secrets } | null }`.
+- `DELETE /keys/backup/version/:version` → 204.
+- `PUT /keys/backup/sessions { version, sessions }`: at most 100 sessions,
+  each at most 8 KiB. For a known session id, the server keeps the copy
+  with the lower first index. The response is `{ stored }`.
+- `GET /keys/backup/sessions?version=&channelId=&after=&limit=`: in
+  session id order, at most 500 in a page. `next` is the `after` value of
+  the next page, or null.
+- `PUT /keys/backup/secrets { version, secrets }`: at most 16 secrets in
+  one backup.
+
+### Trust in a backup version
+
+A device uploads to a backup version only when one of these is true:
+
+- this device made it, or opened it with the recovery key (the client
+  keeps this in the store);
+- the trusted master key of the user signed the auth data;
+- a device of the user that may get keys (section 4) signed the auth data.
+
+Else a malicious server could put in its own public key and read each
+key that the devices upload.
+
+### Upload
+
+- After a new version, at start, after `READY` and when this device
+  becomes signed, the client gets the current version and checks it.
+- It uploads the secrets that the backup does not have (the master key
+  when this device holds it, and the settings keys).
+- It scans the inbound sessions (200 at a time) and uploads each session
+  whose `backupVersion` is not the current version, in batches of 50,
+  with 1 second between batches. After each batch it marks the sessions
+  with the version (only when their first index did not change). Thus
+  the upload can stop and go on later.
+- A new or better key starts an upload after 2 seconds.
+- `BACKUP_NOT_FOUND` means that a different device made a new version or
+  deleted the backup: the client gets the version again.
+
+### Restore
+
+1. Get the version. Decode the recovery key text, or derive the key from
+   the passphrase with the stored parameters.
+2. The backup public key of the key must be the public key of the
+   version. Else: "This recovery key or passphrase does not open the key
+   backup."
+3. Decrypt `master`. When its public key is the master key of the user,
+   keep it and sign this device.
+4. Decrypt the settings keys with a valid signature and add them.
+5. Download the sessions in pages. Each session gets the checks of a
+   `megolm.forward` (section 8). It is saved with `backupVersion`, so it
+   is not uploaded again. Each new key re-decodes the events that wait
+   for it. The UI shows the number of keys.
+
+## 10. Verification (pass 4)
+
+The code is `packages/client-core/src/crypto/verification.ts` and the
+`Sas` type in `packages/crypto-wasm/src/sas.rs` (vodozemac SAS).
+
+Two devices compare 7 emojis. The emojis are the same only when each
+device has the real Curve25519 key of the other device. The messages are
+Olm to-device envelopes, so they are bound to the device keys. The SAS
+checks that the server gave the right device keys.
+
+### Messages
+
+Each message has `txnId` (16 random bytes, base64url).
+
+| Type | From | Content |
+|---|---|---|
+| `verification.request` | initiator, to each target device | `methods: ["sas.v1"]` |
+| `verification.ready` | the device that accepts | — |
+| `verification.start` | initiator | `method`, `commitment` |
+| `verification.key` | responder, then initiator | `key` (SAS Curve25519 public key) |
+| `verification.mac` | both | `keys`, `keyIds` |
+| `verification.done` | both | `signed` (same user only) |
+| `verification.cancel` | either | `code` |
+
+1. The initiator sends `request` to the other devices of its user (or one
+   of them), or to the devices of a different user.
+2. The first device that accepts sends `ready`. The initiator sends
+   `cancel` with `accepted` to the other devices.
+3. The initiator makes a SAS key and sends `start` with
+   `commitment = base64url(SHA-256(key + "|" + txnId))`.
+4. The responder sends its key. Then the initiator sends its key. The
+   responder checks the commitment. Thus neither device can choose its
+   key after it saw the other key.
+5. Both devices show 7 emojis: vodozemac SAS bytes with the info
+   `DISCORD_CLONE_SAS_EMOJI_V1|<initiator userId>|<deviceId>|<key>|<responder userId>|<deviceId>|<key>|<txnId>`,
+   and the Matrix emoji table.
+6. The user clicks "They match". The device sends `mac`: a MAC of its
+   Ed25519 key (key id `ed25519:<deviceId>`), a MAC of the master key of
+   its user (key id `master`), and a MAC of the sorted key ids. The MAC
+   info is `DISCORD_CLONE_SAS_MAC_V1|<sender userId>|<deviceId>|<receiver userId>|<deviceId>|<txnId>|<keyId>`.
+7. The receiver checks each MAC with the keys in its device list. The
+   master MAC must match the trusted master key or the new key of an
+   identity change. For a different user, the master MAC is necessary.
+
+### Result
+
+- Two devices of one user: the device that holds the master key signs the
+  other device when it is not signed (`POST /keys/signatures`). Then it
+  sends `done` with `signed`. The dialog says if both devices are signed
+  now. When no device holds the master key, the dialog tells the user to
+  enter the recovery key.
+- A different user: the client marks the master key of that user as
+  verified (a badge in the member menu). It is stronger than trust on
+  first use. A verified new key after an identity change is accepted.
+
+### Rules
+
+- "They do not match" sends `cancel` with `mismatch`. Nothing is signed.
+- A bad MAC or a bad commitment cancels the verification.
+- A verification stops after 10 minutes (`timeout`).
+- One verification at a time for each pair of devices. A request from a
+  device with a verification in progress gets `cancel` with `busy`.
+- The verification state is only in memory. A restart ends it.
 
 ## 11. Encrypted settings (pass 3)
 
@@ -564,24 +791,46 @@ the **settings key** of the user: one random AES-256-GCM key. The code is
   and its own changes, and it never writes the server blob. When the key
   arrives, it reads the blob again, puts its changes on top and saves.
 - The crypto store keeps the keys, encrypted with the pickle key.
-- Pass 4 adds the settings key to the key backup.
+- The key backup keeps the settings keys (section 9).
+- Since pass 4, only a signed device (section 4) gets the key, and a
+  device accepts `settings.key` and `settings.request` only from a signed
+  device of the same user.
 
 Deviations and why:
 
-- "Verified" means that the device keys have a valid signature and the
-  master key of the user did not change. The owner signature is not
-  necessary: pass 1 signs only the first device, so other devices could
-  never get the key. When the master key of the user changed, the device
-  does not send the key.
 - Two new devices can make two keys at the same time. The second save
   then gets `VERSION_CONFLICT`, reads a blob with the other key, and is
   locked until that key arrives. Its own key is never used again.
 
+## 12. Deviations of pass 4 from the plan, and why
+
+- There is no separate self-signing key. The master key signs the
+  devices, as in pass 1. Reason: one key is simpler, and the master
+  private key is on few devices (section 4).
+- A SAS-verified device does not get the master private key. Thus it
+  cannot sign a different device. Reason: the plan keeps the key on few
+  devices. The recovery key on that device, or a SAS with a device that
+  holds the key, gives the signature.
+- The backup encryption is our own ECIES (section 9), not HPKE. Reason:
+  it uses the crates that vodozemac already has (hkdf, sha2, aes), so the
+  WASM file stays small. Argon2id, AES-GCM and SAS add 14 kB gzip to the
+  WASM file (157 kB to 171 kB), less than the 60 kB limit, so Argon2 stays
+  in the same WASM file.
+- The secrets in the backup have a signature inside the ciphertext.
+  Reason: anyone can encrypt to the backup public key, so the server
+  could add a settings key of its own.
+- The master key reset needs the account password. An account with only
+  OAuth sign-in must set a password first.
+- A new backup version deletes the old one. Reason: one version is
+  simpler, and an old version has no use.
+
 ## Code
 
-- WASM wrapper: `packages/crypto-wasm/src/lib.rs`.
+- WASM wrapper: `packages/crypto-wasm/src/lib.rs`, `backup.rs`, `sas.rs`.
 - Server: `apps/server/src/modules/keys`, `apps/server/src/modules/to-device`,
   `GET /channels/:id/members` in `apps/server/src/modules/messages`.
 - Client: `packages/client-core/src/crypto`.
 - Web: `apps/web/src/lib/crypto.ts` starts the layer, and the codec in
-  `apps/web/src/lib/messages.ts` waits for it.
+  `apps/web/src/lib/messages.ts` waits for it. `SecurityBanner.tsx`,
+  `SecurityDialog.tsx` and `VerificationDialog.tsx` are the UI of
+  sections 4, 9 and 10. The two dialogs load only when they open.
