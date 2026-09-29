@@ -20,6 +20,25 @@ describe("decryptedPayloadSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  it("accepts a message with only an attachment, and rejects more than 10 attachments or a bad key", () => {
+    const attachment = {
+      id: "7",
+      name: "photo.png",
+      mime: "image/png",
+      size: 10,
+      key: encodeBase64Url(new Uint8Array(32)),
+      iv: encodeBase64Url(new Uint8Array(12)),
+      sha256: encodeBase64Url(new Uint8Array(32)),
+      width: 640,
+      height: 480,
+      thumbnail: { id: "8", key: encodeBase64Url(new Uint8Array(32)), iv: encodeBase64Url(new Uint8Array(12)), sha256: encodeBase64Url(new Uint8Array(32)), width: 320, height: 240 },
+    };
+    const message = { type: "message", body: "", mentions: [], embeds: [] };
+    expect(decryptedPayloadSchema.safeParse({ ...message, attachments: [attachment] }).success).toBe(true);
+    expect(decryptedPayloadSchema.safeParse({ ...message, attachments: Array(11).fill(attachment) }).success).toBe(false);
+    expect(decryptedPayloadSchema.safeParse({ ...message, attachments: [{ ...attachment, key: "short" }] }).success).toBe(false);
+  });
+
   it("rejects a reaction key longer than 32 characters", () => {
     const result = decryptedPayloadSchema.safeParse({ type: "reaction", key: "x".repeat(33) });
     expect(result.success).toBe(false);

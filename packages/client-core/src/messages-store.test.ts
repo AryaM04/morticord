@@ -584,3 +584,34 @@ describe("page loads", () => {
     expect(channel.payloads["5"]).toMatchObject({ body: "page" });
   });
 });
+describe("attachments", () => {
+  it("puts the files in the encrypted payload, claims each file and thumbnail after the send, and shows them", async () => {
+    const codec = createFakeCodec();
+    const secrets = { key: encodeBase64Url(new Uint8Array(32)), iv: encodeBase64Url(new Uint8Array(12)), sha256: encodeBase64Url(new Uint8Array(32)) };
+    const attachment = {
+      id: "70",
+      name: "a.png",
+      mime: "image/png",
+      size: 5,
+      ...secrets,
+      width: 10,
+      height: 10,
+      thumbnail: { id: "71", ...secrets, width: 10, height: 10 },
+    };
+    let posted: EventJson | null = null;
+    const request = vi.fn(async (method: string, path: string, options?: { body?: { ciphertext: string; nonce: string } }) => {
+      if (path === "/channels/10/events") {
+        posted = event({ id: "9", codec: "megolm-v1", ciphertext: options!.body!.ciphertext, nonce: options!.body!.nonce });
+        return posted;
+      }
+      return undefined;
+    });
+    const store = createMessagesStore({ api: { request } as unknown as ApiClient, codec, send: vi.fn() });
+    await store.getState().sendMessage("10", "", [], undefined, [attachment]);
+
+    const claims = request.mock.calls.filter(([, path]) => path.endsWith("/claim")).map(([method, path]) => `${method} ${path}`);
+    expect(claims).toEqual(["POST /attachments/70/claim", "POST /attachments/71/claim"]);
+    const channel = store.getState().channels["10"]!;
+    expect(aggregateEvent(posted!, [], channel.payloads).attachments).toEqual([attachment]);
+  });
+});

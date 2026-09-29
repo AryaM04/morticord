@@ -72,7 +72,7 @@ async function guildWithMember(): Promise<{ owner: User; member: User; channelId
 /** Upload with a real HTTP request. The body is a stream when `chunks` is set. */
 async function upload(user: User, channelId: string, body: Uint8Array | { chunks: number; chunkSize: number }) {
   const headers: Record<string, string> = { ...auth(user), "content-type": "application/octet-stream" };
-  let requestBody: BodyInit;
+  let requestBody: RequestInit["body"];
   if (body instanceof Uint8Array) {
     requestBody = body;
   } else {

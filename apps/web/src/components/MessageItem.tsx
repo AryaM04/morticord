@@ -1,7 +1,7 @@
 // One message row: avatar and name (only on the first message of a
 // group), the body, a reply preview line, the reactions row and the
 // hover actions (react, reply, edit, delete).
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { AggregatedMessage } from "@discord-clone/client-core";
 import { Markdown, MarkdownInline } from "./Markdown.js";
 import { Avatar } from "./Avatar.js";
@@ -9,6 +9,9 @@ import { EmojiPickerButton } from "./EmojiPickerButton.js";
 import type { User } from "@discord-clone/shared";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉"];
+
+// Most messages have no files, so the file views load only when one is needed.
+const AttachmentList = lazy(() => import("./AttachmentList.js").then((module) => ({ default: module.AttachmentList })));
 
 function DeleteConfirmDialog({ open, onCancel, onConfirm }: { open: boolean; onCancel: () => void; onConfirm: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -119,7 +122,9 @@ export function MessageItem(props: MessageItemProps) {
           {message.deleted || message.cannotRead ? (
             message.body
           ) : (
-            <Markdown text={message.body} getDisplayName={props.getDisplayName} selfUserId={props.selfUserId} />
+            message.body.length > 0 && (
+              <Markdown text={message.body} getDisplayName={props.getDisplayName} selfUserId={props.selfUserId} />
+            )
           )}
           {message.edited && !message.deleted && (
             <span className="ml-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
@@ -127,6 +132,12 @@ export function MessageItem(props: MessageItemProps) {
             </span>
           )}
         </div>
+
+        {!message.deleted && !message.cannotRead && message.attachments.length > 0 && (
+          <Suspense fallback={null}>
+            <AttachmentList attachments={message.attachments} />
+          </Suspense>
+        )}
 
         {message.reactions.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
