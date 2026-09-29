@@ -71,6 +71,13 @@
       "when": 1790682870404,
       "tag": "0009_m6_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790685415479,
+      "tag": "0010_m6_key_backup_secrets",
+      "breakpoints": true
     }
   ]
 }
