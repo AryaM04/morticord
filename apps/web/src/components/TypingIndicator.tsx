@@ -1,9 +1,11 @@
-// Shows who is typing in the current channel, under the composer.
+// Shows who is typing in the current channel, under the composer. While a
+// send waits for the encryption setup, it shows that instead.
 import { useEffect } from "react";
+import { useStore } from "zustand";
 import { useMessages } from "../lib/useMessages.js";
 import { useRealtime } from "../lib/useRealtime.js";
 import { displayNameOf } from "../lib/members.js";
-import { messagesStore } from "../lib/messages.js";
+import { encryptionSetupStore, messagesStore } from "../lib/messages.js";
 
 // A stable fallback object: a fresh `{}` on every render would break the
 // store subscription (it always looks "changed"), causing a render loop,
@@ -14,6 +16,7 @@ export function TypingIndicator({ channelId, guildId }: { channelId: string; gui
   const typing = useMessages((s) => s.channels[channelId]?.typing ?? EMPTY_TYPING);
   const state = useRealtime((s) => s);
   const userIds = Object.keys(typing);
+  const settingUp = useStore(encryptionSetupStore, (s) => s.settingUp);
 
   // Expire stale entries on a slow timer, so the line clears itself
   // without waiting for the next gateway message.
@@ -22,6 +25,13 @@ export function TypingIndicator({ channelId, guildId }: { channelId: string; gui
     return () => clearInterval(timer);
   }, [channelId]);
 
+  if (settingUp) {
+    return (
+      <div role="status" className="h-5 truncate px-4 text-xs" style={{ color: "var(--color-text-muted)" }}>
+        Setting up encryption…
+      </div>
+    );
+  }
   if (userIds.length === 0) {
     return <div className="h-5" />;
   }

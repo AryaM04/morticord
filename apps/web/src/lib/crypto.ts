@@ -4,8 +4,10 @@
 // device runs the crypto layer: it holds a Web Lock. A different tab waits
 // for the lock. See docs/concepts/olm-megolm.md.
 import type { CryptoHandle } from "@discord-clone/client-core/crypto";
-import { webPlatform } from "@discord-clone/client-core";
-import { gatewaySend, subscribeDispatch } from "./realtime.js";
+import { ApiError, postEvent, webPlatform } from "@discord-clone/client-core";
+import { encodeBase64Url } from "@discord-clone/shared";
+import { messageCodec, setCryptoHandle } from "./messages.js";
+import { gatewaySend, realtimeStore, subscribeDispatch } from "./realtime.js";
 import { session } from "./session.js";
 
 /** The debug hook for development and the end-to-end tests. Never in a production build. */
@@ -17,6 +19,10 @@ export interface CryptoDebug {
   sendPing(userId: string, text: string): Promise<number>;
   /** The `debug.ping` envelopes this device received. */
   received(): Array<{ fromUserId: string; fromDeviceId: string; text: string }>;
+  /** True when this device has the inbound key of a Megolm session. */
+  hasMegolmSession(sessionId: string): Promise<boolean>;
+  /** Encrypt and post many messages fast, with the real codec. It waits and tries again after a 429. */
+  seedMessages(channelId: string, bodies: string[]): Promise<void>;
 }
 
 const MAX_RECEIVED = 100;
@@ -43,12 +49,14 @@ function start(userId: string, deviceId: string): void {
         secureStore: webPlatform.secureStore,
         transport: crypto.createHttpCryptoTransport(session.apiClient, gatewaySend),
         log: (message) => console.warn(`[crypto] ${message}`),
+        isOnline: (userId) => realtimeStore.getState().presences[userId] !== "offline",
       });
       if (current !== run) {
         started.stop();
         return;
       }
       handle = started;
+      setCryptoHandle(started);
       const unsubscribe = subscribeDispatch((event) => started.handleDispatch(event));
       started.onToDevice((event) => {
         if (event.type === "debug.ping" && typeof event.content.text === "string") {
@@ -71,6 +79,7 @@ function start(userId: string, deviceId: string): void {
 function stop(): void {
   run += 1;
   handle = null;
+  setCryptoHandle(null);
   received.length = 0;
   releaseLock?.();
   releaseLock = null;
@@ -103,4 +112,26 @@ export const cryptoDebug: CryptoDebug = {
     return result.sent.length;
   },
   received: () => [...received],
+  hasMegolmSession: (sessionId) => handle?.hasMegolmSession(sessionId) ?? Promise.resolve(false),
+  async seedMessages(channelId, bodies) {
+    for (const [index, body] of bodies.entries()) {
+      const encoded = await messageCodec.encode(channelId, { type: "message", body, mentions: [], attachments: [], embeds: [] });
+      for (;;) {
+        try {
+          await postEvent(session.apiClient, channelId, {
+            codec: encoded.codec,
+            megolmSessionId: encoded.megolmSessionId ?? undefined,
+            ciphertext: encodeBase64Url(encoded.ciphertext),
+            nonce: `seed-${Date.now()}-${index}`,
+          });
+          break;
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 429) {
+            throw error;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      }
+    }
+  },
 };

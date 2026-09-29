@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { IDBFactory } from "fake-indexeddb";
 import type {
+  ChannelMembersResponse,
   ClaimedKey,
   QueriedUser,
   ToDeviceDispatchPayload,
@@ -67,6 +68,10 @@ export class FakeServer {
   readonly queue: QueuedMessage[] = [];
   private readonly online = new Map<string, CryptoHandle>();
   private nextId = 1n;
+  /** The members of each channel, as the channel members route gives them. */
+  readonly channels = new Map<string, ChannelMembersResponse>();
+  /** Users that the clients see as offline. */
+  readonly offline = new Set<string>();
   /** Change a TO_DEVICE dispatch before it goes out. Tests use it to act as a malicious server. */
   tamper: ((payload: ToDeviceDispatchPayload) => ToDeviceDispatchPayload) | null = null;
 
@@ -155,6 +160,13 @@ export class FakeServer {
         }
         return { skipped };
       },
+      channelMembers: async (channelId) => {
+        const channel = this.channels.get(channelId);
+        if (!channel || !channel.members.some((member) => member.userId === userId)) {
+          throw Object.assign(new Error("This channel does not exist."), { status: 404 });
+        }
+        return structuredClone(channel);
+      },
       ackToDevice: (upToId, resync) => {
         const recipient = key(userId, deviceId);
         const limit = BigInt(upToId);
@@ -186,6 +198,19 @@ export class FakeServer {
     this.online.get(target)?.handleDispatch({ t: "TO_DEVICE", d: payload });
   }
 
+  /** Send a gateway dispatch to every online client, as the server sends a membership event. */
+  broadcast(t: string, d: unknown): void {
+    for (const handle of this.online.values()) {
+      handle.handleDispatch({ t, d });
+    }
+  }
+
+  /** Remove a device, as a sign-out does. Its keys and its queue go away. */
+  removeDevice(userId: string, deviceId: string): void {
+    this.devices.delete(key(userId, deviceId));
+    this.broadcast("DEVICE_LIST_UPDATE", { userId });
+  }
+
   queuedFor(userId: string, deviceId: string): number {
     return this.queue.filter((entry) => entry.recipient === key(userId, deviceId)).length;
   }
@@ -199,6 +224,8 @@ export class FakeServer {
       transport: this.transportFor(client.userId, client.deviceId),
       secureStore: client.secureStore,
       indexedDb: client.indexedDb,
+      isOnline: (userId) => !this.offline.has(userId),
+      megolmTimings: { requestDelaysMs: [0, 20, 40], backupForwardDelayMs: [30, 60], membershipDebounceMs: 5 },
     });
     handle.onToDevice((event) => {
       client.received.push({ type: event.type, content: event.content, from: key(event.sender.userId, event.sender.deviceId) });

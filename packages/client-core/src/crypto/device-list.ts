@@ -87,6 +87,27 @@ export class DeviceList {
     return this.deps.store.getDevices(userId);
   }
 
+  /** The verified devices of many users. It fetches the new and outdated users in one query. */
+  async getDevicesOfUsers(userIds: string[]): Promise<Map<string, DeviceRecord[]>> {
+    const unique = [...new Set(userIds)];
+    const stale: string[] = [];
+    for (const userId of unique) {
+      const user = await this.deps.store.getUser(userId);
+      if (!user || user.outdated) {
+        stale.push(userId);
+      }
+    }
+    if (stale.length > 0) {
+      await this.trackUsers(stale);
+      await this.refresh(stale);
+    }
+    const result = new Map<string, DeviceRecord[]>();
+    for (const userId of unique) {
+      result.set(userId, await this.deps.store.getDevices(userId));
+    }
+    return result;
+  }
+
   /** One verified device. When it is not known, it fetches the user again (at most one time in 10 s). */
   async getDevice(userId: string, deviceId: string): Promise<DeviceRecord | undefined> {
     const devices = await this.getDevices(userId);

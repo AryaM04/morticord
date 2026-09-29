@@ -67,6 +67,7 @@ describe("createGatewayClient", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   function makeClient(overrides: Partial<Parameters<typeof createGatewayClient>[0]> = {}) {
@@ -113,6 +114,8 @@ describe("createGatewayClient", () => {
   });
 
   it("sends a heartbeat and reconnects when the previous one never got an ACK", async () => {
+    // A fixed jitter: with a high random value, the reconnect comes after the end of this test.
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     const client = makeClient();
     await vi.advanceTimersByTimeAsync(0);
     currentSocket().serverSend(hello(10_000));

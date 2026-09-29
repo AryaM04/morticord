@@ -14,12 +14,15 @@ server stores:
 - Plaintext routing metadata: the channel, the sender (user and device),
   the relation type and target, the codec, and the times.
 
-A client decodes `ciphertext` with the codec named on the event. In this
-milestone every event uses the codec `plain-v1`: the bytes are UTF-8 JSON,
-made and read with `encodePlainPayload`/`decodePlainPayload` in
-`packages/shared`. From milestone M6, some events use `megolm-v1` instead,
-and the bytes are Megolm ciphertext. The server code that stores and moves
-events does not change between the two, because it only ever sees bytes.
+A client decodes `ciphertext` with the codec named on the event. From
+milestone M6, every new event uses the codec `megolm-v1`: the bytes are a
+Megolm message, and the event has a `megolmSessionId`
+(`docs/concepts/olm-megolm.md` section 8). The Megolm plaintext is the
+UTF-8 JSON of `encodePlainPayload` in `packages/shared`. Old events from
+milestone M3 use `plain-v1`: the bytes are that JSON with no encryption.
+The server rejects a new `plain-v1` event with `PLAINTEXT_NOT_ALLOWED`,
+but clients can still read the old ones. The server code that stores and
+moves events does not read the bytes of either codec.
 
 ## The decrypted payload
 
@@ -54,9 +57,12 @@ has anything unread, without fetching any events.
 
 ## Posting an event
 
-`POST /channels/:id/events` takes `codec`, `ciphertext`, a client-made
-`nonce`, and, for an edit, a reply or a reaction, `relType` and
-`relatesToId`. The rules:
+`POST /channels/:id/events` takes `codec`, `megolmSessionId`,
+`ciphertext`, a client-made `nonce`, and, for an edit, a reply or a
+reaction, `relType` and `relatesToId`. The rules:
+
+- A `megolm-v1` event needs `megolmSessionId`. A `plain-v1` event gets
+  400 `PLAINTEXT_NOT_ALLOWED`, unless `ALLOW_PLAINTEXT_EVENTS` is true.
 
 - A plain message or a reply needs `SEND_MESSAGES`.
 - A reaction needs `ADD_REACTIONS` and `READ_MESSAGE_HISTORY`.

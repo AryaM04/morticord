@@ -1,7 +1,7 @@
 // The crypto store: one IndexedDB database for each user and device. It
 // holds pickles (encrypted by vodozemac with the pickle key), the device
-// list cache and small state values. See docs/concepts/olm-megolm.md
-// section 7.
+// list cache, the Megolm sessions and small state values. See
+// docs/concepts/olm-megolm.md sections 7 and 8.
 
 /** One Olm session with one peer device. `peerKey` is the Curve25519 key of the peer. */
 export interface SessionRecord {
@@ -36,6 +36,45 @@ export interface UserRecord {
   changedMasterKey: string | null;
 }
 
+/** The outbound Megolm session of this device for one channel. */
+export interface OutboundRecord {
+  channelId: string;
+  sessionId: string;
+  pickle: string;
+  /** The device signature that binds the session to the channel and this device. */
+  signature: string;
+  createdAt: number;
+  messageCount: number;
+  /** The devices that got the session key, as "userId:deviceId". */
+  sharedWith: string[];
+}
+
+/** One inbound Megolm session. The session id is the public key of the session, so it is unique. */
+export interface InboundRecord {
+  sessionId: string;
+  channelId: string;
+  /** The sender device, as this device verified it when the key arrived. */
+  senderUserId: string;
+  senderDeviceId: string;
+  senderEd25519: string;
+  /** The sender device signature over the session binding. */
+  signature: string;
+  pickle: string;
+  firstKnownIndex: number;
+  /** The event id of each decrypted message index. A different event with a used index is a replay. */
+  indexes: Record<string, string>;
+  /** True when the key came from a different device than the sender (history share or key request). */
+  forwarded: boolean;
+}
+
+/** The users who could read a channel when this device last checked. Used to find new members. */
+export interface ChannelSnapshot {
+  channelId: string;
+  /** Not set for a DM. */
+  guildId?: string;
+  userIds: string[];
+}
+
 /** One write batch. The store applies it in one transaction. */
 export interface StoreChanges {
   values?: Record<string, unknown>;
@@ -44,6 +83,15 @@ export interface StoreChanges {
 }
 
 export interface CryptoStore {
+  getOutbound(channelId: string): Promise<OutboundRecord | undefined>;
+  putOutbound(record: OutboundRecord): Promise<void>;
+  deleteOutbound(channelId: string): Promise<void>;
+  getInbound(sessionId: string): Promise<InboundRecord | undefined>;
+  putInbound(record: InboundRecord): Promise<void>;
+  inboundForChannel(channelId: string): Promise<InboundRecord[]>;
+  getSnapshot(channelId: string): Promise<ChannelSnapshot | undefined>;
+  putSnapshot(snapshot: ChannelSnapshot): Promise<void>;
+  snapshotsForGuild(guildId: string): Promise<ChannelSnapshot[]>;
   getValue<T>(key: string): Promise<T | undefined>;
   getSessions(peerKey: string): Promise<SessionRecord[]>;
   countSessions(): Promise<number>;
@@ -57,11 +105,14 @@ export interface CryptoStore {
   close(): void;
 }
 
-const VERSION = 1;
+const VERSION = 2;
 const VALUES = "values";
 const SESSIONS = "sessions";
 const USERS = "users";
 const DEVICES = "devices";
+const OUTBOUND = "outbound";
+const INBOUND = "inbound";
+const CHANNELS = "channels";
 
 function done(request: IDBRequest): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -81,12 +132,19 @@ function finished(tx: IDBTransaction): Promise<void> {
 function open(factory: IDBFactory, name: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = factory.open(name, VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
-      db.createObjectStore(VALUES);
-      db.createObjectStore(SESSIONS, { keyPath: ["peerKey", "sessionId"] }).createIndex("peerKey", "peerKey");
-      db.createObjectStore(USERS, { keyPath: "userId" });
-      db.createObjectStore(DEVICES, { keyPath: ["userId", "deviceId"] }).createIndex("userId", "userId");
+      if (event.oldVersion < 1) {
+        db.createObjectStore(VALUES);
+        db.createObjectStore(SESSIONS, { keyPath: ["peerKey", "sessionId"] }).createIndex("peerKey", "peerKey");
+        db.createObjectStore(USERS, { keyPath: "userId" });
+        db.createObjectStore(DEVICES, { keyPath: ["userId", "deviceId"] }).createIndex("userId", "userId");
+      }
+      if (event.oldVersion < 2) {
+        db.createObjectStore(OUTBOUND, { keyPath: "channelId" });
+        db.createObjectStore(INBOUND, { keyPath: "sessionId" }).createIndex("channelId", "channelId");
+        db.createObjectStore(CHANNELS, { keyPath: "channelId" }).createIndex("guildId", "guildId");
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("The crypto store could not open."));
@@ -107,7 +165,23 @@ export async function openCryptoStore(name: string, factory: IDBFactory = indexe
     return (await done(run(tx.objectStore(storeName)))) as T;
   }
 
+  async function write(storeName: string, run: (store: IDBObjectStore) => void): Promise<void> {
+    const tx = db.transaction(storeName, "readwrite");
+    run(tx.objectStore(storeName));
+    await finished(tx);
+  }
+
   return {
+    getOutbound: (channelId) => read(OUTBOUND, (store) => store.get(channelId)),
+    putOutbound: (record) => write(OUTBOUND, (store) => store.put(record)),
+    deleteOutbound: (channelId) => write(OUTBOUND, (store) => store.delete(channelId)),
+    getInbound: (sessionId) => read(INBOUND, (store) => store.get(sessionId)),
+    putInbound: (record) => write(INBOUND, (store) => store.put(record)),
+    inboundForChannel: (channelId) => read(INBOUND, (store) => store.index("channelId").getAll(channelId)),
+    getSnapshot: (channelId) => read(CHANNELS, (store) => store.get(channelId)),
+    putSnapshot: (snapshot) => write(CHANNELS, (store) => store.put(snapshot)),
+    snapshotsForGuild: (guildId) => read(CHANNELS, (store) => store.index("guildId").getAll(guildId)),
+
     getValue: (key) => read(VALUES, (store) => store.get(key)),
 
     getSessions: (peerKey) => read(SESSIONS, (store) => store.index("peerKey").getAll(peerKey)),

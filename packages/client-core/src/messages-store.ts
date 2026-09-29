@@ -79,18 +79,23 @@ export interface AggregatedMessage {
   reactions: AggregatedReaction[];
 }
 
+/** The text of an event whose key did not arrive yet. The text changes to the message when the key arrives. */
+export const WAITING_FOR_KEY_TEXT = "This message cannot be read yet. The app asks for the key.";
+
 /**
  * Combine one timeline event with its loaded relations (edits and
  * reactions) into the shape the UI renders. `payloads` holds the decode
  * result for the event itself and for each relation, keyed by event id;
  * a missing entry means "not decoded yet" and is treated like a pending
- * message (no body yet, not marked unreadable).
+ * message (no body yet, not marked unreadable). `waiting` holds the ids
+ * of the events whose key did not arrive yet.
  */
 export function aggregateEvent(
   event: EventJson,
   relations: EventJson[],
   payloads: Record<string, DecryptedPayload | null | undefined>,
   selfUserId: string | null = null,
+  waiting: Record<string, true> = {},
 ): AggregatedMessage {
   const base: AggregatedMessage = {
     id: event.id,
@@ -115,7 +120,7 @@ export function aggregateEvent(
   const ownPayload = payloads[event.id];
   if (ownPayload === null) {
     base.cannotRead = true;
-    base.body = "This message cannot be read.";
+    base.body = waiting[event.id] ? WAITING_FOR_KEY_TEXT : "This message cannot be read.";
   } else if (ownPayload && ownPayload.type !== "reaction") {
     base.body = ownPayload.body;
     base.mentions = ownPayload.mentions;
@@ -187,6 +192,8 @@ export interface ChannelMessagesState {
   relationsByTarget: Record<string, EventJson[]>;
   /** Decode results, keyed by event id (own timeline events and relations alike). */
   payloads: Record<string, DecryptedPayload | null | undefined>;
+  /** The ids of events that failed to decode because their key did not arrive yet. */
+  waiting: Record<string, true>;
   hasMoreBefore: boolean;
   hasMoreAfter: boolean;
   /** True when the window's newest event is the channel's actual newest event. */
@@ -206,6 +213,7 @@ export function createChannelMessagesState(): ChannelMessagesState {
     eventsById: {},
     relationsByTarget: {},
     payloads: {},
+    waiting: {},
     hasMoreBefore: false,
     hasMoreAfter: false,
     atLatest: true,
@@ -463,8 +471,33 @@ export function setPayload(
   channel: ChannelMessagesState,
   eventId: string,
   payload: DecryptedPayload | null,
+  waitingForKey = false,
 ): ChannelMessagesState {
-  return { ...channel, payloads: { ...channel.payloads, [eventId]: payload } };
+  let waiting = channel.waiting;
+  if (waitingForKey && !waiting[eventId]) {
+    waiting = { ...waiting, [eventId]: true };
+  } else if (!waitingForKey && waiting[eventId]) {
+    const { [eventId]: _removed, ...rest } = waiting;
+    waiting = rest;
+  }
+  return { ...channel, payloads: { ...channel.payloads, [eventId]: payload }, waiting };
+}
+
+/** The loaded events (timeline events and relations) of a channel that wait for the key of one Megolm session. */
+export function eventsWaitingForSession(channel: ChannelMessagesState, sessionId: string): EventJson[] {
+  const found: EventJson[] = [];
+  const check = (event: EventJson | undefined) => {
+    if (event && channel.waiting[event.id] && event.megolmSessionId === sessionId) {
+      found.push(event);
+    }
+  };
+  for (const id of channel.eventIds) {
+    check(channel.eventsById[id]);
+  }
+  for (const relations of Object.values(channel.relationsByTarget)) {
+    relations.forEach(check);
+  }
+  return found;
 }
 
 // ---- stale refetch -------------------------------------------------------------
@@ -756,7 +789,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
       if (event.redactedAt) continue;
       const result = await codec.decode(event);
       updateChannel(get, set, channelId, (channel) =>
-        setPayload(channel, event.id, result.ok ? result.payload : null),
+        setPayload(channel, event.id, result.ok ? result.payload : null, !result.ok && result.waiting === true),
       );
     }
   }
@@ -1073,6 +1106,15 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
       }
     },
   }));
+
+  // A key arrived: decode again the loaded events that waited for it. No reload is needed.
+  codec.onKeys?.((channelId, sessionId) => {
+    const channel = store.getState().channels[channelId];
+    const events = channel ? eventsWaitingForSession(channel, sessionId) : [];
+    if (events.length > 0) {
+      void decodeAndStore(store.getState, store.setState, channelId, events);
+    }
+  });
 
   return store;
 }

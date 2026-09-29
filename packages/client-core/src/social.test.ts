@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DM_PERMISSIONS, Permission, encodeBase64Url } from "@discord-clone/shared";
 import type { DmChannelJson, RelationshipJson, User } from "@discord-clone/shared";
 import { ApiError, type ApiClient } from "./api.js";
-import { plainCodec } from "./codec.js";
+import { createFakeCodec } from "./test/fake-codec.js";
 import { acceptFriendRequest, blockUser, listRelationships, removeRelationship, sendFriendRequest } from "./friends-api.js";
 import { addDmRecipient, listDmChannels, openDm, removeDmRecipient, renameGroupDm } from "./dms-api.js";
 import { createGatewayClient, type GatewayDispatch, type WebSocketLike } from "./gateway.js";
@@ -257,7 +257,7 @@ describe("permissions in a DM", () => {
 describe("messages store with DM channel ids", () => {
   function makeStore() {
     const api = { request: vi.fn() } as unknown as ApiClient;
-    return createMessagesStore({ api, codec: plainCodec, send: vi.fn() });
+    return createMessagesStore({ api, codec: createFakeCodec(), send: vi.fn() });
   }
 
   it("seeds the unread baseline of a DM from READY", () => {
@@ -325,7 +325,7 @@ describe("messages store with DM channel ids", () => {
     });
     const store = createMessagesStore({
       api: { request } as unknown as ApiClient,
-      codec: plainCodec,
+      codec: createFakeCodec(),
       send: vi.fn(),
       makeNonce: () => "n2",
     });
@@ -338,7 +338,7 @@ describe("messages store with DM channel ids", () => {
     const request = vi.fn().mockRejectedValue(new ApiError(403, "CANNOT_MESSAGE_USER", "You cannot send messages to this user."));
     const store = createMessagesStore({
       api: { request } as unknown as ApiClient,
-      codec: plainCodec,
+      codec: createFakeCodec(),
       send: vi.fn(),
       makeNonce: () => "n3",
     });

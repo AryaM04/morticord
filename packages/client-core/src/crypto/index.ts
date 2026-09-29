@@ -10,10 +10,13 @@ import {
   type DeviceRef,
   type ToDeviceDispatchPayload,
 } from "@discord-clone/shared";
+import { decodePlainEvent, type PayloadCodec } from "../codec.js";
 import type { SecureStore } from "../platform.js";
 import { AccountHolder } from "./account.js";
 import { DeviceList } from "./device-list.js";
 import { DeviceManager } from "./device-manager.js";
+import { MegolmMachine, type MegolmTimings } from "./megolm.js";
+import { ChannelMembership, membershipScope } from "./membership.js";
 import { OlmMachine, type EncryptResult, type ToDeviceHandler } from "./olm-machine.js";
 import { KeyedQueue } from "./queue.js";
 import { cryptoStoreName, openCryptoStore, type CryptoStore } from "./store.js";
@@ -23,6 +26,7 @@ import { loadWasm } from "./wasm.js";
 export { createHttpCryptoTransport, type CryptoTransport } from "./transport.js";
 export type { DecryptedToDevice, EncryptResult, ToDeviceHandler } from "./olm-machine.js";
 export type { DeviceRecord, UserRecord } from "./store.js";
+export { WAITING_TEXT, type MegolmTimings } from "./megolm.js";
 
 /** Send at most one TO_DEVICE_ACK in this time, unless the local queue is empty for longer. */
 const ACK_INTERVAL_MS = 2000;
@@ -36,6 +40,11 @@ export interface StartCryptoOptions {
   indexedDb?: IDBFactory;
   log?: (message: string) => void;
   now?: () => number;
+  /** True when a user is online. Only online devices send history to a new member. Default: every user is online. */
+  isOnline?: (userId: string) => boolean;
+  random?: () => number;
+  /** Shorter Megolm delays for tests. */
+  megolmTimings?: Partial<MegolmTimings>;
 }
 
 export interface CryptoHandle {
@@ -43,7 +52,11 @@ export interface CryptoHandle {
   readonly deviceId: string;
   readonly identityKeys: { curve25519: string; ed25519: string };
   readonly devices: DeviceList;
-  /** Feed every gateway dispatch here. It uses READY, RESUMED, TO_DEVICE and DEVICE_LIST_UPDATE. */
+  /** The message codec: Megolm for every new event. It can still read old plaintext events. */
+  readonly codec: PayloadCodec;
+  /** True when this device has the inbound Megolm key of a session. */
+  hasMegolmSession(sessionId: string): Promise<boolean>;
+  /** Feed every gateway dispatch here. It uses READY, RESUMED, TO_DEVICE, DEVICE_LIST_UPDATE and the membership events. */
   handleDispatch(dispatch: { t: string; d: unknown }): void;
   /** Encrypt and send one envelope to each device. */
   encryptToDevices(targets: DeviceRef[], type: string, content: Record<string, unknown>): Promise<EncryptResult>;
@@ -117,6 +130,36 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
   });
   await manager.setup();
 
+  const megolm = new MegolmMachine({
+    wasm,
+    store,
+    olm,
+    deviceList: devices,
+    membership: new ChannelMembership((channelId) => transport.channelMembers(channelId), options.now),
+    account,
+    queue,
+    pickleKey,
+    userId,
+    deviceId,
+    isOnline: options.isOnline,
+    now: options.now,
+    random: options.random,
+    log,
+    timings: options.megolmTimings,
+  });
+  olm.onToDevice((event) => megolm.handleToDevice(event));
+
+  const codec: PayloadCodec = {
+    async encode(channelId, payload) {
+      const { sessionId, ciphertext } = await megolm.encrypt(channelId, payload);
+      return { codec: "megolm-v1", ciphertext, megolmSessionId: sessionId };
+    },
+    async decode(event) {
+      return event.codec === "plain-v1" ? decodePlainEvent(event) : megolm.decrypt(event);
+    },
+    onKeys: (listener) => megolm.onKeys(listener),
+  };
+
   // ---- to-device inbox: one message at a time, in arrival order ----
   const inbox: ToDeviceDispatchPayload[] = [];
   let draining: Promise<void> | null = null;
@@ -168,6 +211,10 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
     if (stopped) {
       return;
     }
+    const scope = membershipScope(dispatch);
+    if (scope) {
+      megolm.onMembershipChange(scope);
+    }
     if (dispatch.t === "TO_DEVICE") {
       const parsed = toDeviceDispatchPayloadSchema.safeParse(dispatch.d);
       if (parsed.success) {
@@ -181,6 +228,7 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
       }
     } else if (dispatch.t === "READY" || dispatch.t === "RESUMED") {
       void resync();
+      megolm.retryRequests();
       if (dispatch.t === "READY") {
         const parsed = readyPayloadSchema.safeParse(dispatch.d);
         if (parsed.success) {
@@ -199,6 +247,8 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
     deviceId,
     identityKeys: { curve25519: account.curve25519, ed25519: account.ed25519 },
     devices,
+    codec,
+    hasMegolmSession: (sessionId) => megolm.hasSession(sessionId),
     handleDispatch,
     encryptToDevices: (targets, type, content) => olm.encryptToDevices(targets, type, content),
     async encryptToUsers(userIds, type, content) {
@@ -220,16 +270,20 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
       };
     },
     async whenIdle() {
-      while (draining) {
-        await draining;
+      for (let round = 0; round < 3; round += 1) {
+        while (draining) {
+          await draining;
+        }
+        await olm.whenIdle();
+        await megolm.whenIdle();
       }
-      await olm.whenIdle();
       while (draining) {
         await draining;
       }
     },
     stop() {
       stopped = true;
+      megolm.stop();
       if (ackTimer) {
         clearTimeout(ackTimer);
       }

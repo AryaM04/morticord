@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import type { DecryptedPayload, EventJson } from "@discord-clone/shared";
+import { describe, expect, it, vi } from "vitest";
+import { encodeBase64Url, encodePlainPayload, type DecryptedPayload, type EventJson } from "@discord-clone/shared";
+import type { ApiClient } from "./api.js";
+import { createFakeCodec } from "./test/fake-codec.js";
 import {
   addPending,
   advanceReadMarker,
@@ -31,6 +33,8 @@ import {
   touchChannel,
   trimWindow,
   createInitialMessagesState,
+  createMessagesStore,
+  WAITING_FOR_KEY_TEXT,
   type ChannelMessagesState,
   type PendingMessage,
 } from "./messages-store.js";
@@ -522,5 +526,34 @@ describe("channel LRU cache", () => {
     state = touchChannel(state, "b");
     state = touchChannel(state, "a");
     expect(state.channelOrder).toEqual(["b", "a"]);
+  });
+});
+
+describe("events that wait for a key", () => {
+  it("shows the waiting text, and decodes again when the key arrives, with no reload", async () => {
+    const codec = createFakeCodec();
+    codec.missing.add("s1");
+    const store = createMessagesStore({ api: { request: vi.fn() } as unknown as ApiClient, codec, send: vi.fn() });
+    const payload = { type: "message" as const, body: "secret", mentions: [], attachments: [], embeds: [] };
+    const waitingEvent = event({
+      id: "5",
+      codec: "megolm-v1",
+      megolmSessionId: "s1",
+      ciphertext: encodeBase64Url(encodePlainPayload(payload)),
+    });
+    store.getState().applyDispatch("EVENT_CREATE", waitingEvent);
+    await vi.waitFor(() => expect(store.getState().channels["10"]!.waiting["5"]).toBe(true));
+    let channel = store.getState().channels["10"]!;
+    const shown = aggregateEvent(waitingEvent, [], channel.payloads, null, channel.waiting);
+    expect(shown.cannotRead).toBe(true);
+    expect(shown.body).toBe(WAITING_FOR_KEY_TEXT);
+
+    // A key for a different session changes nothing. The right key decodes the event.
+    codec.deliverKey("10", "other");
+    codec.deliverKey("10", "s1");
+    await vi.waitFor(() => expect(store.getState().channels["10"]!.payloads["5"]).toEqual(payload));
+    channel = store.getState().channels["10"]!;
+    expect(channel.waiting["5"]).toBeUndefined();
+    expect(aggregateEvent(waitingEvent, [], channel.payloads, null, channel.waiting).body).toBe("secret");
   });
 });

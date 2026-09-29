@@ -349,34 +349,162 @@ key is random. It is kept through `platform.secureStore`:
 
 ## 8. Megolm (pass 2 and pass 3)
 
+Pass 2 builds this section. The code is `packages/client-core/src/crypto/megolm.ts`
+and `membership.ts`.
+
+### Readers of a channel
+
+A user may **read** a channel when it has `VIEW_CHANNEL` and
+`READ_MESSAGE_HISTORY`. Only readers get keys. In a DM or a group DM,
+every recipient is a reader.
+
+- `GET /channels/:id/members` gives the users who can view the channel,
+  with the roles, the overwrites and the owner. The caller must be able
+  to view the channel. The server computes the permissions in memory.
+- The client computes the permissions again with `computePermissions` in
+  `packages/shared`, and keeps only the readers. It fetches the list
+  lazily, only for the channels where it sends or answers.
+- The client keeps the result for at most 10 minutes. These gateway events
+  clear it: `READY`, `GUILD_MEMBER_*`, `GUILD_ROLE_*`, `GUILD_BAN_ADD`,
+  `GUILD_CREATE`, `GUILD_DELETE`, `CHANNEL_CREATE`, `CHANNEL_UPDATE`,
+  `CHANNEL_DELETE` and `CHANNEL_RECIPIENT_*`.
+
+### Send
+
 - Each sending device has one outbound Megolm session for each channel.
   DMs and group DMs are channels.
-- **Rotate** the outbound session when one of these occurs:
-  - it encrypted 100 messages,
-  - it is 7 days old,
-  - a user loses `VIEW_CHANNEL` (leave, kick, ban, role change,
-    overwrite change), or a device of a member is removed.
-- **Share** the session key with Olm (`megolm.session`) to each device of
-  each user with `VIEW_CHANNEL`, from the current index. The eligible
-  users come from `computePermissions` in `packages/shared`, with the
-  same inputs that the server uses. The sender shares only to devices
-  that are in the verified device list. A new device of a member gets the
-  current session from its current index.
-- **History share** (`megolm.forward`): when a member becomes entitled to
-  history (`VIEW_CHANNEL` and `READ_MESSAGE_HISTORY`), an online member
-  forwards each inbound session of the channel, exported at its first
-  known index, to the devices of that member.
-- **Key request** (`megolm.request { channelId, sessionId }`): a device
-  that cannot decrypt an event asks the devices of its own user and the
-  devices of the sender. A device answers only when the requester is
-  entitled to history now. Requests are sent again when a device comes
-  online.
-- The Megolm payload is the `DecryptedPayload` JSON of the message codec
-  (`docs/concepts/messages.md`). The event keeps
-  `megolm_session_id` in clear text, so the receiver finds the session.
-  The receiver checks that the Megolm session came from the device that
-  the event names as sender (the sender Ed25519 key is in the
-  `megolm.session` envelope).
+- The event has `codec: "megolm-v1"` and `megolmSessionId` in clear text.
+  The Megolm plaintext is the `DecryptedPayload` JSON of the message
+  codec (`docs/concepts/messages.md`). On the wire, the Megolm message is
+  base64url.
+- Before each encryption, the client gets the current readers and their
+  verified devices. Then it does these steps, in this order:
+  1. **Rotate** the outbound session when one of these is true: it
+     encrypted 100 messages; it is 7 days old; a user that got the key is
+     not a reader now (leave, kick, ban, role change, overwrite change,
+     recipient removed); a device that got the key is not in the device
+     list now (sign-out, or new identity keys).
+  2. **Share** the session key (`megolm.session`) with each reader device
+     that does not have it, from the current index. This includes the
+     other devices of the sender. A new device of a reader
+     (`DEVICE_LIST_UPDATE`) thus gets the key before the next message. A
+     device that fails gets no new try for 60 seconds.
+  3. Encrypt, and save the session before the event goes out.
+- The rotation check runs at the next send, with the membership that the
+  events above keep fresh. Thus the client never shares a key with a
+  device that is not a reader at that moment.
+- The sender also keeps an inbound copy of its own session, so all its
+  devices decrypt the same way.
+
+### Session binding
+
+When the sender makes a session, its device Ed25519 key signs
+`{type:"megolm_session", channelId, sessionId, userId, deviceId}`. The
+signature goes in `megolm.session` and in each `megolm.forward`.
+
+- `megolm.session { channelId, sessionId, sessionKey, signature }`: the
+  receiver checks the signature with the key of the Olm sender device,
+  and that the session id of the key is `sessionId`.
+- `megolm.forward { channelId, sessionId, sessionKey, senderUserId,
+  senderDeviceId, senderEd25519, signature }`: `sessionKey` is exported at
+  the first known index. When the sender device is in the verified device
+  list, `senderEd25519` must be its key. The signature must verify with
+  `senderEd25519`.
+- The session id is the public key of the session, so it is unique. The
+  first sender that a session id arrives with owns it. A later key for
+  the same id with a different sender or channel is rejected. A later key
+  with an earlier first index replaces the stored one.
+
+### Receive
+
+The receiver finds the inbound session by the session id of the event.
+It shows "This message cannot be read." and never throws when one of
+these is true:
+
+- The session belongs to a different channel, user or device than the
+  event names.
+- The sender device is still in the device list, but with a different
+  Ed25519 key than the session came with.
+- The Megolm message does not decrypt (Megolm also checks the signature
+  of the message).
+- The message index was already used by a different event id (a replay).
+  The client keeps the event id of each index of each session.
+
+When the session is not there (or the message is older than its first
+index), the message shows "This message cannot be read yet. The app asks
+for the key." The client asks for the key, and decodes the event again
+when the key arrives. No reload is necessary.
+
+### History for new readers (`megolm.forward`)
+
+- The client keeps a snapshot of the readers of each channel where it
+  has a session. After a membership event (1 second debounce), it
+  compares the readers with the snapshot.
+- For each new reader, the online devices of the old readers are sorted.
+  The first device sends each inbound session of the channel at once.
+  The next two devices send after a random delay of 20 to 40 seconds,
+  in case the first device is not really online. The other devices send
+  nothing. A device sends the history of one channel to one user at most
+  one time in 10 minutes.
+- Before it sends, the device checks again that the user is a reader.
+- The receiver keeps only the best key of each session, so a second copy
+  does nothing.
+
+### Key requests (`megolm.request { channelId, sessionId }`)
+
+- A device that cannot decrypt an event asks the devices of its own user,
+  the devices of the sender, and the devices of at most 3 other readers
+  (online users first). The other readers are necessary: after a new
+  sign-in, the old device of the user can be gone, and only other
+  members have the keys.
+- Tries: at once, then after 5 s, 30 s, 2 min and 10 min. It stops when
+  the key arrives. After `READY` or `RESUMED`, the open requests go out
+  again at once.
+- A device answers only when the requester user is a reader now, and at
+  most one time in 30 seconds for each requester device and session. The
+  answer is a `megolm.forward` to the requester device only.
+
+### Storage and memory
+
+- The crypto store (IndexedDB version 2) keeps the outbound sessions, the
+  inbound sessions and the reader snapshots. The pickles are encrypted
+  with the pickle key.
+- At most 100 inbound sessions stay unpickled in memory (least recently
+  used). The store keeps all of them.
+
+### Plaintext
+
+The server rejects a new `plain-v1` event with 400
+`PLAINTEXT_NOT_ALLOWED`. `ALLOW_PLAINTEXT_EVENTS=true` turns the check
+off, for old development clients only. The clients never send `plain-v1`.
+They can still read old `plain-v1` events.
+
+### Deviations from the first draft of this section, and why
+
+- Readers need `READ_MESSAGE_HISTORY` as well as `VIEW_CHANNEL`, for the
+  live key share too. A user without history permission therefore cannot
+  read new messages either. Reason: one rule for the key share and the
+  history share is simpler to check, and it never gives a key that the
+  history rule would refuse.
+- The receiver finds a session by its session id, not by the Curve25519
+  key of the sender device and the session id. The record keeps the
+  sender that was verified when the key arrived. Reason: a sign-out
+  removes the device from the device list, and the messages of that
+  device must stay readable.
+- The session binding signature is new. Reason: without it, a member
+  that has a key could forward it and say that a different device made
+  it.
+- A forward for a sender device that is not in the device list now (for
+  example after its sign-out) is accepted when its signature verifies
+  with the `senderEd25519` in the forward. Thus the forwarder vouches for
+  that key. Risk: a member with a key can say that a removed device of a
+  different user made a session. That is useful only together with a
+  server that forges events, and the first-owner rule stops it for a
+  session that the receiver already has.
+- Key requests also go to up to 3 other readers (see above).
+- A second tab of the same device waits for the Web Lock of the crypto
+  layer. Until it gets the lock, it cannot encrypt or decrypt. It shows
+  "Setting up encryption…" when it tries to send.
 
 ## 9. Key backup (pass 4)
 
@@ -400,5 +528,8 @@ then, users compare nothing and trust the master key on first use.
 ## Code
 
 - WASM wrapper: `packages/crypto-wasm/src/lib.rs`.
-- Server: `apps/server/src/modules/keys`, `apps/server/src/modules/to-device`.
+- Server: `apps/server/src/modules/keys`, `apps/server/src/modules/to-device`,
+  `GET /channels/:id/members` in `apps/server/src/modules/messages`.
 - Client: `packages/client-core/src/crypto`.
+- Web: `apps/web/src/lib/crypto.ts` starts the layer, and the codec in
+  `apps/web/src/lib/messages.ts` waits for it.
