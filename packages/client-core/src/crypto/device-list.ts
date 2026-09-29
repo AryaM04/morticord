@@ -1,0 +1,193 @@
+// The device list cache. It fetches device keys with /keys/query, checks
+// every signature, keeps the first master key of each user (trust on first
+// use) and flags a later change. The client never trusts the server for
+// keys: a device with a bad signature is dropped. See
+// docs/concepts/olm-megolm.md section 4.
+import { deviceKeysSignedText, masterKeySignedText, type QueriedUser } from "@discord-clone/shared";
+import type { KeyedQueue } from "./queue.js";
+import type { CryptoStore, DeviceRecord, UserRecord } from "./store.js";
+import type { CryptoTransport } from "./transport.js";
+import type { Wasm } from "./wasm.js";
+
+const REFRESH_QUEUE = "device-list";
+const MAX_QUERY_USERS = 500;
+/** Do not query a user again for an unknown device more often than this. */
+const MISSING_DEVICE_RETRY_MS = 10_000;
+
+export interface DeviceListDeps {
+  store: CryptoStore;
+  transport: CryptoTransport;
+  wasm: Wasm;
+  queue: KeyedQueue;
+  /** Called when the server shows a master key that differs from the trusted one. */
+  onMasterKeyChanged?: (userId: string) => void;
+  now?: () => number;
+}
+
+function newUser(userId: string): UserRecord {
+  return { userId, tracked: false, outdated: true, masterKey: null, changedMasterKey: null };
+}
+
+export class DeviceList {
+  private readonly lastMissingFetch = new Map<string, number>();
+
+  constructor(private readonly deps: DeviceListDeps) {}
+
+  /** Start to track users. A new user is fetched before its next use. */
+  async trackUsers(userIds: string[]): Promise<void> {
+    for (const userId of new Set(userIds)) {
+      const user = await this.deps.store.getUser(userId);
+      if (!user?.tracked) {
+        await this.deps.store.putUser({ ...(user ?? newUser(userId)), tracked: true, outdated: true });
+      }
+    }
+  }
+
+  /** Handle DEVICE_LIST_UPDATE: the next use of this user fetches again. */
+  markOutdated(userId: string): Promise<void> {
+    // In the refresh queue, so a fetch that started before the update cannot clear the flag.
+    return this.deps.queue.run(REFRESH_QUEUE, async () => {
+      const user = await this.deps.store.getUser(userId);
+      if (user && !user.outdated) {
+        await this.deps.store.putUser({ ...user, outdated: true });
+      }
+    });
+  }
+
+  /** Fetch every tracked user that is outdated. */
+  async refreshOutdated(): Promise<void> {
+    const users = await this.deps.store.getUsers();
+    const outdated = users.filter((user) => user.tracked && user.outdated).map((user) => user.userId);
+    if (outdated.length > 0) {
+      await this.refresh(outdated);
+    }
+  }
+
+  /** Fetch these users now and replace their cached devices. */
+  refresh(userIds: string[]): Promise<void> {
+    return this.deps.queue.run(REFRESH_QUEUE, async () => {
+      for (let start = 0; start < userIds.length; start += MAX_QUERY_USERS) {
+        const batch = userIds.slice(start, start + MAX_QUERY_USERS);
+        const response = await this.deps.transport.queryKeys(batch);
+        for (const userId of batch) {
+          const queried = response.users.find((user) => user.userId === userId);
+          await this.apply(userId, queried);
+        }
+      }
+    });
+  }
+
+  /** The verified devices of a user. It fetches first when the cache is outdated. */
+  async getDevices(userId: string): Promise<DeviceRecord[]> {
+    const user = await this.deps.store.getUser(userId);
+    if (!user || user.outdated) {
+      await this.trackUsers([userId]);
+      await this.refresh([userId]);
+    }
+    return this.deps.store.getDevices(userId);
+  }
+
+  /** One verified device. When it is not known, it fetches the user again (at most one time in 10 s). */
+  async getDevice(userId: string, deviceId: string): Promise<DeviceRecord | undefined> {
+    const devices = await this.getDevices(userId);
+    const found = devices.find((device) => device.deviceId === deviceId);
+    if (found) {
+      return found;
+    }
+    const now = (this.deps.now ?? Date.now)();
+    const key = `${userId}:${deviceId}`;
+    if (now - (this.lastMissingFetch.get(key) ?? 0) < MISSING_DEVICE_RETRY_MS) {
+      return undefined;
+    }
+    this.lastMissingFetch.set(key, now);
+    await this.refresh([userId]);
+    return (await this.deps.store.getDevices(userId)).find((device) => device.deviceId === deviceId);
+  }
+
+  getUser(userId: string): Promise<UserRecord | undefined> {
+    return this.deps.store.getUser(userId);
+  }
+
+  /** Users whose master key changed and who still need a user decision. */
+  async changedMasterKeys(): Promise<string[]> {
+    return (await this.deps.store.getUsers()).filter((user) => user.changedMasterKey).map((user) => user.userId);
+  }
+
+  /** The user accepted the new master key of `userId`. Devices are checked again against it. */
+  async acceptMasterKeyChange(userId: string): Promise<void> {
+    const user = await this.deps.store.getUser(userId);
+    if (!user?.changedMasterKey) {
+      return;
+    }
+    await this.deps.store.putUser({ ...user, masterKey: user.changedMasterKey, changedMasterKey: null, outdated: true });
+    await this.refresh([userId]);
+  }
+
+  /** Trust this master key for our own user. Only the device that made the key calls this. */
+  async trustOwnMasterKey(userId: string, publicKey: string): Promise<void> {
+    const user = (await this.deps.store.getUser(userId)) ?? newUser(userId);
+    await this.deps.store.putUser({ ...user, tracked: true, outdated: true, masterKey: publicKey, changedMasterKey: null });
+  }
+
+  private verify(publicKey: string, text: string, signature: string): boolean {
+    return this.deps.wasm.verify(publicKey, text, signature);
+  }
+
+  private async apply(userId: string, queried: QueriedUser | undefined): Promise<void> {
+    const { store } = this.deps;
+    const user = (await store.getUser(userId)) ?? newUser(userId);
+    const known = await store.getDevices(userId);
+
+    const checked = (queried?.devices ?? []).filter((device) => {
+      const text = deviceKeysSignedText(userId, device.deviceId, device.curve25519, device.ed25519);
+      if (!this.verify(device.ed25519, text, device.signature)) {
+        return false;
+      }
+      // Identity keys never change. A known device id with new keys is not accepted.
+      const old = known.find((entry) => entry.deviceId === device.deviceId);
+      return !old || (old.curve25519 === device.curve25519 && old.ed25519 === device.ed25519);
+    });
+
+    // A master key counts only when a device of the user with a valid signature vouches for it.
+    let serverMaster: string | null = null;
+    if (queried?.masterKey) {
+      const { publicKey, deviceId, deviceSignature } = queried.masterKey;
+      const voucher = checked.find((device) => device.deviceId === deviceId);
+      if (voucher && this.verify(voucher.ed25519, masterKeySignedText(userId, publicKey), deviceSignature)) {
+        serverMaster = publicKey;
+      }
+    }
+
+    let masterKey = user.masterKey;
+    let changedMasterKey = user.changedMasterKey;
+    if (serverMaster !== null) {
+      if (masterKey === null) {
+        masterKey = serverMaster;
+        changedMasterKey = null;
+      } else {
+        changedMasterKey = serverMaster === masterKey ? null : serverMaster;
+      }
+    }
+
+    const devices: DeviceRecord[] = checked.map((device) => ({
+      userId,
+      deviceId: device.deviceId,
+      curve25519: device.curve25519,
+      ed25519: device.ed25519,
+      ownerVerified:
+        masterKey !== null &&
+        device.masterSignature !== null &&
+        this.verify(
+          masterKey,
+          deviceKeysSignedText(userId, device.deviceId, device.curve25519, device.ed25519),
+          device.masterSignature,
+        ),
+    }));
+
+    const next: UserRecord = { ...user, outdated: false, masterKey, changedMasterKey };
+    await store.replaceDevices(next, devices);
+    if (changedMasterKey !== null && changedMasterKey !== user.changedMasterKey) {
+      this.deps.onMasterKeyChanged?.(userId);
+    }
+  }
+}

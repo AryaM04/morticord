@@ -181,6 +181,9 @@ importers:
 
   packages/client-core:
     dependencies:
+      '@discord-clone/crypto-wasm':
+        specifier: workspace:*
+        version: link:../crypto-wasm
       '@discord-clone/shared':
         specifier: workspace:*
         version: link:../shared
