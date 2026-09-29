@@ -29,6 +29,18 @@ const envSchema = z.object({
   // Origin of the web app. The server puts it in email links and OAuth redirects.
   WEB_ORIGIN: z.string().min(1).default("http://localhost:5173"),
 
+  // Other origins that can call the API and open the gateway, as a comma
+  // list. The desktop app uses "http://tauri.localhost" on Windows and
+  // "tauri://localhost" on macOS. Empty: only the web app origin.
+  CORS_ALLOWED_ORIGINS: z.string().optional(),
+
+  // The URL scheme of the desktop app. After an OAuth sign-in from the
+  // desktop app, the server sends the browser to "<scheme>://auth/callback".
+  DESKTOP_URL_SCHEME: z
+    .string()
+    .regex(/^[a-z][a-z0-9+.-]*$/, "DESKTOP_URL_SCHEME must be a lowercase URL scheme.")
+    .default("discordclone"),
+
   // Directory for files the server keeps on disk, such as avatars.
   DATA_DIR: z.string().min(1).default("./data"),
 
@@ -91,6 +103,10 @@ export interface AppConfig {
   turnTlsEnabled: boolean;
   turnTlsPort: number;
   webOrigin: string;
+  /** Other origins that can call the API and open the gateway, for example the desktop app. */
+  corsAllowedOrigins: string[];
+  /** The URL scheme of the desktop app, for the OAuth return. */
+  desktopUrlScheme: string;
   dataDir: string;
   smtp: {
     host: string;
@@ -125,6 +141,33 @@ export interface AppConfig {
   logFile?: string;
 }
 
+/**
+ * Read a comma list of origins, such as "http://tauri.localhost,
+ * tauri://localhost". Each entry has only a scheme, a host and an optional
+ * port. Throw when an entry has more than that.
+ */
+export function parseOriginList(raw: string | undefined): string[] {
+  const origins: string[] = [];
+  for (const entry of (raw ?? "").split(",")) {
+    const value = entry.trim();
+    if (value.length === 0) {
+      continue;
+    }
+    let url: URL | null = null;
+    try {
+      url = new URL(value);
+    } catch {
+      // The check below reports the entry.
+    }
+    if (!url || !url.host || (url.pathname !== "" && url.pathname !== "/") || url.search || url.hash || url.username) {
+      throw new Error(`Server config is not valid. CORS_ALLOWED_ORIGINS has an entry that is not an origin: ${value}`);
+    }
+    // `URL.origin` is "null" for a custom scheme such as "tauri:", so build the origin from its parts.
+    origins.push(`${url.protocol}//${url.host}`);
+  }
+  return origins;
+}
+
 /** Read and check the process environment. Throw a clear error on bad input. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.safeParse(env);
@@ -157,6 +200,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     turnTlsEnabled: data.TURN_TLS_ENABLED ?? false,
     turnTlsPort: data.TURN_TLS_PORT,
     webOrigin: data.WEB_ORIGIN,
+    corsAllowedOrigins: parseOriginList(data.CORS_ALLOWED_ORIGINS),
+    desktopUrlScheme: data.DESKTOP_URL_SCHEME,
     dataDir: data.DATA_DIR,
     smtp: {
       host: data.SMTP_HOST,

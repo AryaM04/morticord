@@ -34,10 +34,26 @@ import {
 const OAUTH_COOKIE_NAME = "oauth_flow";
 const OAUTH_COOKIE_TTL_SECONDS = 10 * 60;
 
+/** The app that started the sign-in. It decides where the callback sends the browser. */
+type OAuthClientApp = "web" | "desktop";
+
 interface OAuthCookiePayload {
   provider: OAuthProvider;
   state: string;
   codeVerifier?: string;
+  client?: OAuthClientApp;
+}
+
+/**
+ * The page that gets the one-time code (or an error) in its URL hash. The
+ * web app gets a page on its own origin. The desktop app gets a link with
+ * its own URL scheme, which the operating system gives to the app.
+ */
+export function oauthReturnUrl(
+  config: { webOrigin: string; desktopUrlScheme: string },
+  client: OAuthClientApp | undefined,
+): string {
+  return client === "desktop" ? `${config.desktopUrlScheme}://auth/callback` : `${config.webOrigin}/auth/callback`;
 }
 
 export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): Promise<void> {
@@ -126,6 +142,9 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
 
     const state = generateState();
     const cookiePayload: OAuthCookiePayload = { provider, state };
+    if ((request.query as { client?: string }).client === "desktop") {
+      cookiePayload.client = "desktop";
+    }
 
     let url: URL;
     if (provider === "google") {
@@ -149,9 +168,22 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
 
   app.get("/oauth/:provider/callback", async (request, reply) => {
     const provider = oauthProviderSchema.parse((request.params as { provider: string }).provider);
+
+    // Read the signed cookie first: it tells which app started the sign-in.
+    const rawCookie = request.cookies[OAUTH_COOKIE_NAME];
+    const unsigned = rawCookie ? request.unsignCookie(rawCookie) : null;
+    let cookiePayload: OAuthCookiePayload | null = null;
+    if (unsigned?.valid && unsigned.value) {
+      try {
+        cookiePayload = JSON.parse(unsigned.value) as OAuthCookiePayload;
+      } catch {
+        cookiePayload = null;
+      }
+    }
+    const returnUrl = oauthReturnUrl(deps.config, cookiePayload?.client);
     const errorRedirect = (code: string) => {
       reply.clearCookie(OAUTH_COOKIE_NAME, { path: "/api/v1/auth/oauth" });
-      return reply.redirect(`${deps.config.webOrigin}/auth/callback#error=${code}`, 302);
+      return reply.redirect(`${returnUrl}#error=${code}`, 302);
     };
 
     const client = oauthClients[provider];
@@ -160,23 +192,12 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
     }
 
     const query = request.query as { code?: string; state?: string };
-    const rawCookie = request.cookies[OAUTH_COOKIE_NAME];
     if (!query.code || !query.state || !rawCookie) {
       return errorRedirect("OAUTH_STATE_MISSING");
     }
-
-    const unsigned = request.unsignCookie(rawCookie);
-    if (!unsigned.valid || !unsigned.value) {
+    if (!cookiePayload) {
       return errorRedirect("OAUTH_STATE_INVALID");
     }
-
-    let cookiePayload: OAuthCookiePayload;
-    try {
-      cookiePayload = JSON.parse(unsigned.value) as OAuthCookiePayload;
-    } catch {
-      return errorRedirect("OAUTH_STATE_INVALID");
-    }
-
     if (cookiePayload.provider !== provider || cookiePayload.state !== query.state) {
       return errorRedirect("OAUTH_STATE_INVALID");
     }
@@ -203,7 +224,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
       const code = storeOAuthCode(result);
 
       reply.clearCookie(OAUTH_COOKIE_NAME, { path: "/api/v1/auth/oauth" });
-      return reply.redirect(`${deps.config.webOrigin}/auth/callback#code=${code}`, 302);
+      return reply.redirect(`${returnUrl}#code=${code}`, 302);
     } catch (error) {
       request.log.warn(error, "The OAuth callback failed.");
       const code = error instanceof AppError ? error.code : "OAUTH_FAILED";

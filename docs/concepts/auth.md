@@ -133,3 +133,19 @@ Two points are worth a closer look:
 The server links accounts by email only when the provider says the email
 address is verified. This stops one person from claiming somebody else's
 email address through an OAuth account that never confirmed it.
+
+### OAuth sign-in from the desktop app
+
+The desktop app cannot get the redirect in its own window, because the
+provider page must open in the system browser. The flow has two changes:
+
+1. The desktop app opens the system browser at
+   `/auth/oauth/:p/start?client=desktop`. The signed cookie records the
+   value `desktop`.
+2. After the callback, the server sends the browser to
+   `<DESKTOP_URL_SCHEME>://auth/callback#code=...` (default scheme:
+   `discordclone`). The operating system gives this link to the desktop
+   app, and the app exchanges the code as the web app does.
+
+An error goes to the same link, with `#error=<code>`. A sign-in from the
+web app keeps the old return address on `WEB_ORIGIN`.
