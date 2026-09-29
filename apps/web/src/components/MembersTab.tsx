@@ -136,8 +136,11 @@ export function MembersTab({ guildId }: { guildId: string }) {
   const [transferConfirmText, setTransferConfirmText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const sessionId = useRealtime((s) => s.sessionId);
 
+  // READY clears the member pages. Load them after each READY, never before the first one.
   useEffect(() => {
+    if (!sessionId) return;
     let cancelled = false;
     async function loadAll() {
       setLoading(true);
@@ -161,7 +164,7 @@ export function MembersTab({ guildId }: { guildId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [guildId]);
+  }, [guildId, sessionId]);
 
   const context = useMemo(() => {
     if (!guild || !selfMember || !roles || !selfUserId) return null;

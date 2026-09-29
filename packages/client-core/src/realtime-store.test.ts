@@ -49,10 +49,12 @@ function guildView(id: string, channels: ReturnType<typeof channel>[] = []) {
 function readyState(
   guilds: ReturnType<typeof guildView>[] = [],
   presences: Array<{ userId: string; status: string }> = [],
+  sessionId = "session-1",
+  previous: RealtimeState = createInitialRealtimeState(),
 ) {
-  return applyDispatch(createInitialRealtimeState(), {
+  return applyDispatch(previous, {
     t: "READY",
-    d: { user: { id: "self-1" }, guilds, presences },
+    d: { sessionId, user: { id: "self-1" }, guilds, presences },
   });
 }
 
@@ -68,6 +70,18 @@ describe("applyDispatch", () => {
     expect(state.rolesByGuild.g1).toHaveLength(1);
     expect(state.selfMemberByGuild.g1!.userId).toBe("self-1");
     expect(state.presences.u2).toBe("online");
+  });
+
+  it("records the session of each READY, and a new READY clears the member pages", () => {
+    // A view that loads member pages keys them on the session: a page that
+    // came before this READY is gone, and the view must load it again.
+    const first = readyState([guildView("g1")]);
+    expect(first.sessionId).toBe("session-1");
+    const withMembers: RealtimeState = { ...first, membersByGuild: { g1: { u2: member("g1", "u2") } } };
+
+    const second = readyState([guildView("g1")], [], "session-2", withMembers);
+    expect(second.sessionId).toBe("session-2");
+    expect(second.membersByGuild).toEqual({});
   });
 
   it("RESUMED is a no-op", () => {

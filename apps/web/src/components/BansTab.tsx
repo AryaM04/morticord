@@ -12,8 +12,11 @@ export function BansTab({ guildId }: { guildId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const sessionId = useRealtime((s) => s.sessionId);
 
+  // READY clears the ban list. Load it after each READY, never before the first one.
   useEffect(() => {
+    if (!sessionId) return;
     let cancelled = false;
     setLoading(true);
     listBans(session.apiClient, guildId)
@@ -31,7 +34,7 @@ export function BansTab({ guildId }: { guildId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [guildId]);
+  }, [guildId, sessionId]);
 
   async function handleUnban(userId: string) {
     setBusyUserId(userId);

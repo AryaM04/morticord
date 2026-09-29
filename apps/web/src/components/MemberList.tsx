@@ -123,8 +123,11 @@ export function MemberList({ guildId }: { guildId: string }) {
   const loadingRef = useRef(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
+  const sessionId = useRealtime((s) => s.sessionId);
+
   const loadMore = useCallback(async () => {
-    if (loadingRef.current || done) return;
+    // READY clears the member pages. A page that arrives before READY is lost, so wait for a session.
+    if (!sessionId || loadingRef.current || done) return;
     loadingRef.current = true;
     try {
       const page = await listGuildMembers(session.apiClient, guildId, {
@@ -142,14 +145,15 @@ export function MemberList({ guildId }: { guildId: string }) {
     } finally {
       loadingRef.current = false;
     }
-  }, [guildId, cursor, done]);
+  }, [guildId, sessionId, cursor, done]);
 
-  // Reset paging state and load the first page whenever the guild changes.
+  // Reset paging state and load the first page again when the guild
+  // changes, or when a new READY clears the member pages.
   useEffect(() => {
     setCursor(undefined);
     setDone(false);
     loadingRef.current = false;
-  }, [guildId]);
+  }, [guildId, sessionId]);
 
   // Load the first page once the guild-change effect above has reset the
   // cursor. `loadMore` itself is stable enough for this: it always reads
