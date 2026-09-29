@@ -4,6 +4,7 @@
 // including each channel's permission overwrites.
 import {
   computePermissions,
+  DM_PERMISSIONS,
   Permission,
   type GuildMemberJson,
   type OverwriteInput,
@@ -58,6 +59,10 @@ export function selfGuildPermissions(state: RealtimeState, guildId: string): big
 
 /** The caller's permissions in one channel, including its overwrites. */
 export function selfChannelPermissions(state: RealtimeState, channelId: string): bigint {
+  // A DM has no guild, no roles and no overwrites. Every recipient has the same permissions.
+  if (channelId in state.privateChannels) {
+    return DM_PERMISSIONS;
+  }
   const channel = state.channels[channelId];
   if (!channel) {
     return 0n;

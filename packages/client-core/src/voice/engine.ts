@@ -169,7 +169,8 @@ export interface VoiceDebugPeerStats {
 }
 
 export interface VoiceEngine {
-  join(guildId: string, channelId: string): Promise<void>;
+  /** Join a voice channel. The guild id is null for the call of a DM or a group DM. */
+  join(guildId: string | null, channelId: string): Promise<void>;
   leave(): Promise<void>;
   setMute(muted: boolean): void;
   setDeafen(deafened: boolean): void;
@@ -1282,7 +1283,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
     emitPeers();
   }
 
-  async function join(guildId: string, channelId: string): Promise<void> {
+  async function join(guildId: string | null, channelId: string): Promise<void> {
     if (currentChannelId !== null) {
       // Switching channels: clean up the old call locally. The server
       // replaces our voice state on the next VOICE_JOIN by itself (see

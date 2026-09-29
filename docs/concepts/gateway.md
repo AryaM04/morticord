@@ -31,7 +31,9 @@ it is one JSON object with this shape:
 4. On success, the server sends `READY`: the session ID, the caller's own
    user, every guild the caller is in (with the roles and the channels
    the caller can view), and the presence of online users who share a
-   guild with the caller.
+   guild with the caller or are friends of the caller. It also has the
+   friends and blocks, and the DMs and DM calls of the caller (see
+   `docs/concepts/dms-and-friends.md`).
 
 ## Sequence numbers and dispatch
 
@@ -70,11 +72,15 @@ come and gone.
 
 The server never guesses who should get an event: it sends a dispatch
 only after the change it describes is already committed to the database.
-One in-process hub (`GatewayService`) keeps two indexes in memory, so it
+One in-process hub (`GatewayService`) keeps three indexes in memory, so it
 never needs a database query to find *who* to send to:
 
 - `userId -> sessions`: a user's live connections.
 - `guildId -> userIds`: who is a member of a guild.
+- `userId -> userIds`: the accepted friends of a user, for presence.
+
+A DM has no index. Its recipients come from one query on
+`channel_recipients`.
 
 For most events (a guild is renamed, a member joins) the hub sends to
 every member of a guild, or to one user, straight from these indexes.
@@ -89,7 +95,8 @@ Presence is memory-only; it is not stored in the database. A user is
 a client choose `idle`, `dnd`, or `invisible`; invisible looks like
 `offline` to everyone else. The server tells other users about a
 presence change only when the status other people would see actually
-changes, and only to users who share a guild with that person.
+changes, and only to users who share a guild with that person or are
+friends of that person.
 
 ## Close codes
 

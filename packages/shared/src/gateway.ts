@@ -107,11 +107,11 @@ export const readyPayloadSchema = z.object({
   /** The caller's last-read event id per channel, for unread markers. */
   readStates: z.array(readStateSchema),
   /** Every friend, pending request and block of the caller. */
-  relationships: z.array(relationshipSchema),
+  relationships: z.array(relationshipSchema).default([]),
   /** Every DM and group DM the caller is in. */
-  privateChannels: z.array(dmChannelSchema),
+  privateChannels: z.array(dmChannelSchema).default([]),
   /** The current voice state of every peer in a DM call of the caller. */
-  privateVoiceStates: z.array(voiceStateSchema),
+  privateVoiceStates: z.array(voiceStateSchema).default([]),
 });
 
 /** Sent by the server after a successful RESUME, once missed dispatches replay. */
