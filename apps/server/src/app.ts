@@ -2,6 +2,7 @@
 // Tests call buildApp with test dependencies (a test database, a fake mailer).
 import Fastify, { type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
+import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
 import { sql } from "drizzle-orm";
@@ -76,6 +77,17 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
   });
 
   await app.register(cookie, { secret: deps.config.jwtSecret });
+  // Other origins, such as the desktop app, get CORS headers. Without an
+  // allow-list the server sends none, so only the web app origin can call it.
+  if (deps.config.corsAllowedOrigins.length > 0) {
+    await app.register(cors, {
+      origin: deps.config.corsAllowedOrigins,
+      credentials: false,
+      methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"],
+      allowedHeaders: ["Authorization", "Content-Type"],
+      maxAge: 600,
+    });
+  }
   if (deps.rateLimit !== false) {
     await app.register(rateLimit, { global: false });
   }

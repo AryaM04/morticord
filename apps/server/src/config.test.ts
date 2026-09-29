@@ -48,6 +48,35 @@ describe("loadConfig", () => {
     expect(config.publicApiUrl).toBe("http://localhost:5173");
   });
 
+  it("allows no other origins and uses the default desktop scheme when they are not set", () => {
+    const config = loadConfig(validEnv);
+    expect(config.corsAllowedOrigins).toEqual([]);
+    expect(config.desktopUrlScheme).toBe("discordclone");
+  });
+
+  it("reads a comma list of origins, with a custom scheme", () => {
+    const config = loadConfig({
+      ...validEnv,
+      CORS_ALLOWED_ORIGINS: " http://tauri.localhost, tauri://localhost ,https://chat.example.com:443/,",
+    });
+    expect(config.corsAllowedOrigins).toEqual([
+      "http://tauri.localhost",
+      "tauri://localhost",
+      "https://chat.example.com",
+    ]);
+  });
+
+  it("throws when an allowed origin has a path", () => {
+    expect(() => loadConfig({ ...validEnv, CORS_ALLOWED_ORIGINS: "https://example.com/app" })).toThrow(
+      /CORS_ALLOWED_ORIGINS/,
+    );
+    expect(() => loadConfig({ ...validEnv, CORS_ALLOWED_ORIGINS: "not a url" })).toThrow(/CORS_ALLOWED_ORIGINS/);
+  });
+
+  it("throws when the desktop scheme is not a plain scheme", () => {
+    expect(() => loadConfig({ ...validEnv, DESKTOP_URL_SCHEME: "bad scheme://" })).toThrow(/DESKTOP_URL_SCHEME/);
+  });
+
   it("leaves OAuth providers off when their credentials are not set", () => {
     const config = loadConfig(validEnv);
     expect(config.oauth.github).toBeUndefined();

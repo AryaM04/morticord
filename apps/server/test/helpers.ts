@@ -17,6 +17,8 @@ export function buildTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     turnTlsEnabled: false,
     turnTlsPort: 5349,
     webOrigin: "http://localhost:5173",
+    corsAllowedOrigins: [],
+    desktopUrlScheme: "discordclone",
     dataDir: "./data-test",
     smtp: { host: "localhost", port: 1025, from: "Test <no-reply@example.com>" },
     oauth: {},

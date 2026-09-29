@@ -18,11 +18,12 @@ import {
   type DispatchEventName,
   type ReadyPayload,
 } from "@discord-clone/shared";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { AppConfig } from "../../config.js";
 import { AppError } from "../../errors.js";
 import type { DbClient } from "../../db/client.js";
 import { users } from "../../db/schema.js";
+import { createOriginCheck } from "../../origins.js";
 import { verifyAccessToken } from "../auth/tokens.js";
 import { buildPrivateReadyData } from "../dms/service.js";
 import { listRelationships } from "../friends/service.js";
@@ -117,7 +118,18 @@ export function registerGatewayRoute(
   const { db, config, gateway, voice, ringer, delivery } = deps;
   const voiceOpsDeps = { db, gateway, voice, ringer };
 
-  app.get("/gateway", { websocket: true }, (rawSocket) => {
+  const isAllowedOrigin = createOriginCheck(config);
+
+  // A web page on any site can open a WebSocket to this server, and the
+  // browser does not stop it (no CORS on WebSockets). So the upgrade checks
+  // the Origin header itself, and refuses other sites before the upgrade.
+  const checkOrigin = async (request: FastifyRequest) => {
+    if (!isAllowedOrigin(request.headers.origin, request.headers.host)) {
+      throw new AppError(403, "ORIGIN_NOT_ALLOWED", "This origin cannot open the gateway.");
+    }
+  };
+
+  app.get("/gateway", { websocket: true, preValidation: checkOrigin }, (rawSocket) => {
     const socket = rawSocket as unknown as GatewaySocket & {
       on(event: "message", listener: (data: Buffer | string) => void): void;
       on(event: "close", listener: (code: number, reason: Buffer) => void): void;
