@@ -39,6 +39,18 @@ describe("decryptedPayloadSchema", () => {
     expect(decryptedPayloadSchema.safeParse({ ...message, attachments: [{ ...attachment, key: "short" }] }).success).toBe(false);
   });
 
+  it("keeps a valid link embed, drops an embed it cannot read, and rejects more than one embed", () => {
+    const link = { type: "link", url: "https://example.com/a", title: "A", description: "D", siteName: "Example" };
+    const message = { type: "message", body: "see https://example.com/a", mentions: [], attachments: [] };
+    const parsed = decryptedPayloadSchema.parse({ ...message, embeds: [link] });
+    expect(parsed.type === "message" && parsed.embeds).toEqual([link]);
+    const unknown = decryptedPayloadSchema.parse({ ...message, embeds: [{ type: "video", url: "https://example.com" }] });
+    expect(unknown.type === "message" && unknown.embeds).toEqual([]);
+    const script = decryptedPayloadSchema.parse({ ...message, embeds: [{ ...link, url: "javascript:alert(1)" }] });
+    expect(script.type === "message" && script.embeds).toEqual([]);
+    expect(decryptedPayloadSchema.safeParse({ ...message, embeds: [link, link] }).success).toBe(false);
+  });
+
   it("rejects a reaction key longer than 32 characters", () => {
     const result = decryptedPayloadSchema.safeParse({ type: "reaction", key: "x".repeat(33) });
     expect(result.success).toBe(false);

@@ -19,6 +19,7 @@ import { registerDmRoutes } from "./modules/dms/routes.js";
 import { registerFriendRoutes } from "./modules/friends/routes.js";
 import { registerGuildRoutes } from "./modules/guilds/routes.js";
 import { registerKeyRoutes } from "./modules/keys/routes.js";
+import { registerLinkPreviewRoutes, type LinkPreviewRouteOptions } from "./modules/link-preview/routes.js";
 import { registerMessageRoutes } from "./modules/messages/routes.js";
 import { registerSettingsRoutes } from "./modules/settings/routes.js";
 import { registerToDeviceRoutes } from "./modules/to-device/routes.js";
@@ -50,12 +51,14 @@ export interface AppDeps {
   ringer?: CallRinger;
   /** The most queued to-device messages for each device. Tests can lower it. */
   toDeviceQueueLimit?: number;
+  /** Replaces parts of the link preview route. Tests use it. */
+  linkPreview?: LinkPreviewRouteOptions;
 }
 
 const IMAGE_CONTENT_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: rawDeps.config.logFile ? { file: rawDeps.config.logFile } : true });
   const gateway = rawDeps.gateway ?? new GatewayService();
   await gateway.primeFromDatabase(rawDeps.db);
   const voice = rawDeps.voice ?? new VoiceService(rawDeps.voiceGraceMs);
@@ -101,6 +104,9 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
   await app.register(async (instance) => registerVoiceRoutes(instance, deps), { prefix: "/api/v1" });
   await app.register(async (instance) => registerKeyRoutes(instance, deps), { prefix: "/api/v1" });
   await app.register(async (instance) => registerAttachmentRoutes(instance, deps), { prefix: "/api/v1" });
+  await app.register(async (instance) => registerLinkPreviewRoutes(instance, deps, deps.linkPreview), {
+    prefix: "/api/v1",
+  });
   await app.register(
     async (instance) =>
       registerToDeviceRoutes(instance, { ...deps, delivery, toDeviceQueueLimit: deps.toDeviceQueueLimit ?? TO_DEVICE_QUEUE_LIMIT }),

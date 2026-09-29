@@ -31,6 +31,7 @@ export function buildTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     allowPlaintextEvents: false,
     maxAttachmentBytes: 25 * 1024 * 1024,
     attachmentQuotaBytes: 2 * 1024 * 1024 * 1024,
+    linkPreviewTestAllowLoopback: false,
     ...overrides,
   };
 }

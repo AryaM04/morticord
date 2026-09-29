@@ -66,6 +66,18 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value === "true"),
+
+  // For tests only. Set to "true" to let the link preview route fetch pages
+  // from loopback addresses (127.0.0.0/8, ::1) on any port. Every other
+  // private address stays blocked. Never set it on a real server.
+  LINK_PREVIEW_TEST_ALLOW_LOOPBACK: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+
+  // Write the server log to this file instead of standard output. Empty or
+  // unset: standard output.
+  LOG_FILE: z.string().optional(),
 });
 
 export interface AppConfig {
@@ -107,6 +119,10 @@ export interface AppConfig {
   maxAttachmentBytes: number;
   /** The total size of the attachments of one user, in bytes. */
   attachmentQuotaBytes: number;
+  /** For tests only: the link preview route can fetch from loopback addresses. */
+  linkPreviewTestAllowLoopback: boolean;
+  /** The server log goes to this file, or to standard output when it is undefined. */
+  logFile?: string;
 }
 
 /** Read and check the process environment. Throw a clear error on bad input. */
@@ -161,5 +177,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     allowPlaintextEvents: data.ALLOW_PLAINTEXT_EVENTS,
     maxAttachmentBytes: data.MAX_ATTACHMENT_BYTES,
     attachmentQuotaBytes: data.ATTACHMENT_QUOTA_BYTES,
+    linkPreviewTestAllowLoopback: data.LINK_PREVIEW_TEST_ALLOW_LOOPBACK,
+    logFile: data.LOG_FILE ? data.LOG_FILE : undefined,
   };
 }
