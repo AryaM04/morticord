@@ -20,6 +20,8 @@ import { messagesStore } from "../lib/messages.js";
 import { selfChannelPermissions } from "@discord-clone/client-core";
 import { displayNameOf } from "../lib/members.js";
 import { voiceStore } from "../lib/voice.js";
+import { jumpStore } from "../lib/jump.js";
+import { SearchBox } from "./SearchBox.js";
 
 export function ChatPane({ channelId }: { channelId: string | null }) {
   const guildChannel = useRealtime((s) => (channelId ? s.channels[channelId] : undefined));
@@ -50,7 +52,9 @@ export function ChatPane({ channelId }: { channelId: string | null }) {
   useEffect(() => {
     setReplyTarget(null);
     setEditTarget(null);
-    if (channelId && channel && isTextLike) {
+    // A jump to a message of this channel loads its own page (see MessageList).
+    const jumping = jumpStore.getState().request?.channelId === channelId;
+    if (channelId && channel && isTextLike && !jumping) {
       // A fresh READY (see `applyDispatch` in the store) already seeds
       // this channel's read marker before this effect runs, so read it
       // from the store instead of passing `null`: passing `null` would
@@ -125,9 +129,14 @@ export function ChatPane({ channelId }: { channelId: string | null }) {
     <div className="flex min-w-0 flex-1 flex-col" style={{ backgroundColor: "var(--color-bg-main)" }}>
       <ConnectionBanner />
       {dmChannel ? (
-        <DmHeader channel={dmChannel} />
+        <div className="relative flex items-center">
+          <div className="min-w-0 flex-1">
+            <DmHeader channel={dmChannel} />
+          </div>
+          <SearchBox guildId={null} />
+        </div>
       ) : (
-        <div className="flex items-center gap-2 border-b px-4 py-3" style={{ borderColor: "var(--color-border)" }}>
+        <div className="relative flex items-center gap-2 border-b px-4 py-3" style={{ borderColor: "var(--color-border)" }}>
           <span className="font-semibold">
             {channel.type === "voice" ? "\u{1F50A}" : "#"} {channel.name}
           </span>
@@ -136,6 +145,7 @@ export function ChatPane({ channelId }: { channelId: string | null }) {
               {guildChannel.topic}
             </span>
           )}
+          <SearchBox guildId={guildId} />
         </div>
       )}
 

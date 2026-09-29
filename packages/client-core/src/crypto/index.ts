@@ -160,9 +160,41 @@ export interface CryptoHandle {
   readonly security: SecurityApi;
   /** SAS verification with a different device. */
   readonly verification: VerificationApi;
+  /**
+   * The keys of the local search index of this device: AES-GCM for the
+   * stored message text, and HMAC-SHA-256 for the stored words. Both come
+   * from the pickle key (HKDF), and page code cannot export them.
+   */
+  localIndexKeys(): Promise<LocalIndexKeys>;
   /** Wait until every received message is processed. For tests. */
   whenIdle(): Promise<void>;
   stop(): void;
+}
+
+export interface LocalIndexKeys {
+  encryptionKey: CryptoKey;
+  tokenKey: CryptoKey;
+}
+
+/** Derive the two keys of the local search index from the pickle key. */
+async function deriveLocalIndexKeys(pickleKey: Uint8Array): Promise<LocalIndexKeys> {
+  const base = await crypto.subtle.importKey("raw", pickleKey as Uint8Array<ArrayBuffer>, "HKDF", false, ["deriveKey"]);
+  const params = (info: string) => ({
+    name: "HKDF",
+    hash: "SHA-256",
+    salt: new Uint8Array(32),
+    info: new TextEncoder().encode(info),
+  });
+  const [encryptionKey, tokenKey] = await Promise.all([
+    crypto.subtle.deriveKey(params("discord-clone local search text"), base, { name: "AES-GCM", length: 256 }, false, [
+      "encrypt",
+      "decrypt",
+    ]),
+    crypto.subtle.deriveKey(params("discord-clone local search words"), base, { name: "HMAC", hash: "SHA-256" }, false, [
+      "sign",
+    ]),
+  ]);
+  return { encryptionKey, tokenKey };
 }
 
 /** Get the pickle key of this device, or make one. It is kept only in the platform secure store. */
@@ -478,6 +510,7 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
     },
   };
 
+  let indexKeys: Promise<LocalIndexKeys> | null = null;
   return {
     userId,
     deviceId,
@@ -521,6 +554,7 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
       cancel: (txnId) => verification.cancel(txnId),
       dismiss: (txnId) => verification.dismiss(txnId),
     },
+    localIndexKeys: () => (indexKeys ??= deriveLocalIndexKeys(pickleKey)),
     async whenIdle() {
       for (let round = 0; round < 3; round += 1) {
         while (draining) {

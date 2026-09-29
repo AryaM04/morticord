@@ -10,6 +10,7 @@ Available notes:
 - `olm-megolm.md`: the end-to-end encryption design used by this app.
 - `attachments.md`: encrypted files in a message.
 - `link-previews.md`: link previews that the sender makes, and the SSRF rules of the server route.
+- `search.md`: the local, encrypted search index of each device.
 
 Planned notes:
 

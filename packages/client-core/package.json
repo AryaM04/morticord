@@ -17,6 +17,10 @@
     "./crypto": {
       "types": "./src/crypto/index.ts",
       "default": "./src/crypto/index.ts"
+    },
+    "./search": {
+      "types": "./src/search/index.ts",
+      "default": "./src/search/index.ts"
     }
   },
   "scripts": {

@@ -5,7 +5,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { aggregateEvent, type AggregatedMessage } from "@discord-clone/client-core";
+import { useStore } from "zustand";
 import { useMessages } from "../lib/useMessages.js";
+import { jumpStore, requestJump } from "../lib/jump.js";
 import { useRealtime } from "../lib/useRealtime.js";
 import { messagesStore } from "../lib/messages.js";
 import { displayNameOf, memberUser } from "../lib/members.js";
@@ -43,6 +45,8 @@ export function MessageList({
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  const jumpRequest = useStore(jumpStore, (s) => s.request);
+  const [jumpView, setJumpView] = useState<{ eventId: string; nonce: number } | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Whether this channel has shown at least one row since it was opened.
   // Virtuoso is keyed on this (see below): mounting it fresh, already
@@ -129,7 +133,37 @@ export function MessageList({
     setFirstItemIndex(FIRST_ITEM_INDEX_START);
     oldestEventIdRef.current = null;
     rowCountRef.current = 0;
+    setJumpView(null);
   }, [channelId]);
+
+  // A jump request for this channel (a search result or a reply preview):
+  // load the page around the message, then mount the list again at it.
+  useEffect(() => {
+    if (!jumpRequest || jumpRequest.channelId !== channelId) {
+      return;
+    }
+    let active = true;
+    void messagesStore
+      .getState()
+      .jumpTo(channelId, jumpRequest.eventId)
+      .then(() => {
+        if (!active) return;
+        setFirstItemIndex(FIRST_ITEM_INDEX_START);
+        oldestEventIdRef.current = null;
+        rowCountRef.current = 0;
+        setJumpView({ eventId: jumpRequest.eventId, nonce: jumpRequest.nonce });
+        highlightFor2s(jumpRequest.eventId);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (jumpStore.getState().request === jumpRequest) {
+          jumpStore.setState({ request: null });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [jumpRequest, channelId]);
 
   useEffect(() => {
     if (rows.length > 0) {
@@ -156,6 +190,7 @@ export function MessageList({
   if (!channel) {
     return null;
   }
+  const jumpIndex = jumpView ? rows.findIndex((row) => row.key === jumpView.eventId) : -1;
 
   function replyPreviewFor(message: AggregatedMessage): { authorName: string; text: string } | null {
     if (message.relType !== "reply" || !message.relatesToId) {
@@ -173,17 +208,20 @@ export function MessageList({
   return (
     <div className="relative flex-1">
       <Virtuoso
-        key={`${channelId}:${hasLoaded}`}
+        key={`${channelId}:${hasLoaded}:${jumpView?.nonce ?? 0}`}
         ref={virtuosoRef}
         style={{ height: "100%" }}
         data={rows}
+        // After a jump, mount at the message that the jump shows.
         // Start this fresh mount already scrolled to the newest message.
         // Without it, Virtuoso mounts scrolled to row 0 (the oldest
         // loaded message): with more history than fits on screen, that
         // reads as "at the top", so `startReached` fires immediately and
         // races older pages against `followOutput`'s scroll to the
         // bottom, leaving the view stranded somewhere in the middle.
-        initialTopMostItemIndex={Math.max(0, rows.length - 1)}
+        initialTopMostItemIndex={
+          jumpView && jumpIndex >= 0 ? { index: jumpIndex, align: "center" } : Math.max(0, rows.length - 1)
+        }
         firstItemIndex={firstItemIndex}
         followOutput={atBottom ? "smooth" : false}
         atBottomStateChange={setAtBottom}
@@ -225,7 +263,7 @@ export function MessageList({
               onReplyClick={() => {
                 if (message.relatesToId) {
                   const target = message.relatesToId;
-                  void messagesStore.getState().jumpTo(channelId, target).then(() => highlightFor2s(target));
+                  requestJump(channelId, target);
                 }
               }}
               onReply={() => onReply(message)}
