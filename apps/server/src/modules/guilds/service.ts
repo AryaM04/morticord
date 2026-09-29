@@ -45,10 +45,24 @@ export interface GuildsDeps {
   voice?: VoiceService;
 }
 
+const memberSelectColumns = {
+  guildId: guildMembers.guildId,
+  userId: guildMembers.userId,
+  nickname: guildMembers.nickname,
+  joinedAt: guildMembers.joinedAt,
+  username: users.username,
+  displayName: users.displayName,
+  avatarKey: users.avatarKey,
+  statusText: users.statusText,
+  userCreatedAt: users.createdAt,
+};
+
+/** Load the caller's own member row with the user profile, as a member list page does. */
 async function loadOwnMemberRow(db: DbClient, guildId: bigint, userId: bigint): Promise<MemberRow> {
   const rows = await db
-    .select()
+    .select(memberSelectColumns)
     .from(guildMembers)
+    .innerJoin(users, eq(users.id, guildMembers.userId))
     .where(and(eq(guildMembers.guildId, guildId), eq(guildMembers.userId, userId)))
     .limit(1);
   const row = rows[0];
@@ -255,18 +269,6 @@ export interface ListMembersInput {
 export interface ListedMember extends MemberRow {
   roleIds: bigint[];
 }
-
-const memberSelectColumns = {
-  guildId: guildMembers.guildId,
-  userId: guildMembers.userId,
-  nickname: guildMembers.nickname,
-  joinedAt: guildMembers.joinedAt,
-  username: users.username,
-  displayName: users.displayName,
-  avatarKey: users.avatarKey,
-  statusText: users.statusText,
-  userCreatedAt: users.createdAt,
-};
 
 /** Attach each row's role ids, loaded in one query for the whole page. */
 async function attachRoleIds(db: DbClient, guildId: bigint, rows: MemberRow[]): Promise<ListedMember[]> {

@@ -219,10 +219,19 @@ describeWithDb("gateway", () => {
     await nextMessage(ws, (env) => env.op === GatewayOpcode.HELLO);
     ws.send(JSON.stringify({ op: GatewayOpcode.IDENTIFY, d: { accessToken: user.accessToken, deviceId: user.deviceId } }));
     const ready = await nextMessage(ws, (env) => env.t === "READY");
-    const payload = ready.d as { sessionId: string; user: { id: string }; guilds: Array<{ id: string }> };
+    const payload = ready.d as {
+      sessionId: string;
+      user: { id: string; username: string };
+      guilds: Array<{ id: string; member: { userId: string; user?: { id: string; username: string } } }>;
+    };
     expect(payload.sessionId).toBeTruthy();
     expect(payload.user.id).toBe(user.userId);
     expect(payload.guilds.map((g) => g.id)).toContain(guild.id);
+    // The own member row carries the user profile, as a member list page does.
+    const readyGuild = payload.guilds.find((g) => g.id === guild.id);
+    expect(readyGuild?.member.userId).toBe(user.userId);
+    expect(readyGuild?.member.user?.id).toBe(user.userId);
+    expect(readyGuild?.member.user?.username).toBe(payload.user.username);
   });
 
   it("closes with 4003 when IDENTIFY does not arrive in time", async () => {
