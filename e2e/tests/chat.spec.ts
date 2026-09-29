@@ -308,8 +308,10 @@ test.describe("chat", () => {
 
     // 10. Regression for Task 1: sign out, sign back in, the channel
     // shows its messages again (it must not render empty on first paint).
-    // The new sign-in is a new device without the old Megolm keys: it asks
-    // for them, and the device of B (a reader of the channel) answers.
+    // The new sign-in is a new device that the owner did not verify: no
+    // device gives it the old Megolm keys (docs/concepts/olm-megolm.md
+    // section 4). The rows show the waiting text, and a banner tells the
+    // user how to verify the device.
     await pageA.goto(generalUrl);
     await pageA.getByRole("button", { name: "Open account settings" }).click();
     await pageA.getByRole("button", { name: "Sign out" }).click();
@@ -321,7 +323,10 @@ test.describe("chat", () => {
     await expect(pageA).toHaveURL(/\/app(\/|$)/);
 
     await pageA.goto(generalUrl);
-    await expect(messageRow(pageA, "Hello from A, edited", "Reply from B")).toBeVisible({ timeout: 10_000 });
+    await expect(
+      pageA.locator("[data-message-id]", { hasText: "This message cannot be read yet. The app asks for the key." }).first(),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(pageA.getByText("Verify this device to read old messages.", { exact: false })).toBeVisible();
 
     await contextA.close();
     await contextB.close();
