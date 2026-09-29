@@ -1145,3 +1145,90 @@ describe("adaptive quality applier", () => {
     expect((lastParams.encodings![0] as RTCRtpEncodingParameters).scaleResolutionDownBy).toBeCloseTo(720 / 540);
   });
 });
+
+// ---- the mic gate and the order of track events ---------------------------------
+
+/** A `getUserMedia` whose calls resolve only when the test says so, in any order. */
+function deferredGetUserMedia(): {
+  getUserMedia: VoiceEngineDeps["getUserMedia"];
+  pending: Array<{ stream: FakeMediaStream; resolve: () => void }>;
+} {
+  const pending: Array<{ stream: FakeMediaStream; resolve: () => void }> = [];
+  const getUserMedia = () =>
+    new Promise<MediaStream>((resolve) => {
+      const stream = new FakeMediaStream([new FakeTrack("audio")]);
+      pending.push({ stream, resolve: () => resolve(stream as unknown as MediaStream) });
+    });
+  return { getUserMedia, pending };
+}
+
+describe("the mic gate", () => {
+  it("applies a mute set before join to the new track, and sends it with VOICE_JOIN only", async () => {
+    // Push to talk mutes before the join, so the mic is never open while
+    // the call connects. A VOICE_STATE before VOICE_JOIN is not valid.
+    const { deps, streams } = makeDeps();
+    const engine = createVoiceEngine(deps);
+    engine.setMute(true);
+    expect(deps.sendVoiceState).not.toHaveBeenCalled();
+
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+
+    expect(deps.sendVoiceJoin).toHaveBeenCalledWith("channel-1", true, false);
+    expect(streams[0]!.getAudioTracks()[0]!.enabled).toBe(false);
+    expect(engine.isLocalTrackEnabled()).toBe(false);
+  });
+
+  it("stops the new track and does not join when leave() runs while the mic is requested", async () => {
+    const gum = deferredGetUserMedia();
+    const { deps } = makeDeps({ getUserMedia: gum.getUserMedia });
+    const engine = createVoiceEngine(deps);
+
+    const joinPromise = engine.join("guild-1", "channel-1");
+    await vi.waitFor(() => expect(gum.pending).toHaveLength(1));
+    await engine.leave();
+    gum.pending[0]!.resolve();
+    await joinPromise;
+
+    expect(gum.pending[0]!.stream.getAudioTracks()[0]!.stopped).toBe(true);
+    expect(deps.sendVoiceJoin).not.toHaveBeenCalled();
+    expect(engine.channelId).toBeNull();
+    expect(engine.isLocalTrackEnabled()).toBeNull();
+  });
+
+  it("keeps the newest input device when two device changes finish out of order", async () => {
+    const { deps, streams } = makeDeps();
+    const engine = createVoiceEngine(deps);
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+    engine.setMute(true);
+
+    const gum = deferredGetUserMedia();
+    deps.getUserMedia = gum.getUserMedia;
+    engine.setInputDevice("mic-old");
+    engine.setInputDevice("mic-new");
+    await vi.waitFor(() => expect(gum.pending).toHaveLength(2));
+    gum.pending[1]!.resolve();
+    await vi.waitFor(() => expect(streams[0]!.getAudioTracks()[0]!.stopped).toBe(true));
+    gum.pending[0]!.resolve();
+    await vi.waitFor(() => expect(gum.pending[0]!.stream.getAudioTracks()[0]!.stopped).toBe(true));
+
+    const newest = gum.pending[1]!.stream.getAudioTracks()[0]!;
+    expect(newest.stopped).toBe(false);
+    expect(newest.enabled).toBe(false); // The mute (the push-to-talk gate) holds on the new track.
+    expect(engine.isLocalTrackEnabled()).toBe(false);
+  });
+
+  it("stops a device change track that arrives after leave()", async () => {
+    const { deps } = makeDeps();
+    const engine = createVoiceEngine(deps);
+    await joinAndConfirm(engine, deps, "guild-1", "channel-1");
+
+    const gum = deferredGetUserMedia();
+    deps.getUserMedia = gum.getUserMedia;
+    engine.setInputDevice("mic-2");
+    await vi.waitFor(() => expect(gum.pending).toHaveLength(1));
+    await engine.leave();
+    gum.pending[0]!.resolve();
+    await vi.waitFor(() => expect(gum.pending[0]!.stream.getAudioTracks()[0]!.stopped).toBe(true));
+    expect(engine.isLocalTrackEnabled()).toBeNull();
+  });
+});
