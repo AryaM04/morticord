@@ -1,7 +1,7 @@
 // Link previews on the sender side: find the first link of a message, and
 // ask the platform for its preview before the message is encrypted. The
 // web platform asks our own server (browsers block other sites). A
-// desktop platform (M7) fetches the page itself. A receiver never fetches
+// desktop platform fetches the page itself. A receiver never fetches
 // the URL. See docs/concepts/link-previews.md.
 import {
   decodeBase64Url,

@@ -36,7 +36,7 @@ The user setting "Show link previews for my messages" (a synced setting,
 | Client  | Fetch                                                     |
 | ------- | --------------------------------------------------------- |
 | Web     | `POST /api/v1/link-preview` on our own server             |
-| Desktop | Native fetch in the shell (M7), through the same `Platform` hook |
+| Desktop | The Rust command `link_preview_fetch` of the desktop app, with the same address rules, through the same `Platform` hook |
 
 A browser page cannot read another site (CORS). Thus the web client asks
 its own home server. **Trade-off:** the server sees the URL of each

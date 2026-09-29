@@ -79,6 +79,37 @@ jobs:
       - name: Test
         run: cargo test --locked
 
+  # Separate job: the Rust tests of the desktop app (address checks of the
+  # link preview fetch, server address, deep links). It runs on Windows,
+  # the main desktop target, so it needs no Linux webview packages.
+  desktop:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop-tauri/src-tauri
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v5
+
+      - name: Cache the Cargo registry and the build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop-tauri/src-tauri -> target
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Add a stub web build
+        # The Tauri build step needs the web build folder. The tests do not
+        # use its content, so a stub page is enough.
+        run: |
+          mkdir -p ../../web/dist
+          echo "<!doctype html><title>stub</title>" > ../../web/dist/index.html
+
+      - name: Test
+        run: cargo test --locked
+
   # Separate job: browser tests that need a real TURN server. It does
   # not run in the "build" job above, since it needs Docker Compose and
   # a real Chromium engine, and it is slower than a unit test run.

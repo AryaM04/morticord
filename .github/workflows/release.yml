@@ -1,0 +1,103 @@
+name: Release
+
+# Build the desktop app for Windows and macOS, and put the installers in a
+# draft GitHub release. Push a tag such as "v0.1.0" to start it. The tag
+# must match "version" in apps/desktop-tauri/src-tauri/tauri.conf.json.
+#
+# Updater signatures need the secret TAURI_SIGNING_PRIVATE_KEY (and
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD when the key has a password). Without
+# the key, the release has installers but no updater files and no
+# latest.json. See docs/concepts/desktop-shells.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag of the draft release, such as v0.1.0-test.1"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: ""
+          - os: macos-latest
+            # One app for Apple silicon and Intel Macs.
+            args: "--target universal-apple-darwin"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v5
+
+      - name: Read the Node version from .nvmrc
+        id: node-version
+        shell: bash
+        run: echo "version=$(cat .nvmrc)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ steps.node-version.outputs.version }}
+          cache: pnpm
+
+      - name: Install the pinned Rust toolchain
+        # rustup reads apps/desktop-tauri/rust-toolchain.toml.
+        working-directory: apps/desktop-tauri
+        shell: bash
+        run: |
+          rustup toolchain install
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          fi
+
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop-tauri/src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Choose the updater signing
+        id: signing
+        shell: bash
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$SIGNING_KEY" ]; then
+            echo "args=--config src-tauri/tauri.updater.conf.json" >> "$GITHUB_OUTPUT"
+            echo "updater=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=No updater signature::The secret TAURI_SIGNING_PRIVATE_KEY is not set. This release has no updater files and no latest.json."
+            echo "args=" >> "$GITHUB_OUTPUT"
+            echo "updater=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the app and upload it to a draft release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop-tauri
+          tauriScript: pnpm exec tauri
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: Discord Clone ${{ github.event.inputs.tag || github.ref_name }}
+          releaseBody: See the assets below for the Windows and macOS installers.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: ${{ steps.signing.outputs.updater == 'true' }}
+          updaterJsonPreferNsis: true
+          args: ${{ matrix.args }} ${{ steps.signing.outputs.args }}
