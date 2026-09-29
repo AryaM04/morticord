@@ -25,6 +25,7 @@ import { InviteDialog } from "./InviteDialog.js";
 import { GuildSettingsDialog } from "./GuildSettingsDialog.js";
 import { ChannelSettingsDialog } from "./ChannelSettingsDialog.js";
 import { CreateChannelDialog } from "./CreateChannelDialog.js";
+import { NotificationLevelMenu } from "./NotificationLevelMenu.js";
 
 function GuildMenu({
   items,
@@ -221,6 +222,8 @@ export function ChannelColumn({ guildId, activeChannelId }: { guildId: string; a
     null,
   );
   const draggedIdRef = useRef<string | null>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [notificationMenuAt, setNotificationMenuAt] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     setCollapsed(readCollapsedCategories(guildId));
@@ -364,9 +367,16 @@ export function ChannelColumn({ guildId, activeChannelId }: { guildId: string; a
 
   return (
     <div className="flex w-60 flex-col" style={{ backgroundColor: "var(--color-bg-sidebar)" }}>
-      <div className="border-b px-3 py-3" style={{ borderColor: "var(--color-border)" }}>
+      <div ref={headerRef} className="border-b px-3 py-3" style={{ borderColor: "var(--color-border)" }}>
         <GuildMenu
           items={[
+            {
+              label: "Notification settings",
+              onSelect: () => {
+                const rect = headerRef.current?.getBoundingClientRect();
+                setNotificationMenuAt({ x: rect ? rect.left + 8 : 80, y: rect ? rect.bottom : 60 });
+              },
+            },
             { label: "Invite people", onSelect: () => setInviteChannelId(firstTextChannelId()), hidden: !canCreateInvite },
             { label: "Server settings", onSelect: () => setGuildSettingsOpen(true), hidden: !isOwner && !canManageChannels },
             { label: "Create channel", onSelect: () => setCreateDialog({ kind: "channel", parentId: null }), hidden: !canManageChannels },
@@ -434,6 +444,15 @@ export function ChannelColumn({ guildId, activeChannelId }: { guildId: string; a
 
       <VoiceStatusPanel />
       <UserPanel />
+
+      {notificationMenuAt && (
+        <NotificationLevelMenu
+          guildId={guildId}
+          guildName={guild.name}
+          position={notificationMenuAt}
+          onClose={() => setNotificationMenuAt(null)}
+        />
+      )}
 
       {inviteChannelId && (
         <InviteDialog open={true} channelId={inviteChannelId} onClose={() => setInviteChannelId(null)} />

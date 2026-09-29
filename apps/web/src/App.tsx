@@ -17,6 +17,12 @@ import { startAutoIdle } from "./lib/presence.js";
 // Imported for its side effect: it wires the gateway connection to the
 // session store as soon as the app loads.
 import "./lib/realtime.js";
+// Also for their side effects: the synced settings load after READY, the
+// desktop notifications watch new messages, and the ring sound watches
+// incoming calls.
+import "./lib/settings.js";
+import "./lib/notifications.js";
+import "./lib/ring.js";
 
 function FullPageSpinner() {
   return (

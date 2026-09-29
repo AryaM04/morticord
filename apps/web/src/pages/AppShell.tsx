@@ -1,15 +1,14 @@
 // The main 4-column layout: server rail, channel list, chat pane and
-// member list.
+// member list. `/app/@me` is Home: the friends and the DMs.
 import { Suspense, lazy, useEffect, useRef } from "react";
 import { Redirect, useParams, useLocation } from "wouter";
 import { ServerRail } from "../components/ServerRail.js";
 import { ChannelColumn } from "../components/ChannelColumn.js";
 import { ChatPane } from "../components/ChatPane.js";
 import { MemberList } from "../components/MemberList.js";
-import { UserPanel } from "../components/UserPanel.js";
 import { VerifyBanner } from "../components/VerifyBanner.js";
 import { NoticeBanner } from "../components/NoticeBanner.js";
-import { HomePage } from "./HomePage.js";
+import { HomeView } from "./HomeView.js";
 import { useRealtime } from "../lib/useRealtime.js";
 import { clearLastLocation, readLastLocation, rememberLastLocation } from "../lib/lastLocation.js";
 import { showNotice } from "../lib/notice.js";
@@ -35,15 +34,7 @@ function AppHome() {
   if (lastLocation) {
     return <Redirect to={`/app/${lastLocation.guildId}/${lastLocation.channelId}`} />;
   }
-  return (
-    <>
-      <div className="flex w-60 flex-col" style={{ backgroundColor: "var(--color-bg-sidebar)" }}>
-        <div className="flex-1" />
-        <UserPanel />
-      </div>
-      <HomePage />
-    </>
-  );
+  return <HomeView channelId={null} />;
 }
 
 function GuildView({ guildId, channelId }: { guildId: string; channelId: string | null }) {
@@ -110,7 +101,9 @@ export function AppShell() {
       <NoticeBanner />
       <div className="flex flex-1">
         <ServerRail activeGuildId={params.guildId} />
-        {params.guildId ? (
+        {params.guildId === "@me" ? (
+          <HomeView channelId={params.channelId ?? null} />
+        ) : params.guildId ? (
           <GuildView guildId={params.guildId} channelId={params.channelId ?? null} />
         ) : (
           <AppHome />

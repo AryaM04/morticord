@@ -1,12 +1,15 @@
-// The left-most rail: one icon per guild, a "+" to create or join one,
-// and a plain pill to mark the active guild.
+// The left-most rail: the Home button (friends and DMs), one icon per
+// guild, a "+" to create or join one, and a plain pill to mark the active
+// guild. A right-click on a guild icon sets its notification level.
 import { useState } from "react";
 import { Link } from "wouter";
-import { aggregateGuildUnread, formatBadgeCount } from "@discord-clone/client-core";
+import { aggregateGuildUnread, countUnreadMessages, formatBadgeCount } from "@discord-clone/client-core";
 import { useRealtime } from "../lib/useRealtime.js";
 import { useMessages } from "../lib/useMessages.js";
 import { CreateOrJoinGuildDialog } from "./CreateOrJoinGuildDialog.js";
 import { readLastLocation } from "../lib/lastLocation.js";
+import { HOME_PATH } from "../lib/dms.js";
+import { NotificationLevelMenu } from "./NotificationLevelMenu.js";
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).slice(0, 2);
@@ -21,6 +24,7 @@ function GuildIcon({
   firstChannelId,
   hasUnread,
   mentionCount,
+  onOpenMenu,
 }: {
   id: string;
   name: string;
@@ -29,6 +33,7 @@ function GuildIcon({
   firstChannelId: string | null;
   hasUnread: boolean;
   mentionCount: number;
+  onOpenMenu: (position: { x: number; y: number }) => void;
 }) {
   const href = firstChannelId ? `/app/${id}/${firstChannelId}` : `/app/${id}`;
   return (
@@ -40,7 +45,16 @@ function GuildIcon({
           style={{ backgroundColor: "var(--color-text-primary)" }}
         />
       )}
-      <Link href={href} title={name} aria-label={name} aria-current={active ? "page" : undefined}>
+      <Link
+        href={href}
+        title={name}
+        aria-label={name}
+        aria-current={active ? "page" : undefined}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onOpenMenu({ x: event.clientX, y: event.clientY });
+        }}
+      >
         {iconKey ? (
           <img
             src={`/api/v1/icons/${id}/${iconKey}`}
@@ -80,6 +94,54 @@ function GuildIcon({
   );
 }
 
+function UnreadBadge({ count, label }: { count: number; label: string }) {
+  return (
+    <span
+      className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none"
+      style={{ backgroundColor: "#e05252", color: "white" }}
+    >
+      <span aria-hidden="true">{formatBadgeCount(count)}</span>
+      <span className="sr-only">
+        {count} {label}
+      </span>
+    </span>
+  );
+}
+
+/** The Home button. Its badge counts the unread DM messages. */
+function HomeButton({ active }: { active: boolean }) {
+  const privateChannels = useRealtime((s) => s.privateChannels);
+  const messageChannels = useMessages((s) => s.channels);
+  const selfUserId = useMessages((s) => s.selfUserId);
+  let unread = 0;
+  for (const id of Object.keys(privateChannels)) {
+    const channel = messageChannels[id];
+    if (channel) unread += countUnreadMessages(channel, selfUserId);
+  }
+  return (
+    <div className="relative flex w-full items-center justify-center">
+      {active && (
+        <span
+          aria-hidden="true"
+          className="absolute left-0 h-8 w-1 rounded-r"
+          style={{ backgroundColor: "var(--color-text-primary)" }}
+        />
+      )}
+      <Link
+        href={HOME_PATH}
+        title="Home"
+        aria-label="Home"
+        aria-current={active ? "page" : undefined}
+        className="flex h-12 w-12 items-center justify-center rounded-full font-semibold"
+        style={{ backgroundColor: "var(--color-accent)", color: "white" }}
+      >
+        DC
+      </Link>
+      {unread > 0 && <UnreadBadge count={unread} label={unread === 1 ? "unread direct message" : "unread direct messages"} />}
+    </div>
+  );
+}
+
 export function ServerRail({ activeGuildId }: { activeGuildId?: string }) {
   const guilds = useRealtime((s) => s.guilds);
   const channelIdsByGuild = useRealtime((s) => s.channelIdsByGuild);
@@ -87,6 +149,7 @@ export function ServerRail({ activeGuildId }: { activeGuildId?: string }) {
   const messageChannels = useMessages((s) => s.channels);
   const selfUserId = useMessages((s) => s.selfUserId);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [menu, setMenu] = useState<{ guildId: string; position: { x: number; y: number } } | null>(null);
 
   const guildList = Object.values(guilds).sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
 
@@ -111,15 +174,7 @@ export function ServerRail({ activeGuildId }: { activeGuildId?: string }) {
       className="flex w-[72px] flex-col items-center gap-2 overflow-y-auto py-3"
       style={{ backgroundColor: "var(--color-bg-rail)" }}
     >
-      <Link
-        href="/app"
-        title="Home"
-        aria-label="Home"
-        className="flex h-12 w-12 items-center justify-center rounded-full font-semibold"
-        style={{ backgroundColor: "var(--color-accent)", color: "white" }}
-      >
-        DC
-      </Link>
+      <HomeButton active={activeGuildId === undefined || activeGuildId === "@me"} />
       <div className="my-1 h-px w-8" style={{ backgroundColor: "var(--color-border)" }} />
       {guildList.map((guild) => {
         const summary = aggregateGuildUnread(messageChannels, viewableTextChannelIds(guild.id), selfUserId);
@@ -133,6 +188,7 @@ export function ServerRail({ activeGuildId }: { activeGuildId?: string }) {
             firstChannelId={firstTextChannel(guild.id)}
             hasUnread={summary.hasUnread}
             mentionCount={summary.mentionCount}
+            onOpenMenu={(position) => setMenu({ guildId: guild.id, position })}
           />
         );
       })}
@@ -147,6 +203,14 @@ export function ServerRail({ activeGuildId }: { activeGuildId?: string }) {
         +
       </button>
       <CreateOrJoinGuildDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
+      {menu && guilds[menu.guildId] && (
+        <NotificationLevelMenu
+          guildId={menu.guildId}
+          guildName={guilds[menu.guildId]!.name}
+          position={menu.position}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   );
 }

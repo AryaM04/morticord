@@ -261,8 +261,8 @@ async function loadEngine(): Promise<VoiceEngine> {
   return engineLoad;
 }
 
-/** Join a voice channel, leaving the current one first if there is one. */
-export async function joinVoiceChannel(guildId: string, channelId: string): Promise<void> {
+/** Join a voice channel, or a DM call when `guildId` is null. Leave the current call first if there is one. */
+export async function joinVoiceChannel(guildId: string | null, channelId: string): Promise<void> {
   voiceStore.setState({ status: "connecting", guildId, channelId, errorMessage: null });
   const voiceEngine = await loadEngine();
   const saved = voiceDeviceSettingsStore.getState();

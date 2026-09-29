@@ -17,7 +17,7 @@ type Row =
   | { kind: "day"; key: string; label: string }
   | { kind: "new"; key: string }
   | { kind: "message"; key: string; message: AggregatedMessage; showHeader: boolean }
-  | { kind: "pending"; key: string; nonce: string; body: string; failed: boolean };
+  | { kind: "pending"; key: string; nonce: string; body: string; failed: boolean; error?: string };
 
 function dayLabel(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
@@ -31,7 +31,8 @@ export function MessageList({
   onEdit,
 }: {
   channelId: string;
-  guildId: string;
+  /** Null for a DM. */
+  guildId: string | null;
   canManageMessages: boolean;
   onReply: (message: AggregatedMessage) => void;
   onEdit: (message: AggregatedMessage) => void;
@@ -117,7 +118,7 @@ export function MessageList({
     }
 
     for (const pending of channel.pending) {
-      out.push({ kind: "pending", key: `pending-${pending.nonce}`, nonce: pending.nonce, body: pending.body, failed: pending.state === "failed" });
+      out.push({ kind: "pending", key: `pending-${pending.nonce}`, nonce: pending.nonce, body: pending.body, failed: pending.state === "failed", error: pending.error });
     }
 
     return out;
@@ -200,6 +201,7 @@ export function MessageList({
               <PendingMessageRow
                 body={row.body}
                 failed={row.failed}
+                error={row.error}
                 onRetry={() => void messagesStore.getState().retryPending(channelId, row.nonce)}
                 onDiscard={() => messagesStore.getState().discardPending(channelId, row.nonce)}
               />
