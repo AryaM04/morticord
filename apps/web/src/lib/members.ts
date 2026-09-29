@@ -1,23 +1,52 @@
-// Look up a guild member's display name and user record from the
-// realtime store, for message authors, mentions and typing text.
+// Look up a user's display name and user record from the realtime store,
+// for message authors, mentions, typing text and voice tiles. A guild
+// channel uses the guild member rows. A DM (guild id null) uses the DM
+// recipients and the friend list.
 import type { RealtimeState } from "@discord-clone/client-core";
 import type { User } from "@discord-clone/shared";
 import { session } from "./session.js";
 
 /** The signed-in user's own profile. The session keeps it even before a member row loads. */
-function selfUser(state: RealtimeState, guildId: string): User | undefined {
-  return state.selfMemberByGuild[guildId]?.user ?? session.store.getState().user ?? undefined;
+function selfUser(state: RealtimeState, guildId: string | null): User | undefined {
+  const fromMember = guildId === null ? undefined : state.selfMemberByGuild[guildId]?.user;
+  return fromMember ?? session.store.getState().user ?? undefined;
 }
 
-export function memberUser(state: RealtimeState, guildId: string, userId: string): User | undefined {
+/** A user from a DM or the friend list. A short scan: a user has few DMs in memory. */
+function privateUser(state: RealtimeState, userId: string): User | undefined {
+  const relationship = state.relationships[userId];
+  if (relationship) {
+    return relationship.user;
+  }
+  for (const channel of Object.values(state.privateChannels)) {
+    const recipient = channel.recipients.find((candidate) => candidate.id === userId);
+    if (recipient) {
+      return recipient;
+    }
+  }
+  return undefined;
+}
+
+export function memberUser(state: RealtimeState, guildId: string | null, userId: string): User | undefined {
   if (userId === state.selfUserId) {
     return selfUser(state, guildId);
+  }
+  if (guildId === null) {
+    return privateUser(state, userId);
   }
   return state.membersByGuild[guildId]?.[userId]?.user;
 }
 
-export function displayNameOf(state: RealtimeState, guildId: string, userId: string): string {
+export function displayNameOf(state: RealtimeState, guildId: string | null, userId: string): string {
   const member =
-    userId === state.selfUserId ? state.selfMemberByGuild[guildId] : state.membersByGuild[guildId]?.[userId];
+    guildId === null
+      ? undefined
+      : userId === state.selfUserId
+        ? state.selfMemberByGuild[guildId]
+        : state.membersByGuild[guildId]?.[userId];
   return member?.nickname ?? memberUser(state, guildId, userId)?.displayName ?? userId;
+}
+
+export function avatarUrlOf(user: User | undefined): string | undefined {
+  return user?.avatarKey ? `/api/v1/avatars/${user.id}/${user.avatarKey}` : undefined;
 }

@@ -4,6 +4,7 @@
 // controls. See docs/concepts/voice.md for the call this panel controls.
 import { useState } from "react";
 import { useStore } from "zustand";
+import { dmDisplayName } from "@discord-clone/client-core";
 import { useRealtime } from "../lib/useRealtime.js";
 import {
   cameraSupported,
@@ -38,7 +39,11 @@ export function VoiceStatusPanel() {
   const pttActive = useStore(voiceStore, (s) => s.pttActive);
   const inputMode = useStore(voiceDeviceSettingsStore, (s) => s.inputMode);
   const pttKeyCode = useStore(voiceDeviceSettingsStore, (s) => s.pttKeyCode);
-  const channelName = useRealtime((s) => (channelId ? s.channels[channelId]?.name : undefined));
+  const channelName = useRealtime((s) => {
+    if (!channelId) return undefined;
+    const dm = s.privateChannels[channelId];
+    return dm ? dmDisplayName(dm, s.selfUserId) : s.channels[channelId]?.name;
+  });
   const selfVoiceState = useRealtime((s) =>
     channelId && s.selfUserId ? s.voiceStatesByChannel[channelId]?.[s.selfUserId] : undefined,
   );

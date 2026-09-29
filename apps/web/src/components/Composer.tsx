@@ -3,7 +3,7 @@
 // starts a new line. Escape cancels a reply, an edit, or the mention
 // listbox. ArrowUp in an empty box edits the sender's last message.
 import { useEffect, useId, useRef, useState } from "react";
-import type { GuildMemberJson } from "@discord-clone/shared";
+import type { GuildMemberJson, User } from "@discord-clone/shared";
 import { searchGuildMembers } from "@discord-clone/client-core";
 import { messagesStore } from "../lib/messages.js";
 import { session } from "../lib/session.js";
@@ -76,7 +76,9 @@ export interface EditTarget {
 
 export interface ComposerProps {
   channelId: string;
-  guildId: string;
+  /** Null for a DM. A DM finds mention names in `dmRecipients`, not on the server. */
+  guildId: string | null;
+  dmRecipients?: User[];
   canSend: boolean;
   disabledReason?: string;
   replyTarget: ReplyTarget | null;
@@ -86,12 +88,21 @@ export interface ComposerProps {
   onRequestEditLast: () => void;
 }
 
+/** Find DM recipients whose name starts with the query, in the shape of a member search result. */
+function searchDmRecipients(recipients: User[], query: string): GuildMemberJson[] {
+  const lower = query.toLowerCase();
+  return recipients
+    .filter((user) => user.username.startsWith(lower) || user.displayName.toLowerCase().startsWith(lower))
+    .slice(0, MENTION_SEARCH_LIMIT)
+    .map((user) => ({ guildId: "", userId: user.id, nickname: null, joinedAt: user.createdAt, roles: [], user }));
+}
+
 function memberLabel(member: GuildMemberJson): string {
   return member.nickname ?? member.user?.displayName ?? member.userId;
 }
 
 export function Composer(props: ComposerProps) {
-  const { channelId, guildId, editTarget } = props;
+  const { channelId, guildId, dmRecipients, editTarget } = props;
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const listboxId = useId();
@@ -142,6 +153,11 @@ export function Composer(props: ComposerProps) {
       return;
     }
     const generation = ++searchGenerationRef.current;
+    if (guildId === null) {
+      setSuggestions(searchDmRecipients(dmRecipients ?? [], query));
+      setActiveIndex(0);
+      return;
+    }
     debounceRef.current = setTimeout(() => {
       void searchGuildMembers(session.apiClient, guildId, query, MENTION_SEARCH_LIMIT)
         .then((result) => {

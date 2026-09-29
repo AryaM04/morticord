@@ -243,11 +243,14 @@ export function NewDivider() {
 export function PendingMessageRow({
   body,
   failed,
+  error,
   onRetry,
   onDiscard,
 }: {
   body: string;
   failed: boolean;
+  /** The server error text of the failed send, when there is one. */
+  error?: string;
   onRetry: () => void;
   onDiscard: () => void;
 }) {
@@ -257,8 +260,8 @@ export function PendingMessageRow({
       <div className="min-w-0 flex-1 text-sm">
         <MarkdownInline text={body} />
         {failed && (
-          <span className="ml-2 text-xs" style={{ color: "#e05252" }}>
-            Not sent.{" "}
+          <span className="ml-2 text-xs" style={{ color: "#e05252" }} role="alert">
+            Not sent.{error ? ` ${error}` : ""}{" "}
             <button type="button" onClick={onRetry} className="underline">
               Try again
             </button>{" "}

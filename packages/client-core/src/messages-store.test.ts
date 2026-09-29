@@ -10,6 +10,7 @@ import {
   compareIds,
   aggregateGuildUnread,
   countMentions,
+  countUnreadMessages,
   createChannelMessagesState,
   expireTyping,
   formatBadgeCount,
@@ -369,6 +370,30 @@ describe("unread and mentions", () => {
     channel = withEvent(channel, event({ id: "2" }));
     channel = setPayload(channel, "2", { type: "message", body: "hey @self", mentions: ["self"], attachments: [], embeds: [] });
     expect(countMentions(channel, "self")).toBe(0);
+  });
+});
+
+describe("countUnreadMessages", () => {
+  it("counts loaded messages from other people after the read marker", () => {
+    let channel = createChannelMessagesState();
+    channel = { ...channel, lastReadEventId: "1" };
+    channel = applyEventCreate(channel, event({ id: "1" }));
+    channel = applyEventCreate(channel, event({ id: "2" }));
+    channel = applyEventCreate(channel, event({ id: "3", senderId: "self" }));
+    channel = applyEventCreate(channel, event({ id: "4" }));
+    expect(countUnreadMessages(channel, "self")).toBe(2);
+  });
+
+  it("counts 1 for an unread baseline with no loaded message", () => {
+    const channel = { ...createChannelMessagesState(), lastEventId: "9", lastReadEventId: "5" };
+    expect(countUnreadMessages(channel, "self")).toBe(1);
+    expect(countUnreadMessages({ ...channel, lastReadEventId: "9" }, "self")).toBe(0);
+  });
+
+  it("does not count a channel whose newest message is from the user", () => {
+    let channel: ChannelMessagesState = { ...createChannelMessagesState(), lastReadEventId: "5" };
+    channel = applyEventCreate(channel, event({ id: "6", senderId: "self" }));
+    expect(countUnreadMessages(channel, "self")).toBe(0);
   });
 });
 

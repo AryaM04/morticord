@@ -1,7 +1,7 @@
 // The account settings dialog: display name, status text, avatar, and
 // sign out. Uses the native <dialog> element, which gives us a modal,
 // focus trapping and Escape-to-close for free.
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { displayNameSchema } from "@discord-clone/shared";
 import { useLocation } from "wouter";
 import { FormField } from "./FormField.js";
@@ -9,6 +9,9 @@ import { Avatar } from "./Avatar.js";
 import { describeError } from "../lib/errors.js";
 import { useSession } from "../lib/useSession.js";
 import { session } from "../lib/session.js";
+
+// The notification part loads only when the dialog opens, to keep the main bundle small.
+const NotificationSettings = lazy(() => import("./NotificationSettings.js"));
 
 const MAX_AVATAR_BYTES = 1024 * 1024;
 const ALLOWED_AVATAR_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -133,6 +136,12 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         <p role="alert" className="mb-4 text-sm" style={{ color: "#e05252" }}>
           {avatarError}
         </p>
+      )}
+
+      {open && (
+        <Suspense fallback={null}>
+          <NotificationSettings />
+        </Suspense>
       )}
 
       <form onSubmit={handleSave}>

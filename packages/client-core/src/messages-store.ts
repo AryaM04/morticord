@@ -6,7 +6,7 @@
 // gateway send.
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { encodeBase64Url, GatewayOpcode, type DecryptedPayload, type EventJson } from "@discord-clone/shared";
-import type { ApiClient } from "./api.js";
+import { ApiError, type ApiClient } from "./api.js";
 import type { PayloadCodec } from "./codec.js";
 import * as messagesApi from "./messages-api.js";
 
@@ -49,6 +49,8 @@ export interface PendingMessage {
   relatesToId?: string;
   createdAt: string;
   state: PendingSendState;
+  /** Why the last send failed, in words for people. Only set when `state` is "failed". */
+  error?: string;
 }
 
 // ---- aggregated view of one timeline event --------------------------------
@@ -419,11 +421,16 @@ export function addPending(channel: ChannelMessagesState, pending: PendingMessag
   return { ...channel, pending: [...channel.pending, pending] };
 }
 
-export function markPendingFailed(channel: ChannelMessagesState, nonce: string): ChannelMessagesState {
+export function markPendingFailed(channel: ChannelMessagesState, nonce: string, error?: string): ChannelMessagesState {
   return {
     ...channel,
-    pending: channel.pending.map((p) => (p.nonce === nonce ? { ...p, state: "failed" } : p)),
+    pending: channel.pending.map((p) => (p.nonce === nonce ? { ...p, state: "failed", error } : p)),
   };
+}
+
+/** The server error text of a failed send. A network failure has no server text. */
+function sendErrorText(error: unknown): string | undefined {
+  return error instanceof ApiError ? error.message : undefined;
 }
 
 export function markPendingSending(channel: ChannelMessagesState, nonce: string): ChannelMessagesState {
@@ -528,6 +535,30 @@ export function countMentions(channel: ChannelMessagesState, selfUserId: string 
     }
   }
   return count;
+}
+
+/**
+ * Count the loaded messages from other people after the read marker. A DM
+ * shows this count as its badge, since each DM message is for the user.
+ * An unread channel with no loaded unread message (a READY baseline) counts 1.
+ */
+export function countUnreadMessages(channel: ChannelMessagesState, selfUserId: string | null): number {
+  let count = 0;
+  for (const id of channel.eventIds) {
+    if (channel.lastReadEventId !== null && !idGreaterThan(id, channel.lastReadEventId)) {
+      continue;
+    }
+    const event = channel.eventsById[id];
+    if (event && !event.redactedAt && event.senderId !== selfUserId) {
+      count += 1;
+    }
+  }
+  if (count > 0 || !isChannelUnread(channel.lastEventId, channel.lastReadEventId)) {
+    return count;
+  }
+  // The newest event is not loaded. Count it, unless it is a loaded message of the user.
+  const newest = channel.lastEventId ? channel.eventsById[channel.lastEventId] : undefined;
+  return newest?.senderId === selfUserId ? 0 : 1;
 }
 
 export interface GuildUnreadSummary {
@@ -840,8 +871,8 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
         });
         updateChannel(get, set, channelId, (c) => reconcilePosted(c, event));
         await decodeAndStore(get, set, channelId, [event]);
-      } catch {
-        updateChannel(get, set, channelId, (c) => markPendingFailed(c, nonce));
+      } catch (error) {
+        updateChannel(get, set, channelId, (c) => markPendingFailed(c, nonce, sendErrorText(error)));
       }
     },
 
@@ -868,8 +899,8 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
         });
         updateChannel(get, set, channelId, (c) => reconcilePosted(c, event));
         await decodeAndStore(get, set, channelId, [event]);
-      } catch {
-        updateChannel(get, set, channelId, (c) => markPendingFailed(c, nonce));
+      } catch (error) {
+        updateChannel(get, set, channelId, (c) => markPendingFailed(c, nonce, sendErrorText(error)));
       }
     },
 

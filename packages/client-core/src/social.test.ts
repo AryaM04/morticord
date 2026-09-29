@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { DM_PERMISSIONS, Permission, encodeBase64Url } from "@discord-clone/shared";
 import type { DmChannelJson, RelationshipJson, User } from "@discord-clone/shared";
-import type { ApiClient } from "./api.js";
+import { ApiError, type ApiClient } from "./api.js";
 import { plainCodec } from "./codec.js";
 import { acceptFriendRequest, blockUser, listRelationships, removeRelationship, sendFriendRequest } from "./friends-api.js";
 import { addDmRecipient, listDmChannels, openDm, removeDmRecipient, renameGroupDm } from "./dms-api.js";
@@ -332,6 +332,20 @@ describe("messages store with DM channel ids", () => {
     store.getState().setSelfUserId("1");
     await store.getState().sendMessage("50", "hello", []);
     expect(request).toHaveBeenCalledWith("POST", "/channels/50/events", expect.anything());
+  });
+
+  it("keeps the server error of a failed send, such as a block", async () => {
+    const request = vi.fn().mockRejectedValue(new ApiError(403, "CANNOT_MESSAGE_USER", "You cannot send messages to this user."));
+    const store = createMessagesStore({
+      api: { request } as unknown as ApiClient,
+      codec: plainCodec,
+      send: vi.fn(),
+      makeNonce: () => "n3",
+    });
+    await store.getState().sendMessage("50", "hello", []);
+    const pending = store.getState().channels["50"]!.pending[0]!;
+    expect(pending.state).toBe("failed");
+    expect(pending.error).toBe("You cannot send messages to this user.");
   });
 });
 

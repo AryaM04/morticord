@@ -1,5 +1,5 @@
-// The menu opened from a member row: a small profile card, change
-// nickname, manage roles, kick, ban, and — for a member currently in
+// The menu opened from a member row: a small profile card, message, add
+// friend, change nickname, manage roles, kick, ban, and — for a member currently in
 // voice — server mute, server deafen, move and disconnect. Every action
 // is shown only when the caller is permitted, per docs/concepts/permissions.md.
 import { useEffect, useRef, useState } from "react";
@@ -18,6 +18,7 @@ import {
   canManageRole,
   kickMember,
   removeMemberRole,
+  sendFriendRequest,
   updateMember,
   type SelfContext,
 } from "@discord-clone/client-core";
@@ -25,6 +26,7 @@ import { session } from "../lib/session.js";
 import { describeError } from "../lib/errors.js";
 import { realtimeStore } from "../lib/realtime.js";
 import { useRealtime } from "../lib/useRealtime.js";
+import { openDmWith } from "../lib/dms.js";
 
 // A stable fallback: a fresh `[]` on every render would break the store
 // subscription (it always looks "changed"), causing a render loop.
@@ -59,6 +61,8 @@ export function MemberContextMenu({
   const roles = useRealtime((s) => s.rolesByGuild[guildId]);
   const voiceChannelIds = useRealtime((s) => s.channelIdsByGuild[guildId] ?? EMPTY_CHANNEL_IDS);
   const channels = useRealtime((s) => s.channels);
+  const relationship = useRealtime((s) => s.relationships[member.userId]);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -169,7 +173,49 @@ export function MemberContextMenu({
         </p>
       )}
 
+      {notice && (
+        <p role="status" className="mb-2 text-xs" style={{ color: "#3ba55d" }}>
+          {notice}
+        </p>
+      )}
+
       <div className="flex flex-col gap-1">
+        {!isSelf && (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() =>
+              void run(async () => {
+                await openDmWith(member.userId);
+                onClose();
+              })
+            }
+            className="rounded px-2 py-1 text-left text-sm"
+          >
+            Message
+          </button>
+        )}
+        {!isSelf && !relationship && member.user && (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() =>
+              void run(async () => {
+                const result = await sendFriendRequest(session.apiClient, member.user!.username);
+                realtimeStore.getState().applyDispatch({ t: "RELATIONSHIP_ADD", d: result });
+                setNotice(result.status === "accepted" ? "You are now friends." : "You sent a friend request.");
+              })
+            }
+            className="rounded px-2 py-1 text-left text-sm"
+          >
+            Add friend
+          </button>
+        )}
+        {!isSelf && relationship && relationship.status !== "blocked" && (
+          <span className="px-2 py-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
+            {relationship.status === "accepted" ? "Friend" : "Friend request pending"}
+          </span>
+        )}
         {canChangeNickname && !editingNickname && (
           <button
             type="button"

@@ -5,8 +5,11 @@ import { createMessagesStore, plainCodec } from "@discord-clone/client-core";
 import { session } from "./session.js";
 import { gatewaySend } from "./realtime.js";
 
+/** The codec of this tab. Notifications use it too, to read the text of a new message. */
+export const messageCodec = plainCodec;
+
 export const messagesStore = createMessagesStore({
   api: session.apiClient,
-  codec: plainCodec,
+  codec: messageCodec,
   send: gatewaySend,
 });

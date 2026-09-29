@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { useRealtime } from "../lib/useRealtime.js";
 import { voiceStore } from "../lib/voice.js";
+import { avatarUrlOf, displayNameOf, memberUser } from "../lib/members.js";
 import { ParticipantVolumeMenu, useParticipantMenu } from "./ParticipantVolumeMenu.js";
 
 function initialsOf(name: string): string {
@@ -166,11 +167,11 @@ function VideoTile({
   );
 }
 
-export function VoiceCallView({ guildId, channelId }: { guildId: string; channelId: string }) {
+/** The call view of a guild voice channel, or of a DM call (guild id null). */
+export function VoiceCallView({ guildId, channelId }: { guildId: string | null; channelId: string }) {
   const states = useRealtime((s) => s.voiceStatesByChannel[channelId]);
   const selfUserId = useRealtime((s) => s.selfUserId);
-  const selfMember = useRealtime((s) => s.selfMemberByGuild[guildId]);
-  const members = useRealtime((s) => s.membersByGuild[guildId]);
+  const realtimeState = useRealtime((s) => s);
   const voicePeers = useStore(voiceStore, (s) => s.peers);
   const localSpeaking = useStore(voiceStore, (s) => s.localSpeaking);
   const cameraOn = useStore(voiceStore, (s) => s.cameraOn);
@@ -183,11 +184,10 @@ export function VoiceCallView({ guildId, channelId }: { guildId: string; channel
   const entries = states ? Object.values(states) : [];
 
   function nameOf(userId: string): { name: string; avatarUrl?: string } {
-    const isSelf = userId === selfUserId;
-    const member = isSelf ? selfMember : members?.[userId];
-    const name = member?.nickname ?? member?.user?.displayName ?? userId;
-    const avatarUrl = member?.user?.avatarKey ? `/api/v1/avatars/${userId}/${member.user.avatarKey}` : undefined;
-    return { name, avatarUrl };
+    return {
+      name: displayNameOf(realtimeState, guildId, userId),
+      avatarUrl: avatarUrlOf(memberUser(realtimeState, guildId, userId)),
+    };
   }
 
   const tiles = entries.map((state) => {
