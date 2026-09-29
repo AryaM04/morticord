@@ -61,14 +61,64 @@ export const attachmentSchema = fileSecretsSchema.extend({
 });
 export type Attachment = z.infer<typeof attachmentSchema>;
 
+export const MAX_EMBEDS = 1;
+export const MAX_EMBED_URL_LENGTH = 2048;
+export const MAX_EMBED_TITLE_LENGTH = 256;
+export const MAX_EMBED_DESCRIPTION_LENGTH = 1024;
+export const MAX_EMBED_SITE_NAME_LENGTH = 128;
+
+/** An absolute http or https URL. */
+export const webUrlSchema = z
+  .string()
+  .max(MAX_EMBED_URL_LENGTH)
+  .refine((value) => {
+    try {
+      const url = new URL(value);
+      return url.protocol === "http:" || url.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }, "This is not an http or https URL.");
+
+/**
+ * A link preview. The sender's client makes it before it encrypts the
+ * message, so a receiver never fetches the URL. The image is an encrypted
+ * attachment. See docs/concepts/link-previews.md.
+ */
+export const linkEmbedSchema = z.object({
+  type: z.literal("link"),
+  url: webUrlSchema,
+  title: z.string().max(MAX_EMBED_TITLE_LENGTH).optional(),
+  description: z.string().max(MAX_EMBED_DESCRIPTION_LENGTH).optional(),
+  siteName: z.string().max(MAX_EMBED_SITE_NAME_LENGTH).optional(),
+  image: attachmentSchema.optional(),
+});
+export type LinkEmbed = z.infer<typeof linkEmbedSchema>;
+export type Embed = LinkEmbed;
+
+/**
+ * The embeds of a message. An embed that this client cannot read (a
+ * newer type, or bad data) is dropped. The rest of the message stays
+ * readable.
+ */
+const embedsSchema = z
+  .array(z.unknown())
+  .max(MAX_EMBEDS)
+  .transform((items) =>
+    items.flatMap((item) => {
+      const parsed = linkEmbedSchema.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    }),
+  );
+
 export const messagePayloadSchema = z.object({
   type: z.literal("message"),
   body: z.string().max(MAX_MESSAGE_BODY_LENGTH),
   mentions: mentionsSchema.default([]),
   /** Encrypted files (milestone M6). */
   attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS).default([]),
-  /** Filled in from milestone M6. Always empty in the plaintext codec. */
-  embeds: z.array(z.never()).default([]),
+  /** Link previews (milestone M6). At most one. */
+  embeds: embedsSchema.default([]),
 });
 export type MessagePayload = z.infer<typeof messagePayloadSchema>;
 
