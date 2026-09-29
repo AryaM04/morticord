@@ -123,3 +123,25 @@ devices of the user.
 
 The server never reads the bytes. The client stores JSON now and encrypts
 it in milestone M6.
+
+## The web client
+
+- Home is at `/app/@me`. It shows the Friends page and the DM list. The
+  list has the newest activity first. The realtime store keeps the newest
+  event of each DM.
+- A DM uses the same chat pane and message store as a guild channel. The
+  guild id is null. Names come from the DM recipients and the friends.
+- "Close DM" keeps the id of the newest event of the DM in the synced
+  settings (`hiddenDms`). A newer event shows the DM again. Thus no save
+  is necessary when a message arrives.
+- `createSettingsStore` in client-core is the single place for synced
+  settings: `hiddenDms`, `notificationLevels` (one level for each guild,
+  "mentions" when not set) and `playRingSound`. A change applies at once.
+  On `VERSION_CONFLICT` the store reads the server copy, puts the local
+  keys on top, and tries one more time. `USER_SETTINGS_UPDATE` makes the
+  store read a newer version.
+- `CALL_RING` shows a ringing card above the user panel. A Web Audio tone
+  plays while a card shows. "Decline" hides the card on this tab only.
+- `shouldNotify` in client-core decides on a desktop notification. The
+  web app shows it with `platform.notify` (the Notification API). The app
+  asks for the permission only from a button in the account settings.
