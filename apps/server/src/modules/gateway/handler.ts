@@ -22,6 +22,8 @@ import type { AppConfig } from "../../config.js";
 import type { DbClient } from "../../db/client.js";
 import { users } from "../../db/schema.js";
 import { verifyAccessToken } from "../auth/tokens.js";
+import { buildPrivateReadyData } from "../dms/service.js";
+import { listRelationships } from "../friends/service.js";
 import { buildGuildView } from "../guilds/service.js";
 import { handleTyping } from "../messages/typing.js";
 import { loadReadStates } from "../messages/service.js";
@@ -32,6 +34,7 @@ import {
   handleVoiceSignal,
   handleVoiceState,
 } from "../voice/gateway-ops.js";
+import type { CallRinger } from "../voice/calls.js";
 import { VoiceError, type VoiceService } from "../voice/service.js";
 import { GatewayService, loadGuildIdsForUser, type GatewaySocket } from "./service.js";
 
@@ -69,6 +72,8 @@ async function buildReadyPayload(
   const guildIds = await loadGuildIdsForUser(db, userId);
   const guilds = await Promise.all(guildIds.map((guildId) => buildGuildView(db, guildId, userId, voice)));
   const readStateRows = await loadReadStates(db, userId);
+  const relationships = await listRelationships(db, userId);
+  const { privateChannels, privateVoiceStates } = await buildPrivateReadyData(db, voice, userId);
 
   return {
     sessionId,
@@ -79,18 +84,21 @@ async function buildReadyPayload(
       channelId: row.channelId.toString(),
       lastReadEventId: row.lastReadEventId?.toString() ?? null,
     })),
+    relationships,
+    privateChannels,
+    privateVoiceStates,
   };
 }
 
 export function registerGatewayRoute(
   app: FastifyInstance,
-  deps: { db: DbClient; config: AppConfig; gateway: GatewayService; voice: VoiceService },
+  deps: { db: DbClient; config: AppConfig; gateway: GatewayService; voice: VoiceService; ringer?: CallRinger },
   timing: GatewayTimingOptions = {},
 ): void {
   const heartbeatIntervalMs = timing.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
   const identifyTimeoutMs = timing.identifyTimeoutMs ?? DEFAULT_IDENTIFY_TIMEOUT_MS;
-  const { db, config, gateway, voice } = deps;
-  const voiceOpsDeps = { db, gateway, voice };
+  const { db, config, gateway, voice, ringer } = deps;
+  const voiceOpsDeps = { db, gateway, voice, ringer };
 
   app.get("/gateway", { websocket: true }, (rawSocket) => {
     const socket = rawSocket as unknown as GatewaySocket & {
@@ -425,11 +433,11 @@ export function registerGatewayRoute(
           if (code === GatewayCloseCode.DEVICE_REVOKED) {
             const removed = voice.removeImmediate(info.userId, info.deviceId);
             if (removed) {
-              void broadcastVoiceLeave({ db, gateway }, removed);
+              void broadcastVoiceLeave(voiceOpsDeps, removed);
             }
           } else {
             voice.scheduleGrace(info.userId, info.deviceId, (removedState) => {
-              void broadcastVoiceLeave({ db, gateway }, removedState);
+              void broadcastVoiceLeave(voiceOpsDeps, removedState);
             });
           }
         }

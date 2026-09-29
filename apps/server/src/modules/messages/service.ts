@@ -11,6 +11,7 @@ import { channels, events, readStates } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
 import type { GatewayService } from "../gateway/service.js";
+import { dmPermissions, isPrivateChannelType, isRecipient, requireCanMessage, type ChannelRow } from "../dms/access.js";
 import { channelPermissions, loadMemberContext, requireChannelPermission } from "../guilds/member-context.js";
 import { toEventJson, type EventRow } from "./serialize.js";
 
@@ -19,16 +20,52 @@ function isTimelineEvent(row: Pick<EventRow, "relType">): boolean {
   return row.relType === null || row.relType === "reply";
 }
 
-async function loadTextChannelOrThrow(db: DbClient, channelId: bigint) {
+/** A channel that can hold events, and what the caller may do in it. */
+interface ChannelAccess {
+  channel: ChannelRow;
+  /** The caller's permissions in the channel. A guild channel loads them on the first call only. */
+  permissions(): Promise<bigint>;
+}
+
+/**
+ * Find the channel and check that the caller may see it. There are two
+ * kinds of channel that hold events. A guild text channel uses the member
+ * context, the roles and the overwrites. A DM or group DM has no guild:
+ * every recipient has the same permissions (see `DM_PERMISSIONS`).
+ * A caller who cannot see the channel gets 404.
+ */
+async function loadChannelAccess(db: DbClient, channelId: bigint, userId: bigint): Promise<ChannelAccess> {
   const rows = await db.select().from(channels).where(eq(channels.id, channelId)).limit(1);
   const channel = rows[0];
-  if (!channel || channel.guildId === null) {
+  if (!channel) {
+    throw new AppError(404, "NOT_FOUND", "This channel does not exist.");
+  }
+
+  if (isPrivateChannelType(channel.type)) {
+    if (!(await isRecipient(db, channelId, userId))) {
+      throw new AppError(404, "NOT_FOUND", "This channel does not exist.");
+    }
+    return { channel, permissions: async () => dmPermissions() };
+  }
+
+  if (channel.guildId === null) {
     throw new AppError(404, "NOT_FOUND", "This channel does not exist.");
   }
   if (channel.type !== "text") {
     throw new AppError(400, "CHANNEL_NOT_TEXT", "Only a text channel can hold events.");
   }
-  return channel;
+  const context = await loadMemberContext(db, channel.guildId, userId);
+  if (!context) {
+    throw new AppError(404, "NOT_FOUND", "This channel does not exist.");
+  }
+  let cached: bigint | undefined;
+  return {
+    channel,
+    permissions: async () => {
+      cached ??= await channelPermissions(db, channelId, context);
+      return cached;
+    },
+  };
 }
 
 async function loadEventInChannel(db: DbClient, channelId: bigint, eventId: bigint): Promise<EventRow> {
@@ -78,13 +115,10 @@ export async function createEvent(
     return { event: existing[0], created: false };
   }
 
-  const channel = await loadTextChannelOrThrow(db, channelId);
-  const context = await loadMemberContext(db, channel.guildId!, userId);
-  if (!context) {
-    throw new AppError(404, "NOT_FOUND", "This channel does not exist.");
-  }
-  const permissions = await channelPermissions(db, channelId, context);
+  const access = await loadChannelAccess(db, channelId, userId);
+  const permissions = await access.permissions();
   requireChannelPermission(permissions, Permission.VIEW_CHANNEL);
+  await requireCanMessage(db, access.channel, userId);
 
   let target: EventRow | undefined;
   if (input.relatesToId !== undefined) {
@@ -269,12 +303,8 @@ export async function listEvents(
   userId: bigint,
   input: ListEventsInput,
 ): Promise<ListEventsResult> {
-  const channel = await loadTextChannelOrThrow(db, channelId);
-  const context = await loadMemberContext(db, channel.guildId!, userId);
-  if (!context) {
-    throw new AppError(404, "NOT_FOUND", "This channel does not exist.");
-  }
-  const permissions = await channelPermissions(db, channelId, context);
+  const access = await loadChannelAccess(db, channelId, userId);
+  const permissions = await access.permissions();
   requireChannelPermission(permissions, Permission.VIEW_CHANNEL);
   requireChannelPermission(permissions, Permission.READ_MESSAGE_HISTORY);
 
@@ -326,19 +356,15 @@ export async function redactEvent(
   userId: bigint,
   gateway?: GatewayService,
 ): Promise<void> {
-  const channel = await loadTextChannelOrThrow(db, channelId);
-  const context = await loadMemberContext(db, channel.guildId!, userId);
-  if (!context) {
-    throw new AppError(404, "NOT_FOUND", "This channel does not exist.");
-  }
+  const access = await loadChannelAccess(db, channelId, userId);
   const target = await loadEventInChannel(db, channelId, eventId);
 
   if (target.senderUserId !== userId) {
     if (!isTimelineEvent(target)) {
       throw new AppError(403, "MISSING_PERMISSION", "You do not have permission to do this.");
     }
-    const permissions = await channelPermissions(db, channelId, context);
-    requireChannelPermission(permissions, Permission.MANAGE_MESSAGES);
+    // In a DM nobody has MANAGE_MESSAGES, so a person can redact only their own events.
+    requireChannelPermission(await access.permissions(), Permission.MANAGE_MESSAGES);
   }
 
   if (target.redactedAt) {
@@ -381,13 +407,8 @@ export async function updateReadState(
   eventId: bigint,
   gateway?: GatewayService,
 ): Promise<void> {
-  const channel = await loadTextChannelOrThrow(db, channelId);
-  const context = await loadMemberContext(db, channel.guildId!, userId);
-  if (!context) {
-    throw new AppError(404, "NOT_FOUND", "This channel does not exist.");
-  }
-  const permissions = await channelPermissions(db, channelId, context);
-  requireChannelPermission(permissions, Permission.VIEW_CHANNEL);
+  const access = await loadChannelAccess(db, channelId, userId);
+  requireChannelPermission(await access.permissions(), Permission.VIEW_CHANNEL);
 
   const moved = await db.transaction(async (tx) => {
     const rows = await tx

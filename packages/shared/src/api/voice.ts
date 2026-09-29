@@ -23,7 +23,8 @@ export type TurnCredentialsResponse = z.infer<typeof turnCredentialsResponseSche
  * event type.
  */
 export const voiceStateSchema = z.object({
-  guildId: idSchema,
+  /** The guild of the voice channel. Null for a call in a DM or a group DM. */
+  guildId: idSchema.nullable(),
   channelId: idSchema.nullable(),
   userId: idSchema,
   deviceId: z.string().min(1),

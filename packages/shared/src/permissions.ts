@@ -36,6 +36,22 @@ export const ALL_PERMISSIONS: bigint = Object.values(Permission).reduce(
   0n,
 );
 
+/**
+ * What every person in a DM or a group DM can do. There are no roles or
+ * overwrites in a DM, and nobody has a MANAGE_* permission. Each person can
+ * delete only their own events.
+ */
+export const DM_PERMISSIONS: bigint =
+  Permission.VIEW_CHANNEL |
+  Permission.SEND_MESSAGES |
+  Permission.READ_MESSAGE_HISTORY |
+  Permission.ADD_REACTIONS |
+  Permission.ATTACH_FILES |
+  Permission.CONNECT |
+  Permission.SPEAK |
+  Permission.VIDEO |
+  Permission.STREAM;
+
 export function hasPermission(mask: bigint, flag: bigint): boolean {
   return (mask & flag) === flag;
 }

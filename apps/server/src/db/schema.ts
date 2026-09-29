@@ -261,19 +261,28 @@ export const bans = pgTable(
   (table) => [primaryKey({ columns: [table.guildId, table.userId] })],
 );
 
-export const channels = pgTable("channels", {
-  id: snowflake().primaryKey(),
-  guildId: snowflake("guild_id").references(() => guilds.id, { onDelete: "cascade" }),
-  type: text("type", { enum: ["text", "voice", "category", "dm", "group_dm"] }).notNull(),
-  name: text("name"),
-  topic: text("topic"),
-  position: integer("position").notNull().default(0),
-  parentId: snowflake("parent_id"),
-  nsfw: boolean("nsfw").notNull().default(false),
-  ownerId: snowflake("owner_id").references(() => users.id),
-  /** The newest timeline event (a message or a reply, not an edit or a reaction) in this channel. */
-  lastEventId: snowflake("last_event_id"),
-});
+export const channels = pgTable(
+  "channels",
+  {
+    id: snowflake().primaryKey(),
+    guildId: snowflake("guild_id").references(() => guilds.id, { onDelete: "cascade" }),
+    type: text("type", { enum: ["text", "voice", "category", "dm", "group_dm"] }).notNull(),
+    name: text("name"),
+    topic: text("topic"),
+    position: integer("position").notNull().default(0),
+    parentId: snowflake("parent_id"),
+    nsfw: boolean("nsfw").notNull().default(false),
+    ownerId: snowflake("owner_id").references(() => users.id),
+    /** The newest timeline event (a message or a reply, not an edit or a reaction) in this channel. */
+    lastEventId: snowflake("last_event_id"),
+    /**
+     * Set only on a 1:1 DM: the two user ids, smaller first, joined with a colon.
+     * The unique constraint makes "one DM per pair" hold even for parallel requests.
+     */
+    dmKey: text("dm_key"),
+  },
+  (table) => [unique("channels_dm_key_key").on(table.dmKey)],
+);
 
 export const channelRecipients = pgTable(
   "channel_recipients",
@@ -284,8 +293,14 @@ export const channelRecipients = pgTable(
     userId: snowflake("user_id")
       .notNull()
       .references(() => users.id),
+    /** Decides who becomes the owner of a group DM when the owner leaves: the oldest member. */
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [primaryKey({ columns: [table.channelId, table.userId] })],
+  (table) => [
+    primaryKey({ columns: [table.channelId, table.userId] }),
+    // Speeds up "which DMs is this user in".
+    index("channel_recipients_user_idx").on(table.userId),
+  ],
 );
 
 export const permissionOverwrites = pgTable(
@@ -373,7 +388,12 @@ export const friendships = pgTable(
     otherId: snowflake("other_id")
       .notNull()
       .references(() => users.id),
-    status: text("status", { enum: ["pending", "accepted", "blocked"] }).notNull(),
+    /**
+     * One row per direction. A friend request makes `pending_outgoing` for the sender
+     * and `pending_incoming` for the receiver. A block makes one `blocked` row, for the
+     * user who blocked, and removes the other direction.
+     */
+    status: text("status", { enum: ["pending_outgoing", "pending_incoming", "accepted", "blocked"] }).notNull(),
   },
   (table) => [primaryKey({ columns: [table.userId, table.otherId] })],
 );
@@ -397,4 +417,6 @@ export const userSettings = pgTable("user_settings", {
     .primaryKey()
     .references(() => users.id),
   encryptedBlob: bytea("encrypted_blob").notNull(),
+  /** Starts at 1 with the first save. Each save adds 1. A save with an old version fails. */
+  version: integer("version").notNull().default(1),
 });

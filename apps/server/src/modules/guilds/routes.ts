@@ -7,6 +7,7 @@ import {
   createChannelRequestSchema,
   createGuildRequestSchema,
   createInviteRequestSchema,
+  updateGroupDmRequestSchema,
   createRoleRequestSchema,
   listMembersQuerySchema,
   putOverwriteRequestSchema,
@@ -37,6 +38,7 @@ import {
   getInvitePreview,
   listGuildInvites,
 } from "./invites.js";
+import { isPrivateChannel, renameGroupDm } from "../dms/service.js";
 import { readIconFile } from "./icon.js";
 import {
   applyVoiceModeration,
@@ -209,6 +211,12 @@ export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): 
 
   app.patch("/channels/:id", { preHandler: app.authenticate }, async (request, reply) => {
     const channelId = parseId((request.params as { id: string }).id);
+    if (await isPrivateChannel(deps.db, channelId)) {
+      // A group DM shares this path with the guild channels. Only its name can change.
+      const dmInput = updateGroupDmRequestSchema.parse(request.body);
+      const dmDeps = { db: deps.db, gateway: deps.gateway, voice: deps.voice, ringer: deps.ringer };
+      return reply.send(await renameGroupDm(dmDeps, request.auth!.userId, channelId, dmInput.name));
+    }
     const input = updateChannelRequestSchema.parse(request.body);
     const channel = await updateChannel(
       deps.db,

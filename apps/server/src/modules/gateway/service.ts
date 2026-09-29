@@ -3,12 +3,15 @@
 // after a database commit, never before, so a dispatch never describes a
 // state that did not really happen.
 //
-// Three indexes make fan-out cheap:
+// Four indexes make fan-out cheap:
 //   sessions:      sessionId -> Session (every session, live or resumable)
 //   userSessions:  userId    -> Set<sessionId> (a user's live sessions)
 //   guildUsers:    guildId   -> Set<userId> (who is a member of a guild)
+//   friendUsers:   userId    -> Set<userId> (accepted friends, for presence)
 // REST services keep guildUsers in sync by calling addUserToGuild /
-// removeUserFromGuild right after they change guild_members.
+// removeUserFromGuild right after they change guild_members. The friends
+// service does the same for friendUsers.
+// A DM has no index: its recipients come from one small query.
 import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import {
@@ -21,7 +24,7 @@ import {
   type VisiblePresenceStatus,
 } from "@discord-clone/shared";
 import type { DbClient } from "../../db/client.js";
-import { channels, guildMembers } from "../../db/schema.js";
+import { channelRecipients, channels, friendships, guildMembers } from "../../db/schema.js";
 import { channelPermissions, loadMemberContext } from "../guilds/member-context.js";
 
 /** How many dispatches a session keeps, so a RESUME can replay them. */
@@ -69,6 +72,7 @@ export class GatewayService {
   private readonly sessions = new Map<string, Session>();
   private readonly userSessions = new Map<string, Set<string>>();
   private readonly guildUsers = new Map<string, Set<string>>();
+  private readonly friendUsers = new Map<string, Set<string>>();
   private readonly presence = new Map<string, PresenceStatus>();
   /** Last TYPING_START send time per "userId:channelId" pair. */
   private readonly typingThrottle = new Map<string, number>();
@@ -234,11 +238,54 @@ export class GatewayService {
     this.guildUsers.delete(guildId.toString());
   }
 
-  /** Load the guild membership index from the database. Call once, at startup. */
+  /** Load the guild membership and friend indexes from the database. Call once, at startup. */
   async primeFromDatabase(db: DbClient): Promise<void> {
     const rows = await db.select({ guildId: guildMembers.guildId, userId: guildMembers.userId }).from(guildMembers);
     for (const row of rows) {
       this.addUserToGuild(row.guildId, row.userId);
+    }
+    const friendRows = await db
+      .select({ userId: friendships.userId, otherId: friendships.otherId })
+      .from(friendships)
+      .where(eq(friendships.status, "accepted"));
+    for (const row of friendRows) {
+      this.addFriendship(row.userId, row.otherId);
+    }
+  }
+
+  // ---- friend index ---------------------------------------------------------
+
+  /** Record that two users are friends. Call it right after the friendship commits. */
+  addFriendship(userA: bigint, userB: bigint): void {
+    for (const [from, to] of [
+      [userA, userB],
+      [userB, userA],
+    ] as const) {
+      const key = from.toString();
+      let set = this.friendUsers.get(key);
+      if (!set) {
+        set = new Set();
+        this.friendUsers.set(key, set);
+      }
+      set.add(to.toString());
+    }
+  }
+
+  /** Forget a friendship. Call it right after the friendship ends. */
+  removeFriendship(userA: bigint, userB: bigint): void {
+    for (const [from, to] of [
+      [userA, userB],
+      [userB, userA],
+    ] as const) {
+      const key = from.toString();
+      const set = this.friendUsers.get(key);
+      if (!set) {
+        continue;
+      }
+      set.delete(to.toString());
+      if (set.size === 0) {
+        this.friendUsers.delete(key);
+      }
     }
   }
 
@@ -278,46 +325,56 @@ export class GatewayService {
     }
   }
 
+  /** Every user who can see the presence of `userId`: users who share a guild with it, and its friends. */
+  private presenceAudience(userId: bigint): Set<string> {
+    const self = userId.toString();
+    const audience = new Set<string>();
+    for (const guildId of this.guildsOf(userId)) {
+      for (const otherUserId of this.guildUsers.get(guildId.toString()) ?? []) {
+        audience.add(otherUserId);
+      }
+    }
+    for (const friendId of this.friendUsers.get(self) ?? []) {
+      audience.add(friendId);
+    }
+    audience.delete(self);
+    return audience;
+  }
+
   /** Called when a user's last session disconnects, or their first one connects. */
   private broadcastPresence(userId: bigint, status: VisiblePresenceStatus): void {
-    const sharedGuilds = this.guildsOf(userId);
-    const seen = new Set<string>();
-    for (const guildId of sharedGuilds) {
-      const users = this.guildUsers.get(guildId.toString());
-      if (!users) {
-        continue;
-      }
-      for (const otherUserId of users) {
-        if (otherUserId === userId.toString() || seen.has(otherUserId)) {
-          continue;
-        }
-        seen.add(otherUserId);
-        this.toUser(BigInt(otherUserId), "PRESENCE_UPDATE", { userId: userId.toString(), status });
-      }
+    for (const otherUserId of this.presenceAudience(userId)) {
+      this.toUser(BigInt(otherUserId), "PRESENCE_UPDATE", { userId: userId.toString(), status });
     }
   }
 
-  /** Presence entries for every online user sharing a guild with `userId`, for READY. */
+  /**
+   * Presence entries for every online user who shares a guild with `userId`,
+   * or is a friend of `userId`, for READY. Presence is symmetric: a user
+   * sees exactly the users who see this user.
+   */
   onlinePresencesFor(userId: bigint): PresenceEntry[] {
     const entries: PresenceEntry[] = [];
-    const seen = new Set<string>();
-    for (const guildId of this.guildsOf(userId)) {
-      const users = this.guildUsers.get(guildId.toString());
-      if (!users) {
-        continue;
-      }
-      for (const otherUserId of users) {
-        if (seen.has(otherUserId)) {
-          continue;
-        }
-        seen.add(otherUserId);
-        const status = this.visibleStatus(BigInt(otherUserId));
-        if (status !== "offline") {
-          entries.push({ userId: otherUserId, status });
-        }
+    for (const otherUserId of this.presenceAudience(userId)) {
+      const status = this.visibleStatus(BigInt(otherUserId));
+      if (status !== "offline") {
+        entries.push({ userId: otherUserId, status });
       }
     }
     return entries;
+  }
+
+  /** Tell two new friends about each other's presence. An offline user needs no message. */
+  exchangePresence(userA: bigint, userB: bigint): void {
+    for (const [viewer, subject] of [
+      [userA, userB],
+      [userB, userA],
+    ] as const) {
+      const status = this.visibleStatus(subject);
+      if (status !== "offline") {
+        this.toUser(viewer, "PRESENCE_UPDATE", { userId: subject.toString(), status });
+      }
+    }
   }
 
   /** Called on connect/disconnect so presence flips online/offline at the right time. */
@@ -424,17 +481,24 @@ export class GatewayService {
   }
 
   /**
-   * Send one dispatch to every member of a channel's guild who can view
-   * that channel right now.
+   * Every user who can view a channel right now: the recipients of a DM or
+   * a group DM, or the guild members who pass the permission check.
    */
-  async toChannelViewers(db: DbClient, channelId: bigint, t: DispatchEventName, d: unknown): Promise<void> {
+  async channelViewers(db: DbClient, channelId: bigint): Promise<bigint[]> {
     const channelRows = await db.select().from(channels).where(eq(channels.id, channelId)).limit(1);
     const channel = channelRows[0];
-    if (!channel || channel.guildId === null) {
-      return;
+    if (!channel) {
+      return [];
     }
-    const viewers = await this.computeChannelViewers(db, channel.guildId, channelId);
-    this.toUsers(viewers, t, d);
+    if (channel.guildId === null) {
+      return loadRecipientIds(db, channelId);
+    }
+    return this.computeChannelViewers(db, channel.guildId, channelId);
+  }
+
+  /** Send one dispatch to every user who can view a channel right now. */
+  async toChannelViewers(db: DbClient, channelId: bigint, t: DispatchEventName, d: unknown): Promise<void> {
+    this.toUsers(await this.channelViewers(db, channelId), t, d);
   }
 
   /**
@@ -448,12 +512,7 @@ export class GatewayService {
     t: DispatchEventName,
     d: unknown,
   ): Promise<void> {
-    const channelRows = await db.select().from(channels).where(eq(channels.id, channelId)).limit(1);
-    const channel = channelRows[0];
-    if (!channel || channel.guildId === null) {
-      return;
-    }
-    const viewers = await this.computeChannelViewers(db, channel.guildId, channelId);
+    const viewers = await this.channelViewers(db, channelId);
     this.toUsers(viewers.filter((userId) => userId !== excludeUserId), t, d);
   }
 
@@ -530,6 +589,15 @@ export class GatewayService {
   get sessionCount(): number {
     return this.sessions.size;
   }
+}
+
+/** The user ids of everyone in a DM or a group DM. */
+export async function loadRecipientIds(db: DbClient, channelId: bigint): Promise<bigint[]> {
+  const rows = await db
+    .select({ userId: channelRecipients.userId })
+    .from(channelRecipients)
+    .where(eq(channelRecipients.channelId, channelId));
+  return rows.map((row) => row.userId);
 }
 
 export async function loadGuildIdsForUser(db: DbClient, userId: bigint): Promise<bigint[]> {
