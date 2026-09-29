@@ -19,6 +19,12 @@ import type { GatewayDispatch } from "./gateway.js";
 
 export interface RealtimeState {
   selfUserId: string | null;
+  /**
+   * The gateway session of the latest READY. Null until the first READY.
+   * Each READY clears the REST caches (member pages, bans). A view that
+   * fills these caches must wait for a session and fill them again when it changes.
+   */
+  sessionId: string | null;
   guilds: Record<string, GuildJson>;
   channels: Record<string, ChannelJson>;
   /** Channel ids per guild, ordered by position then id. */
@@ -51,6 +57,7 @@ export function isDmChannel(channel: ChannelJson | DmChannelJson): channel is Dm
 export function createInitialRealtimeState(): RealtimeState {
   return {
     selfUserId: null,
+    sessionId: null,
     guilds: {},
     channels: {},
     channelIdsByGuild: {},
@@ -147,6 +154,7 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
   switch (event.t) {
     case "READY": {
       const payload = event.d as {
+        sessionId: string;
         user: { id: string };
         guilds: Array<
           GuildJson & {
@@ -163,6 +171,7 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       };
       const next = createInitialRealtimeState();
       next.selfUserId = payload.user.id;
+      next.sessionId = payload.sessionId;
       for (const guild of payload.guilds) {
         next.guilds[guild.id] = {
           id: guild.id,
