@@ -22,7 +22,7 @@ async function registerUser() {
     url: "/api/v1/auth/register",
     payload: { email, username, password: "correct-password" },
   });
-  return response.json() as { accessToken: string; user: { id: string } };
+  return response.json() as { accessToken: string; user: { id: string; username: string } };
 }
 
 function authHeader(token: string) {
@@ -78,6 +78,7 @@ describeWithDb("guild, channel and invite routes", () => {
       ]),
     );
     expect(guild.member.userId).toBe(owner.user.id);
+    expect(guild.member.user.username).toBe(owner.user.username);
     // Every channel carries its permission overwrites, so a client can
     // compute permissions locally without a second request.
     for (const channel of guild.channels) {
