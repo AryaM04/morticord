@@ -1,12 +1,47 @@
 // The one synced settings store for this tab. It reads the settings after
 // each READY and again when another session announces a new version. It
-// forgets everything on sign-out.
+// forgets everything on sign-out. The blob is encrypted with the settings
+// key of the user, so the settings wait for the crypto layer.
 import { useStore } from "zustand";
-import { createSettingsStore, type SettingsStore } from "@discord-clone/client-core";
+import { createSettingsStore, type SettingsCipher, type SettingsStore } from "@discord-clone/client-core";
+import type { CryptoHandle } from "@discord-clone/client-core/crypto";
+import { cryptoReady } from "./messages.js";
 import { session } from "./session.js";
 import { realtimeStore } from "./realtime.js";
 
-export const settingsStore = createSettingsStore(session.apiClient);
+const keyListeners = new Set<() => void>();
+let watched: CryptoHandle | null = null;
+
+/** Get the crypto layer, and forward its key arrivals to the store one time for each handle. */
+async function settingsCrypto(): Promise<CryptoHandle> {
+  const handle = await cryptoReady();
+  if (watched !== handle) {
+    watched = handle;
+    handle.settings.onKey(() => keyListeners.forEach((listener) => listener()));
+  }
+  return handle;
+}
+
+const cipher: SettingsCipher = {
+  async open(blob) {
+    const handle = await settingsCrypto();
+    try {
+      return await handle.settings.open(blob);
+    } catch (error) {
+      if (error instanceof Error && error.name === "SettingsKeyMissingError") {
+        return "locked";
+      }
+      throw error;
+    }
+  },
+  seal: async (plaintext, keyId) => (await settingsCrypto()).settings.seal(plaintext, keyId),
+  onKey(listener) {
+    keyListeners.add(listener);
+    return () => keyListeners.delete(listener);
+  },
+};
+
+export const settingsStore = createSettingsStore(session.apiClient, cipher);
 
 export function useSettings<T>(selector: (state: SettingsStore) => T): T {
   return useStore(settingsStore, selector);

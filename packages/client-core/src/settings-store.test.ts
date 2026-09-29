@@ -12,8 +12,46 @@ import {
   isDmHidden,
   notificationLevelOf,
   playRingSoundOf,
+  type SettingsCipher,
   type SettingsValues,
 } from "./settings-store.js";
+import { openSettings, sealSettings, settingsKeyIdOf } from "./crypto/settings-key.js";
+
+/** A cipher with real AES-GCM and a key map in memory. The test gives it keys, as a key share does. */
+function memoryCipher() {
+  const keys = new Map<string, Uint8Array>();
+  const listeners = new Set<() => void>();
+  const cipher: SettingsCipher = {
+    async open(blob) {
+      const id = blob ? settingsKeyIdOf(blob) : null;
+      if (!blob || id === null) {
+        return { plaintext: blob, keyId: null };
+      }
+      const key = keys.get(id);
+      return key ? { plaintext: await openSettings(key, blob), keyId: id } : "locked";
+    },
+    async seal(plaintext, keyId) {
+      let id = keyId;
+      if (!id || !keys.has(id)) {
+        id = encodeBase64Url(crypto.getRandomValues(new Uint8Array(8)));
+        keys.set(id, crypto.getRandomValues(new Uint8Array(32)));
+      }
+      return { blob: await sealSettings(keys.get(id)!, id, plaintext), keyId: id };
+    },
+    onKey(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+  return {
+    cipher,
+    keys,
+    deliver(id: string, key: Uint8Array) {
+      keys.set(id, key);
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
 
 /** A settings server in memory, with the same version rule as the real one. */
 function fakeServer(initial: SettingsValues | null = null, initialVersion = 0) {
@@ -233,5 +271,66 @@ describe("DM view helpers", () => {
     expect(older).toBe(next);
     const guildEvent = applyDispatch(next, { t: "EVENT_CREATE", d: { id: "80", channelId: "99", relType: null } });
     expect(guildEvent).toBe(next);
+  });
+});
+
+describe("encrypted settings", () => {
+  it("encrypts the blob, and a second device with the key reads it", async () => {
+    const { api, server } = fakeServer({ playRingSound: false }, 1);
+    const first = memoryCipher();
+    const store = createSettingsStore(api, first.cipher);
+    await store.getState().load();
+    await store.getState().update({ notificationLevels: { "10": "all" } });
+
+    const blob = decodeBase64Url(server.data!);
+    expect(settingsKeyIdOf(blob)).not.toBeNull();
+    expect(new TextDecoder().decode(blob).includes("notificationLevels")).toBe(false);
+
+    const second = memoryCipher();
+    for (const [id, key] of first.keys) {
+      second.keys.set(id, key);
+    }
+    const other = createSettingsStore(api, second.cipher);
+    await other.getState().load();
+    expect(other.getState().values).toEqual({ playRingSound: false, notificationLevels: { "10": "all" } });
+  });
+
+  it("without the key: shows the defaults, never overwrites the server blob, and saves after the key arrives", async () => {
+    const { api, server } = fakeServer();
+    const first = memoryCipher();
+    const owner = createSettingsStore(api, first.cipher);
+    await owner.getState().load();
+    await owner.getState().update({ playRingSound: false, notificationLevels: { "10": "none" } });
+    const saved = server.data;
+    const puts = server.puts;
+
+    const second = memoryCipher();
+    const store = createSettingsStore(api, second.cipher);
+    await store.getState().load();
+    expect(store.getState().locked).toBe(true);
+    expect(store.getState().loaded).toBe(true);
+    expect(playRingSoundOf(store.getState().values)).toBe(true);
+
+    await store.getState().update({ hiddenDms: { "5": null } });
+    expect(server.puts).toBe(puts);
+    expect(server.data).toBe(saved);
+    expect(store.getState().values).toEqual({ hiddenDms: { "5": null } });
+
+    // The key arrives. The store reads the server copy, puts the local change on top and saves.
+    const [id, key] = [...first.keys][0]!;
+    second.deliver(id, key);
+    await expect.poll(() => server.puts).toBe(puts + 1);
+    expect(store.getState().locked).toBe(false);
+    await owner.getState().load();
+    expect(owner.getState().values).toEqual({ playRingSound: false, notificationLevels: { "10": "none" }, hiddenDms: { "5": null } });
+  });
+
+  it("reads an old plaintext blob and encrypts it on the next save", async () => {
+    const { api, server } = fakeServer({ playRingSound: false }, 2);
+    const store = createSettingsStore(api, memoryCipher().cipher);
+    await store.getState().load();
+    expect(playRingSoundOf(store.getState().values)).toBe(false);
+    await store.getState().update({ hiddenDms: {} });
+    expect(settingsKeyIdOf(decodeBase64Url(server.data!))).not.toBeNull();
   });
 });

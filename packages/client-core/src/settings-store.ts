@@ -6,6 +6,11 @@
 // another device saved first (VERSION_CONFLICT), the store reads the new
 // server copy, puts the local changes on top key by key, and tries one
 // more time. See docs/concepts/dms-and-friends.md.
+//
+// The blob on the server is encrypted with the settings key of the user
+// (see `SettingsCipher`). A device without the key is "locked": it shows
+// the defaults and its own changes, and it never writes the server blob
+// until the key arrives.
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { ApiError, type ApiClient } from "./api.js";
 import { compareIds } from "./messages-store.js";
@@ -33,9 +38,27 @@ export interface SettingsValues {
   playRingSound?: boolean;
 }
 
+/** Encrypts and decrypts the settings blob. The crypto layer supplies it. */
+export interface SettingsCipher {
+  /** Decrypt a blob. "locked" means that the key is not on this device yet. */
+  open(blob: Uint8Array | null): Promise<{ plaintext: Uint8Array | null; keyId: string | null } | "locked">;
+  /** Encrypt with the key `keyId`, or with a new key when it is null. */
+  seal(plaintext: Uint8Array, keyId: string | null): Promise<{ blob: Uint8Array; keyId: string }>;
+  /** Watch the arrival of a settings key. */
+  onKey?(listener: () => void): () => void;
+}
+
+/** No encryption. For tests only. */
+export const plainSettingsCipher: SettingsCipher = {
+  open: async (blob) => ({ plaintext: blob, keyId: null }),
+  seal: async (plaintext) => ({ blob: plaintext, keyId: "" }),
+};
+
 export interface SettingsState {
   /** True after the first read from the server. */
   loaded: boolean;
+  /** True when the server blob uses a key that this device does not have yet. Saves wait for the key. */
+  locked: boolean;
   /** The server version that `values` is based on. */
   version: number;
   values: SettingsValues;
@@ -110,31 +133,47 @@ export function isDmHidden(values: SettingsValues, channelId: string, lastEventI
 // ---- the store ------------------------------------------------------------------
 
 export function createInitialSettingsState(): SettingsState {
-  return { loaded: false, version: 0, values: {}, error: null };
+  return { loaded: false, locked: false, version: 0, values: {}, error: null };
 }
 
 function describeSaveError(error: unknown): string {
   return error instanceof Error ? error.message : "The settings were not saved.";
 }
 
-export function createSettingsStore(api: ApiClient): StoreApi<SettingsStore> {
+/** Thrown inside a save when the server blob needs a key that this device does not have. */
+class LockedError extends Error {}
+
+export function createSettingsStore(api: ApiClient, cipher: SettingsCipher = plainSettingsCipher): StoreApi<SettingsStore> {
   // Keys changed on this device and not saved yet. They win over the server copy.
   let unsaved: SettingsValues = {};
   // One save at a time. A change during a save goes into the next save.
   let saving: Promise<void> | null = null;
   // Each reset starts a new generation. A save from an old generation must not write.
   let generation = 0;
+  // The key id of the last blob that this device read or wrote.
+  let keyId: string | null = null;
 
   const store = createStore<SettingsStore>((set, get) => {
-    async function readServer(): Promise<{ values: SettingsValues; version: number }> {
+    async function readServer(): Promise<{ values: SettingsValues; version: number; locked: boolean }> {
       const response = await getSettings(api);
-      return { values: decodeSettings(settingsBytes(response)), version: response.version };
+      const opened = await cipher.open(settingsBytes(response));
+      if (opened === "locked") {
+        return { values: {}, version: response.version, locked: true };
+      }
+      keyId = opened.keyId;
+      return { values: decodeSettings(opened.plaintext), version: response.version, locked: false };
+    }
+
+    async function seal(values: SettingsValues): Promise<Uint8Array> {
+      const sealed = await cipher.seal(encodeSettings(values), keyId);
+      keyId = sealed.keyId;
+      return sealed.blob;
     }
 
     async function saveOnce(patch: SettingsValues, own: number): Promise<void> {
       const { values, version } = get();
       try {
-        const response = await putSettings(api, encodeSettings(values), version);
+        const response = await putSettings(api, await seal(values), version);
         if (own !== generation) return;
         set({ version: response.version, error: null });
         return;
@@ -146,8 +185,11 @@ export function createSettingsStore(api: ApiClient): StoreApi<SettingsStore> {
       // Another device saved first. Merge by key, with the local keys on top, and try one more time.
       const server = await readServer();
       if (own !== generation) return;
+      if (server.locked) {
+        throw new LockedError();
+      }
       set({ values: { ...server.values, ...patch, ...unsaved }, version: server.version });
-      const response = await putSettings(api, encodeSettings(get().values), server.version);
+      const response = await putSettings(api, await seal(get().values), server.version);
       if (own !== generation) return;
       set({ version: response.version, error: null });
     }
@@ -160,12 +202,18 @@ export function createSettingsStore(api: ApiClient): StoreApi<SettingsStore> {
           await saveOnce(patch, own);
         } catch (error) {
           if (own !== generation) return;
+          if (error instanceof LockedError) {
+            // Keep the change on this device. It saves when the key arrives.
+            unsaved = { ...patch, ...unsaved };
+            set({ locked: true });
+            return;
+          }
           set({ error: describeSaveError(error) });
           // Show the server copy again, so this device does not keep a value that the server does not have.
           try {
             const server = await readServer();
             if (own === generation) {
-              set({ values: { ...server.values, ...unsaved }, version: server.version, loaded: true });
+              set({ values: { ...server.values, ...unsaved }, version: server.version, loaded: true, locked: server.locked });
             }
           } catch {
             // Keep the local copy. The next change or the next announcement tries again.
@@ -192,13 +240,18 @@ export function createSettingsStore(api: ApiClient): StoreApi<SettingsStore> {
         const own = generation;
         const server = await readServer();
         if (own !== generation) return;
-        set({ values: { ...server.values, ...unsaved }, version: server.version, loaded: true });
+        set({ values: { ...server.values, ...unsaved }, version: server.version, loaded: true, locked: server.locked });
+        // Changes made while the device was locked save now.
+        if (!server.locked && Object.keys(unsaved).length > 0) {
+          await startSave();
+        }
       },
 
       update(patch) {
         unsaved = { ...unsaved, ...patch };
         set({ values: { ...get().values, ...patch } });
-        return startSave();
+        // Without the key, the device must not overwrite the server blob.
+        return get().locked ? Promise.resolve() : startSave();
       },
 
       async applyRemoteVersion(version) {
@@ -214,10 +267,19 @@ export function createSettingsStore(api: ApiClient): StoreApi<SettingsStore> {
       reset() {
         generation += 1;
         unsaved = {};
+        keyId = null;
         saving = null;
         set(createInitialSettingsState());
       },
     };
+  });
+  cipher.onKey?.(() => {
+    if (store.getState().locked) {
+      store
+        .getState()
+        .load()
+        .catch(() => {});
+    }
   });
   return store;
 }

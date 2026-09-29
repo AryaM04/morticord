@@ -1,5 +1,5 @@
 // Typed REST wrappers for the synced user settings. The server keeps the
-// bytes as they are. The client stores JSON now and encrypts it in M6.
+// bytes as they are. The client encrypts them with the settings key.
 import {
   decodeBase64Url,
   encodeBase64Url,

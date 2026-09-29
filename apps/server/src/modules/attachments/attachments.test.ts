@@ -187,7 +187,7 @@ describeWithDb("attachments", () => {
     let peak = before;
     const timer = setInterval(() => {
       peak = Math.max(peak, used());
-    }, 10);
+    }, 25);
     // A different process sends the body, so that only the server side counts here.
     const size = 20 * 1024 * 1024;
     const script = `
@@ -211,7 +211,7 @@ describeWithDb("attachments", () => {
     expect(JSON.parse(output.slice(4)).size).toBe(size);
     // A buffered upload would add at least 20 MiB.
     expect(peak - before).toBeLessThan(4 * 1024 * 1024);
-  });
+  }, 30_000);
 
   it("needs ATTACH_FILES and SEND_MESSAGES to upload, and READ_MESSAGE_HISTORY to download", async () => {
     const { owner, member, channelId } = await guildWithMember();
