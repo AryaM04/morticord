@@ -779,19 +779,68 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
     return next;
   }
 
+  /** Decode events in parallel. A redacted event needs no decode. */
+  function decodeEvents(events: EventJson[]): Promise<Array<{ id: string; payload: DecryptedPayload | null; waiting: boolean }>> {
+    return Promise.all(
+      events
+        .filter((event) => !event.redactedAt)
+        .map(async (event) => {
+          const result = await codec.decode(event);
+          return { id: event.id, payload: result.ok ? result.payload : null, waiting: !result.ok && result.waiting === true };
+        }),
+    );
+  }
+
   async function decodeAndStore(
     get: () => MessagesStore,
     set: (partial: Partial<MessagesStore>) => void,
     channelId: string,
     events: EventJson[],
   ): Promise<void> {
-    for (const event of events) {
-      if (event.redactedAt) continue;
-      const result = await codec.decode(event);
+    const decoded = await decodeEvents(events);
+    if (decoded.length > 0) {
       updateChannel(get, set, channelId, (channel) =>
-        setPayload(channel, event.id, result.ok ? result.payload : null, !result.ok && result.waiting === true),
+        decoded.reduce((next, entry) => setPayload(next, entry.id, entry.payload, entry.waiting), channel),
       );
     }
+  }
+
+  /**
+   * Decode a fetched page first, then put the page and its payloads in the
+   * store in one update. Thus the list never shows the page with empty rows
+   * that grow later, which would move the scroll position.
+   */
+  async function applyPage(
+    get: () => MessagesStore,
+    set: (partial: Partial<MessagesStore>) => void,
+    channelId: string,
+    page: { events: EventJson[]; relations: EventJson[] },
+    apply: (channel: ChannelMessagesState) => ChannelMessagesState,
+  ): Promise<void> {
+    const decoded = await decodeEvents([...page.events, ...page.relations]);
+    updateChannel(get, set, channelId, (channel) =>
+      decoded.reduce((next, entry) => setPayload(next, entry.id, entry.payload, entry.waiting), apply(channel)),
+    );
+  }
+
+  /** Keep the live events that arrived after the fetch of a latest page, while the page decoded. */
+  function withLaterLiveEvents(previous: ChannelMessagesState, next: ChannelMessagesState): ChannelMessagesState {
+    const newest = next.eventIds[next.eventIds.length - 1] ?? null;
+    const later = previous.eventIds.filter(
+      (id) => !next.eventIds.includes(id) && (newest === null || compareIds(id, newest) > 0),
+    );
+    if (later.length === 0) {
+      return next;
+    }
+    const eventsById = { ...next.eventsById };
+    let result: ChannelMessagesState = next;
+    for (const id of later) {
+      eventsById[id] = previous.eventsById[id]!;
+      if (id in previous.payloads) {
+        result = setPayload(result, id, previous.payloads[id] ?? null, previous.waiting[id] === true);
+      }
+    }
+    return trimWindow({ ...result, eventIds: [...next.eventIds, ...later], eventsById }, "after");
   }
 
   const store = createStore<MessagesStore>((set, get) => ({
@@ -804,7 +853,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
     async openChannel(channelId, lastEventId, lastReadEventId) {
       set(touchChannel(get(), channelId));
       const page = await messagesApi.listEvents(api, channelId, { limit: 50 });
-      updateChannel(get, set, channelId, (channel) => {
+      await applyPage(get, set, channelId, page, (channel) => {
         // `lastReadEventId` was captured before this fetch started, so a
         // `markRead` call that ran in the meantime (for example, this
         // same channel re-opening while already caught up) may have
@@ -816,9 +865,8 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
           lastReadEventId: nextLastReadEventId,
           atLatest: true,
         };
-        return loadPage(withMeta, page, "initial");
+        return withLaterLiveEvents(channel, loadPage(withMeta, page, "initial"));
       });
-      await decodeAndStore(get, set, channelId, [...page.events, ...page.relations]);
     },
 
     async loadOlder(channelId) {
@@ -828,8 +876,7 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
       }
       const oldest = channel.eventIds[0]!;
       const page = await messagesApi.listEvents(api, channelId, { before: oldest, limit: 50 });
-      updateChannel(get, set, channelId, (c) => loadPage(c, page, "before"));
-      await decodeAndStore(get, set, channelId, [...page.events, ...page.relations]);
+      await applyPage(get, set, channelId, page, (c) => loadPage(c, page, "before"));
     },
 
     async loadNewer(channelId) {
@@ -839,36 +886,31 @@ export function createMessagesStore(options: MessagesStoreOptions): StoreApi<Mes
       }
       const newest = channel.eventIds[channel.eventIds.length - 1]!;
       const page = await messagesApi.listEvents(api, channelId, { after: newest, limit: 50 });
-      updateChannel(get, set, channelId, (c) => {
+      await applyPage(get, set, channelId, page, (c) => {
         const merged = loadPage(c, page, "after");
         return { ...merged, atLatest: !merged.hasMoreAfter };
       });
-      await decodeAndStore(get, set, channelId, [...page.events, ...page.relations]);
     },
 
     async jumpTo(channelId, eventId) {
       const page = await messagesApi.listEvents(api, channelId, { around: eventId, limit: 50 });
-      let atLatest = false;
-      updateChannel(get, set, channelId, (c) => {
+      await applyPage(get, set, channelId, page, (c) => {
         const next = jumpToPage(c, page);
-        atLatest = !next.hasMoreAfter;
-        return { ...next, atLatest };
+        return { ...next, atLatest: !next.hasMoreAfter };
       });
-      await decodeAndStore(get, set, channelId, [...page.events, ...page.relations]);
     },
 
     async refetchLatest(channelId) {
       const page = await messagesApi.listEvents(api, channelId, { limit: 50 });
-      updateChannel(get, set, channelId, (c) => {
+      await applyPage(get, set, channelId, page, (c) => {
         const fresh = createChannelMessagesState();
         const next = loadPage(
           { ...fresh, lastEventId: c.lastEventId, lastReadEventId: c.lastReadEventId, pending: c.pending },
           page,
           "initial",
         );
-        return { ...next, atLatest: true };
+        return withLaterLiveEvents(c, { ...next, atLatest: true });
       });
-      await decodeAndStore(get, set, channelId, [...page.events, ...page.relations]);
     },
 
     async sendMessage(channelId, body, mentions, relatesToId) {

@@ -557,3 +557,30 @@ describe("events that wait for a key", () => {
     expect(aggregateEvent(waitingEvent, [], channel.payloads, null, channel.waiting).body).toBe("secret");
   });
 });
+describe("page loads", () => {
+  it("keeps a live event that arrives while the latest page decodes", async () => {
+    const base = createFakeCodec();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const codec = { ...base, decode: async (e: EventJson) => (await gate, base.decode(e)) };
+    const cipher = (body: string) =>
+      encodeBase64Url(encodePlainPayload({ type: "message", body, mentions: [], attachments: [], embeds: [] }));
+    const pageEvent = event({ id: "5", codec: "megolm-v1", megolmSessionId: "s", ciphertext: cipher("page") });
+    const request = vi.fn().mockResolvedValue({ events: [pageEvent], relations: [], hasMoreBefore: false, hasMoreAfter: false });
+    const store = createMessagesStore({ api: { request } as unknown as ApiClient, codec, send: vi.fn() });
+
+    const opening = store.getState().openChannel("10", "5", null);
+    await vi.waitFor(() => expect(request).toHaveBeenCalled());
+    store
+      .getState()
+      .applyDispatch("EVENT_CREATE", event({ id: "6", codec: "megolm-v1", megolmSessionId: "s", ciphertext: cipher("live") }));
+    release();
+    await opening;
+    await vi.waitFor(() => expect(store.getState().channels["10"]!.payloads["6"]).toBeDefined());
+    const channel = store.getState().channels["10"]!;
+    expect(channel.eventIds).toEqual(["5", "6"]);
+    expect(channel.payloads["5"]).toMatchObject({ body: "page" });
+  });
+});

@@ -13,6 +13,7 @@
 // Needs a real Postgres (see auth.spec.ts): skips itself when it is not
 // reachable.
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { seedMessages } from "../lib/crypto-debug.js";
 
 const WEB_ORIGIN = "http://localhost:5173";
 
@@ -111,39 +112,6 @@ async function acceptInviteApi(request: APIRequestContext, token: string, code: 
   }
 }
 
-/** Plaintext-codec (`plain-v1`) payload bytes, base64url encoded, matching `encodePlainPayload`. */
-function encodeMessagePayload(body: string): string {
-  const json = JSON.stringify({ type: "message", body, mentions: [], attachments: [], embeds: [] });
-  return Buffer.from(json, "utf8").toString("base64url");
-}
-
-/**
- * Post one plaintext message event directly over the REST API, retrying
- * on 429 (the server allows 10 events per 5 seconds per user) using the
- * `retryAfterMs` the server sends back, so a large seed never flakes.
- */
-async function postMessageApi(request: APIRequestContext, token: string, channelId: string, body: string): Promise<void> {
-  for (;;) {
-    const response = await request.post(`${WEB_ORIGIN}/api/v1/channels/${channelId}/events`, {
-      headers: { authorization: `Bearer ${token}` },
-      data: {
-        codec: "plain-v1",
-        ciphertext: encodeMessagePayload(body),
-        nonce: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-      },
-    });
-    if (response.ok()) {
-      return;
-    }
-    if (response.status() === 429) {
-      const errorBody = (await response.json()) as { error?: { retryAfterMs?: number } };
-      const wait = Math.max(50, errorBody.error?.retryAfterMs ?? 500);
-      await new Promise((resolve) => setTimeout(resolve, wait));
-      continue;
-    }
-    throw new Error(`post message failed: ${response.status()} ${await response.text()}`);
-  }
-}
 
 async function loginThroughUi(page: Page, user: TestUser): Promise<void> {
   await page.goto(`${WEB_ORIGIN}/login`);
@@ -309,10 +277,14 @@ test.describe("chat", () => {
 
     // 9. History: seed 150 messages in a dedicated channel, scroll to the
     // top until the earliest message loads, and check the viewport did
-    // not jump back to the bottom.
-    for (let i = 0; i < 150; i += 1) {
-      await postMessageApi(request, apiA.accessToken, history.id, `history message ${i}`);
-    }
+    // not jump back to the bottom. The seed encrypts each message with the
+    // real crypto layer of page A, and posts it directly (the server
+    // allows 10 events per 5 seconds, so this takes more than a minute).
+    await seedMessages(
+      pageA,
+      history.id,
+      Array.from({ length: 150 }, (_, i) => `history message ${i}`),
+    );
     const historyUrl = `${WEB_ORIGIN}/app/${guild.id}/${history.id}`;
     await pageA.goto(historyUrl);
     await expect(pageA.getByText("history message 149")).toBeVisible({ timeout: 20_000 });
@@ -336,6 +308,8 @@ test.describe("chat", () => {
 
     // 10. Regression for Task 1: sign out, sign back in, the channel
     // shows its messages again (it must not render empty on first paint).
+    // The new sign-in is a new device without the old Megolm keys: it asks
+    // for them, and the device of B (a reader of the channel) answers.
     await pageA.goto(generalUrl);
     await pageA.getByRole("button", { name: "Open account settings" }).click();
     await pageA.getByRole("button", { name: "Sign out" }).click();

@@ -210,6 +210,42 @@ describe("Megolm channel encryption", () => {
     expect(forwards).toBeGreaterThanOrEqual(2);
     expect(forwards).toBeLessThanOrEqual(2 * 3);
     expect([await read(c1, old1), await read(c2, old2)]).toEqual(["old one", "old two"]);
+
+    // User 3 has the forwarded key of the session of A1, which A1 never shared with it.
+    // When user 3 leaves, the next message of A1 must use a new session.
+    server.channels.set(CHANNEL, guildChannel(["1", "2"]));
+    server.broadcast("GUILD_MEMBER_REMOVE", { guildId: GUILD, userId: "3" });
+    await settle(all);
+    const after = await send(a1, "after the leave");
+    expect(after.megolmSessionId).not.toBe(old1.megolmSessionId);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await settle(all);
+    expect(await read(c1, after)).toBe("waiting");
+    expect(await read(b1, after)).toBe("after the leave");
+  });
+
+  it("rotates after a role change takes a reader away, even when the reader got the key by a forward", async () => {
+    const { server, a1, c1, all } = await setup(["1", "2"]);
+    const old = await send(a1, "old");
+    await settle(all);
+    server.channels.set(CHANNEL, guildChannel(["1", "2", "3"]));
+    server.broadcast("GUILD_MEMBER_UPDATE", { guildId: GUILD, userId: "3", roles: [] });
+    await expect
+      .poll(async () => {
+        await settle(all);
+        return c1.handle!.hasMegolmSession(old.megolmSessionId!);
+      })
+      .toBe(true);
+
+    server.channels.set(
+      CHANNEL,
+      guildChannel(["1", "2", "3"], [{ targetId: "3", targetType: "member", allow: "0", deny: Permission.VIEW_CHANNEL.toString() }]),
+    );
+    server.broadcast("CHANNEL_UPDATE", { id: CHANNEL, guildId: GUILD });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await settle(all);
+    const after = await send(a1, "new");
+    expect(after.megolmSessionId).not.toBe(old.megolmSessionId);
   });
 
   it("asks for a missing key, and decodes again when the key arrives", async () => {

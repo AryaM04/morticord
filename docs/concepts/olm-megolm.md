@@ -380,10 +380,11 @@ every recipient is a reader.
 - Before each encryption, the client gets the current readers and their
   verified devices. Then it does these steps, in this order:
   1. **Rotate** the outbound session when one of these is true: it
-     encrypted 100 messages; it is 7 days old; a user that got the key is
-     not a reader now (leave, kick, ban, role change, overwrite change,
-     recipient removed); a device that got the key is not in the device
-     list now (sign-out, or new identity keys).
+     encrypted 100 messages; it is 7 days old; a reader device that the
+     sender saw while the session was in use is not a reader device now
+     (leave, kick, ban, role change, overwrite change, recipient removed,
+     sign-out, new identity keys); the session is marked for rotation
+     (see below).
   2. **Share** the session key (`megolm.session`) with each reader device
      that does not have it, from the current index. This includes the
      other devices of the sender. A new device of a reader
@@ -393,6 +394,15 @@ every recipient is a reader.
 - The rotation check runs at the next send, with the membership that the
   events above keep fresh. Thus the client never shares a key with a
   device that is not a reader at that moment.
+- A reader can forward an outbound session that is still in use (history
+  share, key request). The sender does not see that. Thus the sender
+  marks its outbound sessions for rotation when a reader can have gone:
+  - at once for `GUILD_MEMBER_REMOVE`, `GUILD_BAN_ADD`, `GUILD_DELETE`,
+    `CHANNEL_DELETE` and `CHANNEL_RECIPIENT_REMOVE` (in the scope of the
+    event), and for `READY` (all sessions: events can be lost while the
+    gateway is down);
+  - after a role or overwrite change, when the new reader list lacks a
+    user of the reader snapshot of the channel.
 - The sender also keeps an inbound copy of its own session, so all its
   devices decrypt the same way.
 

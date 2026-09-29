@@ -47,6 +47,15 @@ export interface OutboundRecord {
   messageCount: number;
   /** The devices that got the session key, as "userId:deviceId". */
   sharedWith: string[];
+  /**
+   * Every reader device that this device saw while the session was in use.
+   * A reader can forward the key to them, so the removal of one starts a new session.
+   */
+  seenDevices: string[];
+  /** Not set for a DM. */
+  guildId?: string;
+  /** True when a membership event can have removed a reader. The next send starts a new session. */
+  rotate?: boolean;
 }
 
 /** One inbound Megolm session. The session id is the public key of the session, so it is unique. */
@@ -84,6 +93,7 @@ export interface StoreChanges {
 
 export interface CryptoStore {
   getOutbound(channelId: string): Promise<OutboundRecord | undefined>;
+  allOutbound(): Promise<OutboundRecord[]>;
   putOutbound(record: OutboundRecord): Promise<void>;
   deleteOutbound(channelId: string): Promise<void>;
   getInbound(sessionId: string): Promise<InboundRecord | undefined>;
@@ -173,6 +183,7 @@ export async function openCryptoStore(name: string, factory: IDBFactory = indexe
 
   return {
     getOutbound: (channelId) => read(OUTBOUND, (store) => store.get(channelId)),
+    allOutbound: () => read(OUTBOUND, (store) => store.getAll()),
     putOutbound: (record) => write(OUTBOUND, (store) => store.put(record)),
     deleteOutbound: (channelId) => write(OUTBOUND, (store) => store.delete(channelId)),
     getInbound: (sessionId) => read(INBOUND, (store) => store.get(sessionId)),
