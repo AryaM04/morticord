@@ -206,6 +206,18 @@ export const keyBackupSessions = pgTable(
   (table) => [primaryKey({ columns: [table.userId, table.version, table.sessionId] })],
 );
 
+/** Secrets in the key backup: the master private key and the settings keys, encrypted to the backup key. */
+export const keyBackupSecrets = pgTable(
+  "key_backup_secrets",
+  {
+    userId: snowflake("user_id").notNull(),
+    version: integer("version").notNull(),
+    name: text("name").notNull(),
+    data: bytea("data").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.version, table.name] })],
+);
+
 export const guilds = pgTable("guilds", {
   id: snowflake().primaryKey(),
   name: text("name").notNull(),

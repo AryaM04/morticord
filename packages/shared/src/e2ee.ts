@@ -58,3 +58,22 @@ export function megolmSessionSignedText(channelId: string, sessionId: string, us
 export function masterKeySignedText(userId: string, publicKey: string): string {
   return canonicalJson({ type: "master_key", userId, publicKey });
 }
+
+/** The passphrase parameters of a key backup. The recovery key is Argon2id(passphrase, salt). */
+export interface BackupPassphraseParams {
+  algorithm: "argon2id";
+  /** Base64url. */
+  salt: string;
+  memoryKiB: number;
+  iterations: number;
+  parallelism: number;
+}
+
+/**
+ * The text that the Ed25519 key of the device that makes a key backup
+ * signs. Other devices upload keys to the backup only when a device that
+ * the master key signed vouches for its public key.
+ */
+export function backupSignedText(userId: string, publicKey: string, passphrase: BackupPassphraseParams | null): string {
+  return canonicalJson({ type: "key_backup", userId, publicKey, passphrase });
+}

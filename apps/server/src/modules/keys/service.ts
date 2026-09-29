@@ -1,7 +1,8 @@
 // The key server: device identity keys, one-time keys, fallback keys and
 // the user master key. The server checks every signature and never holds
 // a private key. See docs/concepts/olm-megolm.md sections 3 and 4.
-import { and, count, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, count, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { verify as verifyPassword } from "@node-rs/argon2";
 import {
   DispatchEvent,
   MAX_STORED_ONE_TIME_KEYS,
@@ -12,13 +13,16 @@ import {
   type DeviceRef,
   type PutMasterKeyRequest,
   type QueriedUser,
+  type ResetMasterKeyRequest,
   type UploadKeysRequest,
+  type UploadSignatureRequest,
   type UploadKeysResponse,
 } from "@discord-clone/shared";
 import type { DbClient } from "../../db/client.js";
-import { crossSigningKeys, devices, fallbackKeys, oneTimeKeys, toDeviceQueue } from "../../db/schema.js";
+import { crossSigningKeys, devices, fallbackKeys, oneTimeKeys, toDeviceQueue, users } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
 import type { GatewayService } from "../gateway/service.js";
+import { deleteAllBackups } from "./backup.js";
 import { verifyEd25519 } from "./signatures.js";
 import { usersWhoCanSee, visibleUserIds } from "./visibility.js";
 
@@ -220,6 +224,82 @@ export async function putMasterKey(
   if (changed) {
     await announceDeviceListChange(deps, userId);
   }
+}
+
+/**
+ * Store the master signature of a different device of the same user. A
+ * device that holds the master private key calls this after it verified
+ * the other device (SAS). The signature must verify with the master key.
+ */
+export async function uploadSignature(deps: KeysDeps, userId: bigint, input: UploadSignatureRequest): Promise<void> {
+  const changed = await deps.db.transaction(async (tx) => {
+    const target = await lockOwnDevice(tx, userId, input.deviceId);
+    if (target.curve25519Key === null || target.ed25519Key === null) {
+      throw new AppError(400, "DEVICE_KEYS_MISSING", "This device has no identity keys.");
+    }
+    const [master] = await tx.select().from(crossSigningKeys).where(eq(crossSigningKeys.userId, userId));
+    if (!master) {
+      throw new AppError(400, "MASTER_KEY_MISSING", "This user has no master key.");
+    }
+    const text = deviceKeysSignedText(userId.toString(), target.id, target.curve25519Key, target.ed25519Key);
+    if (!verifyEd25519(master.masterKey, text, input.signature)) {
+      throw badSignature("master signature");
+    }
+    if (target.masterSignature === input.signature) {
+      return false;
+    }
+    await tx.update(devices).set({ masterSignature: input.signature }).where(eq(devices.id, target.id));
+    return true;
+  });
+  if (changed) {
+    await announceDeviceListChange(deps, userId);
+  }
+}
+
+/**
+ * Replace the master key of a user who lost it (no signed device and no
+ * recovery key). The account password is necessary. The signatures of the
+ * old key and the key backup are deleted, because the old master key made
+ * them. Other users see the new key as an identity change.
+ */
+export async function resetMasterKey(
+  deps: KeysDeps,
+  userId: bigint,
+  deviceId: string,
+  input: ResetMasterKeyRequest,
+): Promise<void> {
+  const [user] = await deps.db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, userId));
+  if (!user?.passwordHash) {
+    throw new AppError(403, "PASSWORD_REQUIRED", "Set a password for this account first. Then reset the identity.");
+  }
+  if (!(await verifyPassword(user.passwordHash, input.password))) {
+    throw new AppError(401, "INVALID_PASSWORD", "The password is not correct.");
+  }
+  const userText = userId.toString();
+  await deps.db.transaction(async (tx) => {
+    const device = await lockOwnDevice(tx, userId, deviceId);
+    if (device.curve25519Key === null || device.ed25519Key === null) {
+      throw new AppError(400, "DEVICE_KEYS_MISSING", "Upload the identity keys of this device first.");
+    }
+    if (!verifyEd25519(device.ed25519Key, masterKeySignedText(userText, input.publicKey), input.deviceSignature)) {
+      throw badSignature("master key");
+    }
+    const deviceText = deviceKeysSignedText(userText, deviceId, device.curve25519Key, device.ed25519Key);
+    if (!verifyEd25519(input.publicKey, deviceText, input.masterSignature)) {
+      throw badSignature("master signature");
+    }
+    await tx
+      .insert(crossSigningKeys)
+      .values({ userId, masterKey: input.publicKey, deviceId, deviceSignature: input.deviceSignature })
+      .onConflictDoUpdate({
+        target: crossSigningKeys.userId,
+        set: { masterKey: input.publicKey, deviceId, deviceSignature: input.deviceSignature },
+      });
+    await tx.update(devices).set({ masterSignature: null }).where(and(eq(devices.userId, userId), ne(devices.id, deviceId)));
+    await tx.update(devices).set({ masterSignature: input.masterSignature }).where(eq(devices.id, deviceId));
+    await deleteAllBackups(tx, userId);
+  });
+  await announceDeviceListChange(deps, userId);
 }
 
 /** The master key and the devices with keys of each visible user. Users the caller cannot see are left out. */

@@ -155,3 +155,111 @@ export type ToDeviceAckPayload = z.infer<typeof toDeviceAckPayloadSchema>;
 /** Sent by the server when the devices or the master key of a user change. */
 export const deviceListUpdatePayloadSchema = z.object({ userId: idSchema });
 export type DeviceListUpdatePayload = z.infer<typeof deviceListUpdatePayloadSchema>;
+
+// ---- signatures of other devices and the master key reset (section 4) ----
+
+/** The master key of the user signs the device keys of a different device of the same user. */
+export const uploadSignatureRequestSchema = z.object({
+  deviceId: deviceIdSchema,
+  signature: signatureSchema,
+});
+export type UploadSignatureRequest = z.infer<typeof uploadSignatureRequestSchema>;
+
+/** Replace the master key of the user. The password of the account is necessary. */
+export const resetMasterKeyRequestSchema = putMasterKeyRequestSchema.extend({
+  password: z.string().min(1).max(256),
+});
+export type ResetMasterKeyRequest = z.infer<typeof resetMasterKeyRequestSchema>;
+
+// ---- key backup (section 9) ----
+
+/** The most sessions in one backup upload. */
+export const MAX_BACKUP_SESSIONS_PER_REQUEST = 100;
+/** The largest encrypted session or secret, in bytes once decoded. */
+export const MAX_BACKUP_ITEM_BYTES = 8 * 1024;
+/** The most secrets (master key, settings keys) in one backup. */
+export const MAX_BACKUP_SECRETS = 16;
+/** The most sessions in one page of the session download. */
+export const MAX_BACKUP_SESSIONS_PER_PAGE = 500;
+
+const backupItemSchema = base64UrlSchema.min(1).max(Math.ceil((MAX_BACKUP_ITEM_BYTES * 4) / 3), "The backup item is too large.");
+
+export const backupPassphraseSchema = z.object({
+  algorithm: z.literal("argon2id"),
+  salt: base64UrlSchema.min(22).max(86),
+  memoryKiB: z.number().int().min(8 * 1024).max(256 * 1024),
+  iterations: z.number().int().min(1).max(10),
+  parallelism: z.number().int().min(1).max(4),
+});
+
+export const backupAuthDataSchema = z.object({
+  passphrase: backupPassphraseSchema.nullable(),
+  /** The device that made the backup. Its Ed25519 key signs `backupSignedText`. */
+  deviceId: deviceIdSchema,
+  signature: signatureSchema,
+});
+export type BackupAuthData = z.infer<typeof backupAuthDataSchema>;
+
+export const createBackupVersionRequestSchema = z.object({
+  publicKey: publicKeySchema,
+  authData: backupAuthDataSchema,
+});
+export type CreateBackupVersionRequest = z.infer<typeof createBackupVersionRequestSchema>;
+
+export const createBackupVersionResponseSchema = z.object({ version: z.number().int().positive() });
+export type CreateBackupVersionResponse = z.infer<typeof createBackupVersionResponseSchema>;
+
+/** A secret name: "master" or "settings:<keyId>". */
+export const backupSecretNameSchema = z.string().regex(/^[a-z]+(:[A-Za-z0-9_-]{1,32})?$/, "This is not a valid secret name.");
+
+export const backupVersionSchema = z.object({
+  version: z.number().int().positive(),
+  publicKey: publicKeySchema,
+  authData: backupAuthDataSchema,
+  /** Secret name to the encrypted secret. */
+  secrets: z.record(backupSecretNameSchema, backupItemSchema),
+});
+export type BackupVersion = z.infer<typeof backupVersionSchema>;
+
+export const getBackupVersionResponseSchema = z.object({ backup: backupVersionSchema.nullable() });
+export type GetBackupVersionResponse = z.infer<typeof getBackupVersionResponseSchema>;
+
+export const backupSessionSchema = z.object({
+  channelId: idSchema,
+  /** The Megolm session id: unpadded standard base64. */
+  sessionId: publicKeySchema,
+  /** The first known message index of the encrypted session. The server keeps the lower one. */
+  firstIndex: z.number().int().nonnegative().max(2 ** 31),
+  data: backupItemSchema,
+});
+export type BackupSession = z.infer<typeof backupSessionSchema>;
+
+export const putBackupSessionsRequestSchema = z.object({
+  version: z.number().int().positive(),
+  sessions: z.array(backupSessionSchema).min(1).max(MAX_BACKUP_SESSIONS_PER_REQUEST),
+});
+export type PutBackupSessionsRequest = z.infer<typeof putBackupSessionsRequestSchema>;
+
+export const putBackupSecretsRequestSchema = z.object({
+  version: z.number().int().positive(),
+  secrets: z
+    .record(backupSecretNameSchema, backupItemSchema)
+    .refine((secrets) => Object.keys(secrets).length >= 1 && Object.keys(secrets).length <= MAX_BACKUP_SECRETS, "Send 1 to 16 secrets."),
+});
+export type PutBackupSecretsRequest = z.infer<typeof putBackupSecretsRequestSchema>;
+
+export const getBackupSessionsQuerySchema = z.object({
+  version: z.coerce.number().int().positive(),
+  channelId: idSchema.optional(),
+  /** Give the sessions after this session id (the `next` value of the previous page). */
+  after: publicKeySchema.optional(),
+  limit: z.coerce.number().int().min(1).max(MAX_BACKUP_SESSIONS_PER_PAGE).optional(),
+});
+export type GetBackupSessionsQuery = z.infer<typeof getBackupSessionsQuerySchema>;
+
+export const getBackupSessionsResponseSchema = z.object({
+  sessions: z.array(backupSessionSchema),
+  /** The `after` value of the next page, or null on the last page. */
+  next: publicKeySchema.nullable(),
+});
+export type GetBackupSessionsResponse = z.infer<typeof getBackupSessionsResponseSchema>;
