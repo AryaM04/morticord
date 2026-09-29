@@ -13,3 +13,6 @@ export * from "./voice-api.js";
 export * from "./friends-api.js";
 export * from "./dms-api.js";
 export * from "./settings-api.js";
+export * from "./settings-store.js";
+export * from "./notifications.js";
+export * from "./dm-view.js";
