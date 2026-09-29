@@ -35,7 +35,7 @@ import {
   handleVoiceState,
 } from "../voice/gateway-ops.js";
 import type { CallRinger } from "../voice/calls.js";
-import { VoiceError, type VoiceService } from "../voice/service.js";
+import { VoiceError, type VoiceService, type VoiceState } from "../voice/service.js";
 import { GatewayService, loadGuildIdsForUser, type GatewaySocket } from "./service.js";
 
 export interface GatewayTimingOptions {
@@ -275,6 +275,13 @@ export function registerGatewayRoute(
       }
     }
 
+    /** Tell the audience that a peer left. A failure is logged, and never becomes an unhandled rejection. */
+    function announceVoiceLeave(removed: VoiceState): void {
+      broadcastVoiceLeave(voiceOpsDeps, removed).catch((error) => {
+        app.log.error(error, "The server could not tell the audience that a voice peer left.");
+      });
+    }
+
     function sendVoiceError(error: unknown): void {
       if (error instanceof VoiceError) {
         send(GatewayOpcode.DISPATCH, { code: error.code, message: error.message }, { t: "VOICE_ERROR" });
@@ -433,11 +440,11 @@ export function registerGatewayRoute(
           if (code === GatewayCloseCode.DEVICE_REVOKED) {
             const removed = voice.removeImmediate(info.userId, info.deviceId);
             if (removed) {
-              void broadcastVoiceLeave(voiceOpsDeps, removed);
+              announceVoiceLeave(removed);
             }
           } else {
             voice.scheduleGrace(info.userId, info.deviceId, (removedState) => {
-              void broadcastVoiceLeave(voiceOpsDeps, removedState);
+              announceVoiceLeave(removedState);
             });
           }
         }
