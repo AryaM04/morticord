@@ -13,9 +13,13 @@ import { GatewayService } from "./modules/gateway/service.js";
 import type { Mailer } from "./mailer.js";
 import { authGuardPlugin } from "./plugins/auth-guard.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
+import { registerDmRoutes } from "./modules/dms/routes.js";
+import { registerFriendRoutes } from "./modules/friends/routes.js";
 import { registerGuildRoutes } from "./modules/guilds/routes.js";
 import { registerMessageRoutes } from "./modules/messages/routes.js";
+import { registerSettingsRoutes } from "./modules/settings/routes.js";
 import { registerUserRoutes } from "./modules/users/routes.js";
+import { CallRinger } from "./modules/voice/calls.js";
 import { registerVoiceRoutes } from "./modules/voice/routes.js";
 import { VoiceService } from "./modules/voice/service.js";
 
@@ -35,6 +39,10 @@ export interface AppDeps {
   voice?: VoiceService;
   /** How long a disconnected voice peer's state stays, in case it resumes. Tests can shorten it. */
   voiceGraceMs?: number;
+  /** How long a DM call rings. Tests can shorten it. Default 30 s. */
+  callRingMs?: number;
+  /** The DM call ringer. buildApp makes one when it is left out. */
+  ringer?: CallRinger;
 }
 
 const IMAGE_CONTENT_TYPES = ["image/png", "image/jpeg", "image/webp"];
@@ -44,7 +52,9 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
   const gateway = rawDeps.gateway ?? new GatewayService();
   await gateway.primeFromDatabase(rawDeps.db);
   const voice = rawDeps.voice ?? new VoiceService(rawDeps.voiceGraceMs);
-  const deps: AppDeps = { ...rawDeps, gateway, voice };
+  const ringer = rawDeps.ringer ?? new CallRinger(gateway, rawDeps.callRingMs);
+  const deps: AppDeps = { ...rawDeps, gateway, voice, ringer };
+  app.addHook("onClose", async () => ringer.dispose());
 
   // Raw image bytes for the avatar upload route. Fastify parses only JSON
   // and text by default, so image bodies need their own parser.
@@ -73,10 +83,13 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
 
   await app.register(async (instance) => registerAuthRoutes(instance, deps), { prefix: "/api/v1/auth" });
   await app.register(async (instance) => registerUserRoutes(instance, deps), { prefix: "/api/v1" });
+  await app.register(async (instance) => registerFriendRoutes(instance, deps), { prefix: "/api/v1" });
+  await app.register(async (instance) => registerDmRoutes(instance, deps), { prefix: "/api/v1" });
+  await app.register(async (instance) => registerSettingsRoutes(instance, deps), { prefix: "/api/v1" });
   await app.register(async (instance) => registerGuildRoutes(instance, deps), { prefix: "/api/v1" });
   await app.register(async (instance) => registerMessageRoutes(instance, deps), { prefix: "/api/v1" });
   await app.register(async (instance) => registerVoiceRoutes(instance, deps), { prefix: "/api/v1" });
-  registerGatewayRoute(app, { db: deps.db, config: deps.config, gateway, voice }, deps.gatewayTiming);
+  registerGatewayRoute(app, { db: deps.db, config: deps.config, gateway, voice, ringer }, deps.gatewayTiming);
 
   return app;
 }

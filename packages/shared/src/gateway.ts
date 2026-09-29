@@ -9,6 +9,8 @@ import { z } from "zod";
 import { banSchema, guildMemberSchema, guildViewSchema, roleSchema } from "./api/guilds.js";
 import { eventSchema, readStateSchema } from "./api/messages.js";
 import { idSchema } from "./api/common.js";
+import { dmChannelSchema } from "./api/dms.js";
+import { relationshipSchema } from "./api/friends.js";
 import { voiceStateSchema } from "./api/voice.js";
 
 export const GatewayOpcode = {
@@ -104,6 +106,12 @@ export const readyPayloadSchema = z.object({
   presences: z.array(presenceEntrySchema),
   /** The caller's last-read event id per channel, for unread markers. */
   readStates: z.array(readStateSchema),
+  /** Every friend, pending request and block of the caller. */
+  relationships: z.array(relationshipSchema),
+  /** Every DM and group DM the caller is in. */
+  privateChannels: z.array(dmChannelSchema),
+  /** The current voice state of every peer in a DM call of the caller. */
+  privateVoiceStates: z.array(voiceStateSchema),
 });
 
 /** Sent by the server after a successful RESUME, once missed dispatches replay. */
@@ -129,7 +137,8 @@ export const guildBanRemovePayloadSchema = z.object({ guildId: idSchema, userId:
 export const guildMemberUpdatePayloadSchema = guildMemberSchema;
 
 export const guildDeletePayloadSchema = z.object({ id: z.string().min(1) });
-export const channelDeletePayloadSchema = z.object({ id: z.string().min(1), guildId: z.string().min(1) });
+/** `guildId` is null when the channel is a DM or a group DM. */
+export const channelDeletePayloadSchema = z.object({ id: z.string().min(1), guildId: z.string().min(1).nullable() });
 export const guildMemberRemovePayloadSchema = z.object({
   guildId: z.string().min(1),
   userId: z.string().min(1),
@@ -276,6 +285,13 @@ export const DispatchEvent = {
   VOICE_STATE_UPDATE: "VOICE_STATE_UPDATE",
   VOICE_SIGNAL: "VOICE_SIGNAL",
   VOICE_ERROR: "VOICE_ERROR",
+  RELATIONSHIP_ADD: "RELATIONSHIP_ADD",
+  RELATIONSHIP_REMOVE: "RELATIONSHIP_REMOVE",
+  CHANNEL_RECIPIENT_ADD: "CHANNEL_RECIPIENT_ADD",
+  CHANNEL_RECIPIENT_REMOVE: "CHANNEL_RECIPIENT_REMOVE",
+  CALL_RING: "CALL_RING",
+  CALL_RING_STOP: "CALL_RING_STOP",
+  USER_SETTINGS_UPDATE: "USER_SETTINGS_UPDATE",
 } as const;
 
 export type DispatchEventName = (typeof DispatchEvent)[keyof typeof DispatchEvent];

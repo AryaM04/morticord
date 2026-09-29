@@ -3,6 +3,11 @@
 // VoiceService, and sends the right dispatch through the gateway. A
 // rejected op throws VoiceError; the gateway handler turns that into a
 // VOICE_ERROR sent back to the caller.
+//
+// A voice state has a guild for a guild voice channel, and no guild for the
+// call of a DM or a group DM. The audience of a guild call is the guild
+// members who can view the channel. The audience of a DM call is the
+// recipients of the DM.
 import { eq } from "drizzle-orm";
 import {
   DispatchEvent,
@@ -14,8 +19,10 @@ import {
 } from "@discord-clone/shared";
 import type { DbClient } from "../../db/client.js";
 import { channels } from "../../db/schema.js";
+import { isMessagingBlocked, isPrivateChannelType, isRecipient } from "../dms/access.js";
 import { channelPermissions, loadMemberContext } from "../guilds/member-context.js";
-import type { GatewayService } from "../gateway/service.js";
+import { loadRecipientIds, type GatewayService } from "../gateway/service.js";
+import type { CallRinger } from "./calls.js";
 import {
   MAX_SIGNAL_PAYLOAD_BYTES,
   VoiceError,
@@ -28,27 +35,75 @@ export interface VoiceOpsDeps {
   db: DbClient;
   gateway: GatewayService;
   voice: VoiceService;
+  /** Rings the recipients of a DM call. Guild calls do not use it. */
+  ringer?: CallRinger;
 }
 
-/** Send a VOICE_STATE_UPDATE for `state` to every guild member who can view its channel. */
+/** Everyone who must see the voice state of `state`. */
+async function stateAudience(deps: Pick<VoiceOpsDeps, "db" | "gateway">, state: VoiceState): Promise<bigint[]> {
+  if (state.guildId === null) {
+    return loadRecipientIds(deps.db, state.channelId);
+  }
+  return deps.gateway.computeChannelViewers(deps.db, state.guildId, state.channelId);
+}
+
+/** Send a VOICE_STATE_UPDATE for `state` to everyone who can view its channel. */
 export async function broadcastVoiceState(deps: Pick<VoiceOpsDeps, "db" | "gateway">, state: VoiceState): Promise<void> {
-  const viewers = await deps.gateway.computeChannelViewers(deps.db, state.guildId, state.channelId);
-  deps.gateway.toUsers(viewers, DispatchEvent.VOICE_STATE_UPDATE, toVoiceStateUpdate(state));
+  const audience = await stateAudience(deps, state);
+  deps.gateway.toUsers(audience, DispatchEvent.VOICE_STATE_UPDATE, toVoiceStateUpdate(state));
 }
 
-/** Send a VOICE_STATE_UPDATE with a null channelId for `state`, to the viewers of the channel it left. */
-export async function broadcastVoiceLeave(deps: Pick<VoiceOpsDeps, "db" | "gateway">, state: VoiceState): Promise<void> {
-  const viewers = await deps.gateway.computeChannelViewers(deps.db, state.guildId, state.channelId);
-  deps.gateway.toUsers(viewers, DispatchEvent.VOICE_STATE_UPDATE, toVoiceStateUpdate(state, true));
+/**
+ * Send a VOICE_STATE_UPDATE with a null channelId for `state`, to the
+ * viewers of the channel it left. When the call of a DM is now empty, the
+ * ring of that call stops.
+ */
+export async function broadcastVoiceLeave(
+  deps: Pick<VoiceOpsDeps, "db" | "gateway"> & Partial<Pick<VoiceOpsDeps, "voice" | "ringer">>,
+  state: VoiceState,
+): Promise<void> {
+  const audience = await stateAudience(deps, state);
+  deps.gateway.toUsers(audience, DispatchEvent.VOICE_STATE_UPDATE, toVoiceStateUpdate(state, true));
+  if (state.guildId === null && deps.voice && deps.voice.channelStates(state.channelId).length === 0) {
+    deps.ringer?.stop(state.channelId);
+  }
 }
 
-async function loadVoiceChannel(db: DbClient, channelId: bigint) {
-  const rows = await db.select().from(channels).where(eq(channels.id, channelId)).limit(1);
+/** What the join op needs to know about the channel it joins. */
+interface JoinTarget {
+  guildId: bigint | null;
+  forceMute: boolean;
+}
+
+async function resolveJoinTarget(deps: VoiceOpsDeps, userId: bigint, channelId: bigint): Promise<JoinTarget> {
+  const rows = await deps.db.select().from(channels).where(eq(channels.id, channelId)).limit(1);
   const channel = rows[0];
-  if (!channel || channel.guildId === null || channel.type !== "voice") {
+  if (!channel) {
     throw new VoiceError("NOT_A_VOICE_CHANNEL", "This is not a voice channel.");
   }
-  return channel as typeof channel & { guildId: bigint };
+
+  if (isPrivateChannelType(channel.type)) {
+    if (!(await isRecipient(deps.db, channelId, userId))) {
+      throw new VoiceError("NO_PERMISSION", "You are not in this DM.");
+    }
+    if (await isMessagingBlocked(deps.db, channel, userId)) {
+      throw new VoiceError("NO_PERMISSION", "You cannot call this user.");
+    }
+    return { guildId: null, forceMute: false };
+  }
+
+  if (channel.guildId === null || channel.type !== "voice") {
+    throw new VoiceError("NOT_A_VOICE_CHANNEL", "This is not a voice channel.");
+  }
+  const context = await loadMemberContext(deps.db, channel.guildId, userId);
+  if (!context) {
+    throw new VoiceError("NO_PERMISSION", "You are not a member of this guild.");
+  }
+  const permissions = await channelPermissions(deps.db, channelId, context);
+  if (!hasPermission(permissions, Permission.VIEW_CHANNEL) || !hasPermission(permissions, Permission.CONNECT)) {
+    throw new VoiceError("NO_PERMISSION", "You do not have permission to join this voice channel.");
+  }
+  return { guildId: channel.guildId, forceMute: !hasPermission(permissions, Permission.SPEAK) };
 }
 
 export async function handleVoiceJoin(
@@ -58,32 +113,33 @@ export async function handleVoiceJoin(
   payload: VoiceJoinPayload,
 ): Promise<void> {
   const channelId = BigInt(payload.channelId);
-  const channel = await loadVoiceChannel(deps.db, channelId);
-
-  const context = await loadMemberContext(deps.db, channel.guildId, userId);
-  if (!context) {
-    throw new VoiceError("NO_PERMISSION", "You are not a member of this guild.");
-  }
-  const permissions = await channelPermissions(deps.db, channelId, context);
-  if (!hasPermission(permissions, Permission.VIEW_CHANNEL) || !hasPermission(permissions, Permission.CONNECT)) {
-    throw new VoiceError("NO_PERMISSION", "You do not have permission to join this voice channel.");
-  }
-  const forceMute = !hasPermission(permissions, Permission.SPEAK);
+  const target = await resolveJoinTarget(deps, userId, channelId);
 
   const { state, previous } = deps.voice.join({
     userId,
     deviceId,
-    guildId: channel.guildId,
+    guildId: target.guildId,
     channelId,
     selfMute: payload.selfMute,
     selfDeaf: payload.selfDeaf,
-    forceMute,
+    forceMute: target.forceMute,
   });
 
   if (previous) {
     await broadcastVoiceLeave(deps, previous);
   }
   await broadcastVoiceState(deps, state);
+
+  if (target.guildId === null && deps.ringer) {
+    const peerCount = deps.voice.channelStates(channelId).length;
+    if (peerCount > 1) {
+      // Someone answered: the call does not need to ring any more.
+      deps.ringer.stop(channelId);
+    } else if (previous?.channelId !== channelId) {
+      // The first person joined. A caller who only moves to another device does not ring again.
+      deps.ringer.start(channelId, userId, await loadRecipientIds(deps.db, channelId));
+    }
+  }
 }
 
 export async function handleVoiceLeave(deps: VoiceOpsDeps, userId: bigint, deviceId: string): Promise<void> {
@@ -106,7 +162,7 @@ export async function handleVoiceState(
   }
 
   let hasSpeak = true;
-  if (payload.selfMute === false) {
+  if (payload.selfMute === false && current.guildId !== null) {
     const context = await loadMemberContext(deps.db, current.guildId, userId);
     const permissions = context ? await channelPermissions(deps.db, current.channelId, context) : 0n;
     hasSpeak = hasPermission(permissions, Permission.SPEAK);

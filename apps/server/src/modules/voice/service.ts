@@ -31,7 +31,8 @@ export class VoiceError extends Error {
 export interface VoiceState {
   userId: bigint;
   deviceId: string;
-  guildId: bigint;
+  /** The guild of the channel. Null for a call in a DM or a group DM. */
+  guildId: bigint | null;
   channelId: bigint;
   selfMute: boolean;
   selfDeaf: boolean;
@@ -46,7 +47,7 @@ export interface VoiceState {
 export interface JoinInput {
   userId: bigint;
   deviceId: string;
-  guildId: bigint;
+  guildId: bigint | null;
   channelId: bigint;
   selfMute: boolean;
   selfDeaf: boolean;
@@ -64,7 +65,7 @@ export interface UpdateStateInput {
 /** Turn one voice state into the wire shape sent as VOICE_STATE_UPDATE. */
 export function toVoiceStateUpdate(state: VoiceState, leaving = false): VoiceStateUpdatePayload {
   return {
-    guildId: state.guildId.toString(),
+    guildId: state.guildId?.toString() ?? null,
     channelId: leaving ? null : state.channelId.toString(),
     userId: state.userId.toString(),
     deviceId: state.deviceId,

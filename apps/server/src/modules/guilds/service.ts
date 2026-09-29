@@ -9,7 +9,7 @@ import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
 import type { GatewayService } from "../gateway/service.js";
 import { revalidateGuildVoice } from "../voice/gateway-ops.js";
-import type { VoiceService } from "../voice/service.js";
+import { toVoiceStateUpdate, type VoiceService } from "../voice/service.js";
 import { deleteIconFile, generateIconKey, saveIconFile } from "./icon.js";
 import {
   guildPermissions,
@@ -75,21 +75,7 @@ export async function buildGuildView(db: DbClient, guildId: bigint, userId: bigi
   const voiceStates = voice
     ? viewableChannels
         .filter((channel) => channel.type === "voice")
-        .flatMap((channel) =>
-          voice.channelStates(channel.id).map((peerState) => ({
-            guildId: peerState.guildId.toString(),
-            channelId: peerState.channelId.toString(),
-            userId: peerState.userId.toString(),
-            deviceId: peerState.deviceId,
-            selfMute: peerState.selfMute,
-            selfDeaf: peerState.selfDeaf,
-            selfVideo: peerState.selfVideo,
-            selfStream: peerState.selfStream,
-            serverMute: peerState.serverMute,
-            serverDeaf: peerState.serverDeaf,
-            joinedAt: peerState.joinedAt,
-          })),
-        )
+        .flatMap((channel) => voice.channelStates(channel.id).map((peerState) => toVoiceStateUpdate(peerState)))
     : [];
   return toGuildView(
     context.guild,

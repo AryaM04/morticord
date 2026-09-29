@@ -5,3 +5,6 @@ export * from "./users.js";
 export * from "./guilds.js";
 export * from "./messages.js";
 export * from "./voice.js";
+export * from "./friends.js";
+export * from "./dms.js";
+export * from "./settings.js";

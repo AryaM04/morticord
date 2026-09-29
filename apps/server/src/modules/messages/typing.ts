@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { hasPermission, Permission, DispatchEvent } from "@discord-clone/shared";
 import type { DbClient } from "../../db/client.js";
 import { channels } from "../../db/schema.js";
+import { isMessagingBlocked, isPrivateChannelType, isRecipient } from "../dms/access.js";
 import type { GatewayService } from "../gateway/service.js";
 import { channelPermissions, loadMemberContext } from "../guilds/member-context.js";
 
@@ -20,17 +21,27 @@ export async function handleTyping(
 ): Promise<void> {
   const channelRows = await db.select().from(channels).where(eq(channels.id, channelId)).limit(1);
   const channel = channelRows[0];
-  if (!channel || channel.guildId === null || channel.type !== "text") {
+  if (!channel) {
     return;
   }
 
-  const context = await loadMemberContext(db, channel.guildId, userId);
-  if (!context) {
-    return;
-  }
-  const permissions = await channelPermissions(db, channelId, context);
-  if (!hasPermission(permissions, Permission.VIEW_CHANNEL) || !hasPermission(permissions, Permission.SEND_MESSAGES)) {
-    return;
+  if (isPrivateChannelType(channel.type)) {
+    // A DM has no roles. Every recipient can type, unless a block stops the messages.
+    if (!(await isRecipient(db, channelId, userId)) || (await isMessagingBlocked(db, channel, userId))) {
+      return;
+    }
+  } else {
+    if (channel.guildId === null || channel.type !== "text") {
+      return;
+    }
+    const context = await loadMemberContext(db, channel.guildId, userId);
+    if (!context) {
+      return;
+    }
+    const permissions = await channelPermissions(db, channelId, context);
+    if (!hasPermission(permissions, Permission.VIEW_CHANNEL) || !hasPermission(permissions, Permission.SEND_MESSAGES)) {
+      return;
+    }
   }
 
   if (!gateway.shouldSendTyping(userId, channelId)) {

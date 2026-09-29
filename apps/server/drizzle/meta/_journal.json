@@ -43,6 +43,13 @@
       "when": 1790590838943,
       "tag": "0005_m5_roles_hoist",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790648818470,
+      "tag": "0006_m5_dms_friends_settings",
+      "breakpoints": true
     }
   ]
 }
