@@ -1,7 +1,7 @@
 [package]
 name = "desktop-tauri"
 version = "0.0.0"
-description = "Desktop shell for Discord Clone, built with Tauri."
+description = "Desktop app for Discord Clone, built with Tauri."
 edition = "2021"
 rust-version = "1.98"
 
@@ -13,9 +13,32 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+keyring = { version = "3", features = ["windows-native", "apple-native"] }
+# The same HTTP client and TLS stack as the updater plugin, so the binary
+# holds only one copy of each.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+tokio = { version = "1", features = ["net", "time"] }
+url = "2"
+base64 = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Data_Xml_Dom", "UI_Notifications"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mac-notification-sys = "0.6"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
 
 # Small binary: trade build time and a little speed for a smaller file.
 # This matters because the app ships to friends over a home internet link.

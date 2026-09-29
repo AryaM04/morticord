@@ -5,6 +5,7 @@ import { useStore } from "zustand";
 import { useRealtime } from "../lib/useRealtime.js";
 import { voiceStore } from "../lib/voice.js";
 import { ParticipantVolumeMenu, useParticipantMenu } from "./ParticipantVolumeMenu.js";
+import { serverUrl } from "../lib/server-url.js";
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).slice(0, 2);
@@ -62,7 +63,7 @@ export function VoiceChannelParticipants({
             >
               {member?.user?.avatarKey ? (
                 <img
-                  src={`/api/v1/avatars/${state.userId}/${member.user.avatarKey}`}
+                  src={serverUrl(`/api/v1/avatars/${state.userId}/${member.user.avatarKey}`)}
                   alt=""
                   className="h-6 w-6 rounded-full object-cover"
                 />

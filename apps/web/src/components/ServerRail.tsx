@@ -10,6 +10,7 @@ import { CreateOrJoinGuildDialog } from "./CreateOrJoinGuildDialog.js";
 import { readLastLocation } from "../lib/lastLocation.js";
 import { HOME_PATH } from "../lib/dms.js";
 import { NotificationLevelMenu } from "./NotificationLevelMenu.js";
+import { serverUrl } from "../lib/server-url.js";
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).slice(0, 2);
@@ -57,7 +58,7 @@ function GuildIcon({
       >
         {iconKey ? (
           <img
-            src={`/api/v1/icons/${id}/${iconKey}`}
+            src={serverUrl(`/api/v1/icons/${id}/${iconKey}`)}
             alt=""
             className="h-12 w-12 rounded-full object-cover"
           />

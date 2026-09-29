@@ -10,7 +10,8 @@ import {
   type FileSecrets,
 } from "@discord-clone/client-core";
 import type { Attachment, AttachmentThumbnail } from "@discord-clone/shared";
-import { API_BASE_URL, session } from "./session.js";
+import { session } from "./session.js";
+import { apiBaseUrl } from "./server-url.js";
 
 /** Decrypted files stay in memory up to this total size. */
 const CACHE_BYTES = 50 * 1024 * 1024;
@@ -25,7 +26,7 @@ async function upload(
   const token = await session.apiClient.getAccessToken();
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("POST", `${API_BASE_URL}/channels/${channelId}/attachments`);
+    request.open("POST", `${apiBaseUrl()}/channels/${channelId}/attachments`);
     request.setRequestHeader("Authorization", `Bearer ${token}`);
     request.setRequestHeader("Content-Type", "application/octet-stream");
     request.upload.onprogress = (event) => {
@@ -128,7 +129,7 @@ export function loadDecrypted(id: string, secrets: FileSecrets, mime: string): P
   if (!pending) {
     pending = (async () => {
       const token = await session.apiClient.getAccessToken();
-      const response = await fetch(`${API_BASE_URL}/attachments/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      const response = await fetch(`${apiBaseUrl()}/attachments/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       if (!response.ok) {
         throw new Error("The file could not be downloaded.");
       }

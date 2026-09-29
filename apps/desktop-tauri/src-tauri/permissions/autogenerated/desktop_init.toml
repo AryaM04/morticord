@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-desktop-init"
+description = "Enables the desktop_init command without any pre-configured scope."
+commands.allow = ["desktop_init"]
+
+[[permission]]
+identifier = "deny-desktop-init"
+description = "Denies the desktop_init command without any pre-configured scope."
+commands.deny = ["desktop_init"]

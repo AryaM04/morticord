@@ -2,6 +2,8 @@
 // list comes from GET /auth/providers, not a hard-coded guess.
 import { useEffect, useState } from "react";
 import type { OAuthProvider } from "@discord-clone/shared";
+import { desktopFeatures } from "../lib/platform.js";
+import { serverUrl } from "../lib/server-url.js";
 import { session } from "../lib/session.js";
 
 const PROVIDER_LABEL: Record<OAuthProvider, string> = {
@@ -32,12 +34,24 @@ export function OAuthButtons() {
     return null;
   }
 
+  // The desktop app signs in through the system browser. The server then
+  // sends the code back through the app URL scheme (a deep link).
+  const desktop = desktopFeatures();
+  const startUrl = (provider: OAuthProvider) =>
+    serverUrl(`/api/v1/auth/oauth/${provider}/start${desktop ? "?client=desktop" : ""}`);
+
   return (
     <div className="mb-4 flex flex-col gap-2">
       {providers.map((provider) => (
         <a
           key={provider}
-          href={`/api/v1/auth/oauth/${provider}/start`}
+          href={startUrl(provider)}
+          onClick={(event) => {
+            if (desktop) {
+              event.preventDefault();
+              void desktop.openExternal(startUrl(provider));
+            }
+          }}
           className="rounded border px-3 py-2 text-center text-sm"
           style={{ borderColor: "var(--color-border)" }}
         >

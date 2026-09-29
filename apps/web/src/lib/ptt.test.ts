@@ -1,5 +1,13 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { PTT_RELEASE_DELAY_MS, PushToTalkController, isPttKeyAllowedWhileTyping, isTypingTarget } from "./ptt.js";
+import {
+  PTT_RELEASE_DELAY_MS,
+  PushToTalkController,
+  describeKeyCode,
+  isPttKeyAllowedWhileTyping,
+  isTypingTarget,
+  shortcutFromEvent,
+  shortcutKeyCode,
+} from "./ptt.js";
 
 describe("PushToTalkController", () => {
   beforeEach(() => {
@@ -110,5 +118,42 @@ describe("isTypingTarget", () => {
 
   it("is false for null", () => {
     expect(isTypingTarget(null)).toBe(false);
+  });
+});
+
+describe("shortcutFromEvent", () => {
+  const press = (code: string, mods: Partial<{ ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }> = {}) => ({
+    code,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    metaKey: false,
+    ...mods,
+  });
+
+  it("writes the modifiers in a fixed order before the key", () => {
+    expect(shortcutFromEvent(press("KeyT", { shiftKey: true, ctrlKey: true }))).toBe("Control+Shift+KeyT");
+    expect(shortcutFromEvent(press("F8", { metaKey: true, altKey: true }))).toBe("Alt+Super+F8");
+  });
+
+  it("gives a plain key without modifiers", () => {
+    expect(shortcutFromEvent(press("Backquote"))).toBe("Backquote");
+  });
+
+  it("waits for the main key when only a modifier is down", () => {
+    expect(shortcutFromEvent(press("ControlLeft", { ctrlKey: true }))).toBeNull();
+    expect(shortcutFromEvent(press("MetaRight", { metaKey: true }))).toBeNull();
+  });
+});
+
+describe("shortcutKeyCode and describeKeyCode", () => {
+  it("finds the main key of a shortcut", () => {
+    expect(shortcutKeyCode("Control+Shift+KeyT")).toBe("KeyT");
+    expect(shortcutKeyCode("Backquote")).toBe("Backquote");
+  });
+
+  it("describes a shortcut with modifiers", () => {
+    expect(describeKeyCode("Control+Shift+KeyT")).toBe("Ctrl + Shift + T");
+    expect(describeKeyCode("Digit4")).toBe("4");
   });
 });

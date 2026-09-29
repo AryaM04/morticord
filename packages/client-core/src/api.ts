@@ -41,7 +41,8 @@ interface RequestOptions<T> {
 }
 
 export interface ApiClientOptions {
-  baseUrl: string;
+  /** The API base URL, such as "/api/v1". A function gives the value at the time of each request. */
+  baseUrl: string | (() => string);
   platform: Platform;
   /** Called once the client gives up on the session (reuse, invalid refresh token). */
   onSignedOut: () => void;
@@ -109,7 +110,8 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     }
 
     try {
-      return await fetch(`${baseUrl}${path}`, { method, headers, body: requestBody });
+      const base = typeof baseUrl === "function" ? baseUrl() : baseUrl;
+      return await fetch(`${base}${path}`, { method, headers, body: requestBody });
     } catch {
       throw new ApiError(0, "NETWORK_ERROR", "The server could not be reached. Check your connection.");
     }

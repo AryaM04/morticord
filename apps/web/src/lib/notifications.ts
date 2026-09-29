@@ -3,7 +3,7 @@
 // the web). This file asks for the permission only from a button in the
 // user settings, never on page load.
 import { navigate } from "wouter/use-browser-location";
-import { dmDisplayName, notificationLevelOf, shouldNotify, webPlatform } from "@discord-clone/client-core";
+import { dmDisplayName, notificationLevelOf, shouldNotify } from "@discord-clone/client-core";
 import type { EventJson } from "@discord-clone/shared";
 import { realtimeStore, subscribeDispatch } from "./realtime.js";
 import { messageCodec } from "./messages.js";
@@ -11,6 +11,7 @@ import { settingsStore } from "./settings.js";
 import { presenceUiStore } from "./presence.js";
 import { displayNameOf } from "./members.js";
 import { dmPath } from "./dms.js";
+import { currentPlatform, desktopFeatures } from "./platform.js";
 
 const MAX_BODY_LENGTH = 200;
 const MENTION_RE = /<@(\d+)>/g;
@@ -18,11 +19,18 @@ const MENTION_RE = /<@(\d+)>/g;
 export type NotificationPermissionState = "granted" | "denied" | "default" | "unsupported";
 
 export function notificationPermission(): NotificationPermissionState {
+  // The desktop app shows system notifications. It needs no browser permission.
+  if (desktopFeatures()) {
+    return "granted";
+  }
   return typeof Notification === "undefined" ? "unsupported" : Notification.permission;
 }
 
 /** Ask the browser for the permission. Call this only from a click. */
 export async function requestNotificationPermission(): Promise<NotificationPermissionState> {
+  if (desktopFeatures()) {
+    return "granted";
+  }
   if (typeof Notification === "undefined") {
     return "unsupported";
   }
@@ -75,7 +83,7 @@ async function handleNewEvent(event: EventJson): Promise<void> {
   const body = text.length > MAX_BODY_LENGTH ? `${text.slice(0, MAX_BODY_LENGTH)}…` : text;
   const path = dm ? dmPath(event.channelId) : `/app/${guildId}/${event.channelId}`;
 
-  webPlatform.notify?.({ title, body, tag: event.channelId, onClick: () => navigate(path) });
+  currentPlatform().notify?.({ title, body, tag: event.channelId, onClick: () => navigate(path) });
 }
 
 subscribeDispatch((dispatch) => {

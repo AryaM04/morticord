@@ -12,6 +12,7 @@ import { realtimeStore } from "../lib/realtime.js";
 import { useRealtime } from "../lib/useRealtime.js";
 import { presenceUiStore } from "../lib/presence.js";
 import { MemberContextMenu, type VoiceContext } from "./MemberContextMenu.js";
+import { serverUrl } from "../lib/server-url.js";
 
 const PAGE_SIZE = 50;
 
@@ -67,7 +68,7 @@ function MemberRow({
         <div className="relative">
           {member.user?.avatarKey ? (
             <img
-              src={`/api/v1/avatars/${member.userId}/${member.user.avatarKey}`}
+              src={serverUrl(`/api/v1/avatars/${member.userId}/${member.user.avatarKey}`)}
               alt=""
               className="h-8 w-8 rounded-full object-cover"
             />

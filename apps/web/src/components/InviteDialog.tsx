@@ -2,6 +2,7 @@
 // invite, and copy its link.
 import { useEffect, useRef, useState } from "react";
 import { INVITE_MAX_AGE_SECONDS, type CreateInviteRequest } from "@discord-clone/shared";
+import { webPageUrl } from "../lib/server-url.js";
 
 type InviteMaxAgeSeconds = CreateInviteRequest["maxAgeSeconds"];
 import { createInvite } from "@discord-clone/client-core";
@@ -65,7 +66,7 @@ export function InviteDialog({
 
   async function handleCopy() {
     if (!code) return;
-    const url = `${window.location.origin}/invite/${code}`;
+    const url = webPageUrl(`/invite/${code}`);
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
@@ -74,7 +75,7 @@ export function InviteDialog({
     }
   }
 
-  const inviteUrl = code ? `${window.location.origin}/invite/${code}` : "";
+  const inviteUrl = code ? webPageUrl(`/invite/${code}`) : "";
 
   return (
     <dialog
