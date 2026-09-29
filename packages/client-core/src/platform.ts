@@ -1,6 +1,7 @@
-// A platform gives client-core the one thing it needs from the host: a
-// secure place to keep the session. The web app uses IndexedDB. A
-// desktop shell (M7) will supply its own OS key store here.
+// A platform gives client-core the things it needs from the host: a
+// secure place to keep the session, and desktop notifications. The web
+// app uses IndexedDB and the Notification API. A desktop shell (M7) will
+// supply its own OS key store and notification service here.
 
 /** A small secure key-value store. Values are text (JSON, in practice). */
 export interface SecureStore {
@@ -9,9 +10,20 @@ export interface SecureStore {
   delete(key: string): Promise<void>;
 }
 
+export interface NotifyOptions {
+  title: string;
+  body: string;
+  /** Messages with the same tag replace each other, for example one tag for each channel. */
+  tag?: string;
+  /** Called when the user clicks the notification. */
+  onClick?: () => void;
+}
+
 /** The host services that client-core needs. */
 export interface Platform {
   secureStore: SecureStore;
+  /** Show a desktop notification. It does nothing when the user did not give permission. */
+  notify?(options: NotifyOptions): void;
 }
 
 const DB_NAME = "discord-clone-secure-store";
@@ -72,7 +84,21 @@ function createIndexedDbSecureStore(): SecureStore {
   };
 }
 
-/** The platform for the web app: a browser tab, backed by IndexedDB. */
+/** Show a notification through the Notification API. The app asks for the permission from a button. */
+function webNotify(options: NotifyOptions): void {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") {
+    return;
+  }
+  const notification = new Notification(options.title, { body: options.body, tag: options.tag });
+  notification.onclick = () => {
+    window.focus();
+    notification.close();
+    options.onClick?.();
+  };
+}
+
+/** The platform for the web app: a browser tab, backed by IndexedDB and the Notification API. */
 export const webPlatform: Platform = {
   secureStore: createIndexedDbSecureStore(),
+  notify: webNotify,
 };

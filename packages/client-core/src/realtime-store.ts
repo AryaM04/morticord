@@ -484,6 +484,22 @@ export function applyDispatch(state: RealtimeState, event: GatewayDispatch): Rea
       return { ...state, remoteSettingsVersion: version };
     }
 
+    case "EVENT_CREATE": {
+      // Keep the newest event of a DM, for the order of the DM list and to open a closed DM again.
+      const created = event.d as { id: string; channelId: string; relType: string | null };
+      const channel = state.privateChannels[created.channelId];
+      if (!channel || (created.relType !== null && created.relType !== "reply")) {
+        return state;
+      }
+      if (channel.lastEventId !== null && BigInt(channel.lastEventId) >= BigInt(created.id)) {
+        return state;
+      }
+      return {
+        ...state,
+        privateChannels: { ...state.privateChannels, [channel.id]: { ...channel, lastEventId: created.id } },
+      };
+    }
+
     case "VOICE_STATE_UPDATE": {
       const voiceState = event.d as VoiceStateJson;
       return {
