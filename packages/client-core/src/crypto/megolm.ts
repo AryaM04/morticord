@@ -42,6 +42,8 @@ const FORWARD_INTERVAL_MS = 10 * 60 * 1000;
 const REQUEST_HELPER_USERS = 3;
 /** After the first device, this many more devices send history to a new member, after a random delay. */
 const BACKUP_FORWARDERS = 2;
+/** Keep at most this many key requests that got no answer, for a later new try. */
+const MAX_UNANSWERED = 1000;
 
 export interface MegolmTimings {
   /** The delay before each key request attempt. The number of values is the number of attempts. */
@@ -88,6 +90,18 @@ interface CachedInbound {
   session: InboundSession;
 }
 
+/** A Megolm session in the form that a forward and the key backup use. */
+export interface ExportedSession {
+  channelId: string;
+  sessionId: string;
+  /** Exported at the first known index. */
+  sessionKey: string;
+  senderUserId: string;
+  senderDeviceId: string;
+  senderEd25519: string;
+  signature: string;
+}
+
 interface PendingRequest {
   channelId: string;
   senderUserId: string;
@@ -132,6 +146,8 @@ export class MegolmMachine {
   private readonly background = new Set<Promise<void>>();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private readonly pending = new Map<string, PendingRequest>();
+  /** Key requests with no answer after the last try. `restartRequests` tries them again. */
+  private readonly unanswered = new Map<string, PendingRequest>();
   private readonly shareFailures = new Map<string, number>();
   private readonly answered = new Map<string, number>();
   private readonly forwarded = new Map<string, number>();
@@ -195,7 +211,7 @@ export class MegolmMachine {
     const plaintext = encodePlainPayload(payload);
     return this.deps.queue.run(`megolm-out:${channelId}`, async () => {
       const { guildId, userIds } = await this.deps.membership.eligible(channelId);
-      const devicesByUser = await this.deps.deviceList.getDevicesOfUsers(userIds);
+      const devicesByUser = await this.deps.deviceList.trustedDevicesOfUsers(userIds);
       let record = await this.deps.store.getOutbound(channelId);
       const reason = record ? this.rotationReason(record, devicesByUser) : null;
       if (reason) {
@@ -462,7 +478,26 @@ export class MegolmMachine {
   }
 
   private async receiveForward(event: DecryptedToDevice): Promise<void> {
-    const content = strings(event.content, [
+    await this.importExported(event.content, `device ${event.sender.deviceId}`);
+  }
+
+  /**
+   * Import a session from the key backup. It gets the same checks as a
+   * forward. `backupVersion` marks it as in that backup already. It never
+   * throws. Returns true when the session was valid.
+   */
+  async importBackedUpSession(content: Record<string, unknown>, backupVersion: number): Promise<boolean> {
+    try {
+      return await this.importExported(content, "the key backup", backupVersion);
+    } catch (error) {
+      this.log(`A session from the key backup could not be imported: ${String(error)}`);
+      return false;
+    }
+  }
+
+  /** Check and import an exported session (a forward or a backup copy). Returns true when it is valid. */
+  private async importExported(raw: Record<string, unknown>, source: string, backupVersion?: number): Promise<boolean> {
+    const content = strings(raw, [
       "channelId",
       "sessionId",
       "sessionKey",
@@ -472,43 +507,49 @@ export class MegolmMachine {
       "signature",
     ]);
     if (!content) {
-      return;
+      return false;
     }
     const original = await this.deps.deviceList.getDevice(content.senderUserId!, content.senderDeviceId!);
     // When the sender device is known, its verified key must be the key in the forward.
     if (original && original.ed25519 !== content.senderEd25519) {
-      this.log(`A forwarded Megolm key names a wrong key for device ${content.senderDeviceId}.`);
-      return;
+      this.log(`A Megolm key from ${source} names a wrong key for device ${content.senderDeviceId}.`);
+      return false;
     }
     const text = megolmSessionSignedText(content.channelId!, content.sessionId!, content.senderUserId!, content.senderDeviceId!);
     if (!this.deps.wasm.verify(content.senderEd25519!, text, content.signature!)) {
-      this.log(`A forwarded Megolm key from device ${event.sender.deviceId} has a bad signature.`);
-      return;
+      this.log(`A Megolm key from ${source} has a bad signature.`);
+      return false;
     }
-    await this.importSession(content, () => this.deps.wasm.InboundGroupSession.import(content.sessionKey!), {
-      senderUserId: content.senderUserId!,
-      senderDeviceId: content.senderDeviceId!,
-      senderEd25519: content.senderEd25519!,
-      forwarded: true,
-    });
+    return this.importSession(
+      content,
+      () => this.deps.wasm.InboundGroupSession.import(content.sessionKey!),
+      {
+        senderUserId: content.senderUserId!,
+        senderDeviceId: content.senderDeviceId!,
+        senderEd25519: content.senderEd25519!,
+        forwarded: true,
+      },
+      backupVersion,
+    );
   }
 
   private async importSession(
     content: Record<string, string>,
     make: () => InboundSession,
     sender: Pick<InboundRecord, "senderUserId" | "senderDeviceId" | "senderEd25519" | "forwarded">,
-  ): Promise<void> {
+    backupVersion?: number,
+  ): Promise<boolean> {
     let session: InboundSession;
     try {
       session = make();
     } catch {
       this.log("A Megolm key is not valid.");
-      return;
+      return false;
     }
     try {
       if (session.session_id !== content.sessionId) {
         this.log("A Megolm key does not match its session id.");
-        return;
+        return false;
       }
       await this.storeInbound({
         sessionId: content.sessionId,
@@ -518,7 +559,9 @@ export class MegolmMachine {
         pickle: session.pickle(this.deps.pickleKey),
         firstKnownIndex: session.first_known_index,
         indexes: {},
+        ...(backupVersion === undefined ? {} : { backupVersion }),
       });
+      return true;
     } finally {
       session.free();
     }
@@ -546,6 +589,7 @@ export class MegolmMachine {
         if (existing.firstKnownIndex <= candidate.firstKnownIndex) {
           return false;
         }
+        // The new copy has an earlier first index. The backup gets it again, unless it came from the backup.
         next = { ...candidate, indexes: existing.indexes, forwarded: existing.forwarded && candidate.forwarded };
       }
       await this.deps.store.putInbound(next);
@@ -616,6 +660,7 @@ export class MegolmMachine {
     if (this.stopped || this.pending.has(sessionId)) {
       return;
     }
+    this.unanswered.delete(sessionId);
     const entry: PendingRequest = {
       channelId: event.channelId,
       senderUserId: event.senderId,
@@ -640,6 +685,10 @@ export class MegolmMachine {
           if (next === undefined) {
             this.log(`No device sent the key of Megolm session ${sessionId}.`);
             this.pending.delete(sessionId);
+            this.unanswered.set(sessionId, entry);
+            if (this.unanswered.size > MAX_UNANSWERED) {
+              this.unanswered.delete(this.unanswered.keys().next().value!);
+            }
             return;
           }
           this.scheduleRequest(sessionId, entry, next);
@@ -656,6 +705,31 @@ export class MegolmMachine {
         this.scheduleRequest(sessionId, entry, 0);
       }
     }
+  }
+
+  /**
+   * Try every key request again from the first attempt, also the ones that
+   * got no answer. Call it when this device becomes verified: other devices
+   * answer only verified devices.
+   */
+  restartRequests(): void {
+    if (this.stopped) {
+      return;
+    }
+    for (const [sessionId, entry] of this.pending) {
+      // A request that is on its way now goes again when it ends (the first delay).
+      entry.attempt = 0;
+      if (entry.timer) {
+        clearTimeout(entry.timer);
+        this.scheduleRequest(sessionId, entry, 0);
+      }
+    }
+    for (const [sessionId, entry] of this.unanswered) {
+      entry.attempt = 0;
+      this.pending.set(sessionId, entry);
+      this.scheduleRequest(sessionId, entry, 0);
+    }
+    this.unanswered.clear();
   }
 
   /** Ask the devices of this user, the devices of the sender and some other readers of the channel. */
@@ -681,6 +755,11 @@ export class MegolmMachine {
       return;
     }
     const requester = event.sender;
+    // Only a device that the master key of its user signed gets keys.
+    if (!(await this.deps.deviceList.isTrusted(requester))) {
+      this.log(`Device ${requester.deviceId} asked for a key, but its owner did not verify it.`);
+      return;
+    }
     const key = `${deviceKey(requester)}:${content.sessionId}`;
     const now = this.now();
     if (now - (this.answered.get(key) ?? -Infinity) < ANSWER_INTERVAL_MS) {
@@ -705,25 +784,37 @@ export class MegolmMachine {
     await this.forwardSessions([record], [refOf(requester)]);
   }
 
+  /** One inbound session, exported at its first known index, with that index. Null when this device does not have it. */
+  async exportSession(sessionId: string): Promise<{ content: ExportedSession; firstKnownIndex: number } | null> {
+    return this.deps.queue.run(`megolm-in:${sessionId}`, async () => {
+      const entry = await this.loadInbound(sessionId);
+      const sessionKey = entry?.session.export_at(entry.session.first_known_index);
+      if (!entry || !sessionKey) {
+        return null;
+      }
+      const { record } = entry;
+      return {
+        content: {
+          channelId: record.channelId,
+          sessionId: record.sessionId,
+          sessionKey,
+          senderUserId: record.senderUserId,
+          senderDeviceId: record.senderDeviceId,
+          senderEd25519: record.senderEd25519,
+          signature: record.signature,
+        },
+        firstKnownIndex: record.firstKnownIndex,
+      };
+    });
+  }
+
   /** Send each session, exported at its first known index, to the target devices. */
   private async forwardSessions(records: InboundRecord[], targets: DeviceRef[]): Promise<void> {
     for (const record of records) {
-      const exported = await this.deps.queue.run(`megolm-in:${record.sessionId}`, async () => {
-        const entry = await this.loadInbound(record.sessionId);
-        return entry ? { record: entry.record, key: entry.session.export_at(entry.session.first_known_index) } : null;
-      });
-      if (!exported?.key) {
-        continue;
+      const exported = await this.exportSession(record.sessionId);
+      if (exported) {
+        await this.deps.olm.encryptToDevices(targets, FORWARD_TYPE, { ...exported.content });
       }
-      await this.deps.olm.encryptToDevices(targets, FORWARD_TYPE, {
-        channelId: exported.record.channelId,
-        sessionId: exported.record.sessionId,
-        sessionKey: exported.key,
-        senderUserId: exported.record.senderUserId,
-        senderDeviceId: exported.record.senderDeviceId,
-        senderEd25519: exported.record.senderEd25519,
-        signature: exported.record.signature,
-      });
     }
   }
 
@@ -854,7 +945,7 @@ export class MegolmMachine {
     if (!userIds.includes(userId)) {
       return;
     }
-    const devices = (await this.deps.deviceList.getDevicesOfUsers([userId])).get(userId) ?? [];
+    const devices = (await this.deps.deviceList.trustedDevicesOfUsers([userId])).get(userId) ?? [];
     const records = await this.deps.store.inboundForChannel(channelId);
     if (devices.length > 0 && records.length > 0) {
       await this.forwardSessions(records, devices.map(refOf));

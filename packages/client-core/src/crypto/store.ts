@@ -34,6 +34,8 @@ export interface UserRecord {
   masterKey: string | null;
   /** A different master key that the server now shows. The UI must warn. */
   changedMasterKey: string | null;
+  /** The master key that a SAS verification confirmed. It is stronger than trust on first use. */
+  verifiedMasterKey?: string | null;
 }
 
 /** The outbound Megolm session of this device for one channel. */
@@ -74,6 +76,8 @@ export interface InboundRecord {
   indexes: Record<string, string>;
   /** True when the key came from a different device than the sender (history share or key request). */
   forwarded: boolean;
+  /** The key backup version that has this session at this first index. Not set when the backup does not have it. */
+  backupVersion?: number;
 }
 
 /** The users who could read a channel when this device last checked. Used to find new members. */
@@ -99,6 +103,10 @@ export interface CryptoStore {
   getInbound(sessionId: string): Promise<InboundRecord | undefined>;
   putInbound(record: InboundRecord): Promise<void>;
   inboundForChannel(channelId: string): Promise<InboundRecord[]>;
+  /** At most `limit` inbound sessions with a session id after `after`, in session id order. */
+  inboundPage(after: string | null, limit: number): Promise<InboundRecord[]>;
+  /** Mark sessions as in the backup version, when their first index did not change since the upload. */
+  markBackedUp(sessions: Array<{ sessionId: string; firstKnownIndex: number }>, version: number): Promise<void>;
   getSnapshot(channelId: string): Promise<ChannelSnapshot | undefined>;
   putSnapshot(snapshot: ChannelSnapshot): Promise<void>;
   snapshotsForGuild(guildId: string): Promise<ChannelSnapshot[]>;
@@ -189,6 +197,19 @@ export async function openCryptoStore(name: string, factory: IDBFactory = indexe
     getInbound: (sessionId) => read(INBOUND, (store) => store.get(sessionId)),
     putInbound: (record) => write(INBOUND, (store) => store.put(record)),
     inboundForChannel: (channelId) => read(INBOUND, (store) => store.index("channelId").getAll(channelId)),
+    inboundPage: (after, limit) =>
+      read(INBOUND, (store) => store.getAll(after === null ? null : IDBKeyRange.lowerBound(after, true), limit)),
+    async markBackedUp(sessions, version) {
+      const tx = db.transaction(INBOUND, "readwrite");
+      const store = tx.objectStore(INBOUND);
+      for (const { sessionId, firstKnownIndex } of sessions) {
+        const record = (await done(store.get(sessionId))) as InboundRecord | undefined;
+        if (record && record.firstKnownIndex === firstKnownIndex) {
+          store.put({ ...record, backupVersion: version });
+        }
+      }
+      await finished(tx);
+    },
     getSnapshot: (channelId) => read(CHANNELS, (store) => store.get(channelId)),
     putSnapshot: (snapshot) => write(CHANNELS, (store) => store.put(snapshot)),
     snapshotsForGuild: (guildId) => read(CHANNELS, (store) => store.index("guildId").getAll(guildId)),

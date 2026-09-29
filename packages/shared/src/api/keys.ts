@@ -197,6 +197,8 @@ export const backupAuthDataSchema = z.object({
   /** The device that made the backup. Its Ed25519 key signs `backupSignedText`. */
   deviceId: deviceIdSchema,
   signature: signatureSchema,
+  /** The master key signs the same text when the device that made the backup holds it. */
+  masterSignature: signatureSchema.nullable(),
 });
 export type BackupAuthData = z.infer<typeof backupAuthDataSchema>;
 

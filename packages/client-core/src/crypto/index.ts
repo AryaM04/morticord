@@ -15,6 +15,7 @@ import type { SecureStore } from "../platform.js";
 import { AccountHolder } from "./account.js";
 import { DeviceList } from "./device-list.js";
 import { DeviceManager } from "./device-manager.js";
+import { KeyBackup, type BackupStatus, type BackupTimings, type RestoreProgress, type RestoreResult } from "./key-backup.js";
 import { MegolmMachine, type MegolmTimings } from "./megolm.js";
 import { ChannelMembership, membershipScope } from "./membership.js";
 import { OlmMachine, type EncryptResult, type ToDeviceHandler } from "./olm-machine.js";
@@ -22,6 +23,7 @@ import { KeyedQueue } from "./queue.js";
 import { SettingsKeys } from "./settings-key.js";
 import { cryptoStoreName, openCryptoStore, type CryptoStore } from "./store.js";
 import type { CryptoTransport } from "./transport.js";
+import { VerificationMachine, type VerificationView } from "./verification.js";
 import { loadWasm } from "./wasm.js";
 
 export { createHttpCryptoTransport, type CryptoTransport } from "./transport.js";
@@ -29,6 +31,9 @@ export type { DecryptedToDevice, EncryptResult, ToDeviceHandler } from "./olm-ma
 export type { DeviceRecord, UserRecord } from "./store.js";
 export { WAITING_TEXT, type MegolmTimings } from "./megolm.js";
 export { SettingsKeyMissingError } from "./settings-key.js";
+export { WrongRecoveryKeyError, type BackupStatus, type RestoreProgress, type RestoreResult } from "./key-backup.js";
+export { SAS_EMOJIS, type VerificationPhase, type VerificationView } from "./verification.js";
+export { decodeRecoveryKey, encodeRecoveryKey } from "./recovery-key.js";
 
 /** The gateway events that say that a user left a guild, a DM or a channel. */
 const MEMBER_LEFT_EVENTS = new Set([
@@ -58,6 +63,67 @@ export interface StartCryptoOptions {
   random?: () => number;
   /** Shorter Megolm delays for tests. */
   megolmTimings?: Partial<MegolmTimings>;
+  /** Shorter key backup delays for tests. */
+  backupTimings?: Partial<BackupTimings>;
+  /** A shorter verification timeout for tests. */
+  verificationTimeoutMs?: number;
+}
+
+/** The trust state of this device and the key backup, for the UI. */
+export interface SecurityState {
+  /** True when the master key of this user signed this device. Only then do other devices share keys with it. */
+  deviceVerified: boolean;
+  /** True when this device holds the master private key, so it can sign other devices of this user. */
+  holdsMasterKey: boolean;
+  backup: BackupStatus;
+}
+
+/** One device of this user, for the device list in the security settings. */
+export interface OwnDevice {
+  deviceId: string;
+  verified: boolean;
+  current: boolean;
+}
+
+/** What this device knows about the identity (the master key) of a user. */
+export interface UserTrust {
+  /** True when a SAS verification confirmed the current master key of the user. */
+  verified: boolean;
+  /** True when the master key changed since this device trusted it. No keys go to that user until the change is accepted. */
+  changed: boolean;
+}
+
+export interface SecurityApi {
+  state(): Promise<SecurityState>;
+  /** Watch changes of the state, of the device list of this user and of the identity of other users. */
+  onChange(listener: () => void): () => void;
+  ownDevices(): Promise<OwnDevice[]>;
+  userTrust(userId: string): Promise<UserTrust>;
+  /** Accept the new master key of a user after an identity change. */
+  acceptIdentityChange(userId: string): Promise<void>;
+  /** Make a new key backup. Returns the recovery key text, to show one time. */
+  setUpBackup(passphrase?: string): Promise<{ recoveryKey: string }>;
+  restoreBackup(
+    input: { recoveryKey: string } | { passphrase: string },
+    onProgress?: (progress: RestoreProgress) => void,
+  ): Promise<RestoreResult>;
+  deleteBackup(): Promise<void>;
+  /** Make a new master key after the old one is lost. The account password is necessary. */
+  resetIdentity(password: string): Promise<void>;
+}
+
+export interface VerificationApi {
+  list(): VerificationView[];
+  onChange(listener: () => void): () => void;
+  /** Ask the other devices of this user (or one of them) to verify this device. */
+  requestOwnDevices(deviceId?: string): Promise<string>;
+  /** Ask a different user to verify identities with this user. */
+  requestUser(userId: string): Promise<string>;
+  accept(txnId: string): Promise<void>;
+  /** The user compared the emojis: `match` false cancels. */
+  confirm(txnId: string, match: boolean): Promise<void>;
+  cancel(txnId: string): Promise<void>;
+  dismiss(txnId: string): void;
 }
 
 export interface CryptoHandle {
@@ -87,6 +153,10 @@ export interface CryptoHandle {
   /** Users whose master key changed. The UI must warn about each one. */
   changedMasterKeys(): Promise<string[]>;
   onMasterKeyChanged(listener: (userId: string) => void): () => void;
+  /** Device verification, the key backup and identity changes. */
+  readonly security: SecurityApi;
+  /** SAS verification with a different device. */
+  readonly verification: VerificationApi;
   /** Wait until every received message is processed. For tests. */
   whenIdle(): Promise<void>;
   stop(): void;
@@ -119,6 +189,14 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
   const account = await AccountHolder.load(wasm, store, pickleKey, queue);
 
   const masterKeyListeners = new Set<(userId: string) => void>();
+  const securityListeners = new Set<() => void>();
+  const securityChanged = () => {
+    for (const listener of securityListeners) {
+      listener();
+    }
+  };
+  let selfVerified: boolean | null = null;
+  let stopped = false;
   const devices = new DeviceList({
     store,
     transport,
@@ -129,6 +207,12 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
       for (const listener of masterKeyListeners) {
         listener(changedUserId);
       }
+    },
+    onUserChanged: (changedUserId) => {
+      if (changedUserId === userId && selfVerified !== null) {
+        void checkSelfVerified();
+      }
+      securityChanged();
     },
   });
   await devices.trackUsers([userId]);
@@ -180,6 +264,59 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
   });
   olm.onToDevice((event) => settings.handleToDevice(event));
 
+  const backup = new KeyBackup({
+    wasm,
+    store,
+    transport,
+    deviceList: devices,
+    manager,
+    megolm,
+    settings,
+    account,
+    userId,
+    deviceId,
+    log,
+    timings: options.backupTimings,
+  });
+  backup.onChange(securityChanged);
+  megolm.onKeys(() => backup.noteNewKey());
+  settings.onKey(() => backup.noteNewKey());
+
+  const verification = new VerificationMachine({
+    wasm,
+    deviceList: devices,
+    manager,
+    encryptToDevices: (targets, type, content) => olm.encryptToDevices(targets, type, content),
+    userId,
+    deviceId,
+    ed25519: account.ed25519,
+    log,
+    timeoutMs: options.verificationTimeoutMs,
+  });
+  olm.onToDevice((event) => verification.handleToDevice(event));
+
+  /** True when the trusted master key of this user signed this device. */
+  async function isSelfVerified(): Promise<boolean> {
+    const self = (await store.getDevices(userId)).find((device) => device.deviceId === deviceId);
+    return self !== undefined && (await devices.isTrusted(self));
+  }
+
+  /**
+   * When this device becomes verified, other devices answer its key
+   * requests, and it can use the key backup. So it asks again.
+   */
+  async function checkSelfVerified(): Promise<void> {
+    const now = await isSelfVerified();
+    const before = selfVerified;
+    selfVerified = now;
+    if (now && before === false && !stopped) {
+      log("This device is verified now. It asks again for the keys that it does not have.");
+      megolm.restartRequests();
+      await settings.retryRequests();
+      await backup.refresh().catch((error: unknown) => log(`The key backup could not be checked: ${String(error)}`));
+    }
+  }
+
   const codec: PayloadCodec = {
     async encode(channelId, payload) {
       const { sessionId, ciphertext } = await megolm.encrypt(channelId, payload);
@@ -194,7 +331,6 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
   // ---- to-device inbox: one message at a time, in arrival order ----
   const inbox: ToDeviceDispatchPayload[] = [];
   let draining: Promise<void> | null = null;
-  let stopped = false;
   let lastAckedId = await olm.lastProcessed();
   let lastAckAt = 0;
   let ackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -264,12 +400,19 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
     } else if (dispatch.t === "DEVICE_LIST_UPDATE") {
       const parsed = deviceListUpdatePayloadSchema.safeParse(dispatch.d);
       if (parsed.success) {
-        void devices.markOutdated(parsed.data.userId);
+        const changedUserId = parsed.data.userId;
+        void devices
+          .markOutdated(changedUserId)
+          // The security UI shows the devices of this user, so they are fetched at once.
+          .then(() => (changedUserId === userId && !stopped ? devices.refresh([userId]) : undefined))
+          .catch((error: unknown) => log(`The device list could not be fetched: ${String(error)}`));
       }
     } else if (dispatch.t === "READY" || dispatch.t === "RESUMED") {
       void resync();
       megolm.retryRequests();
       if (dispatch.t === "READY") {
+        // A different device can have made or deleted the key backup while this one was away.
+        void backup.refresh().catch((error: unknown) => log(`The key backup could not be checked: ${String(error)}`));
         const parsed = readyPayloadSchema.safeParse(dispatch.d);
         if (parsed.success) {
           void manager
@@ -281,6 +424,56 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
   }
 
   await resync();
+  selfVerified = await isSelfVerified();
+  void backup.refresh().catch((error: unknown) => log(`The key backup could not be checked: ${String(error)}`));
+
+  const security: SecurityApi = {
+    async state() {
+      return { deviceVerified: await isSelfVerified(), holdsMasterKey: await manager.hasMasterKey(), backup: backup.status() };
+    },
+    onChange(listener) {
+      securityListeners.add(listener);
+      return () => {
+        securityListeners.delete(listener);
+      };
+    },
+    async ownDevices() {
+      const own = await devices.getDevices(userId);
+      const user = await devices.getUser(userId);
+      const trusted = user !== undefined && user.changedMasterKey === null;
+      return own.map((device) => ({
+        deviceId: device.deviceId,
+        verified: trusted && device.ownerVerified,
+        current: device.deviceId === deviceId,
+      }));
+    },
+    async userTrust(target) {
+      await devices.getDevices(target);
+      const user = await devices.getUser(target);
+      return {
+        verified: Boolean(user?.masterKey && user.verifiedMasterKey === user.masterKey && user.changedMasterKey === null),
+        changed: Boolean(user?.changedMasterKey),
+      };
+    },
+    async acceptIdentityChange(target) {
+      await devices.acceptMasterKeyChange(target);
+      securityChanged();
+    },
+    setUpBackup: (passphrase) => backup.setUp(passphrase),
+    async restoreBackup(input, onProgress) {
+      const result = await backup.restore(input, onProgress);
+      await checkSelfVerified();
+      securityChanged();
+      return result;
+    },
+    deleteBackup: () => backup.delete(),
+    async resetIdentity(password) {
+      await manager.resetMasterKey(password);
+      selfVerified = await isSelfVerified();
+      await backup.refresh().catch((error: unknown) => log(`The key backup could not be checked: ${String(error)}`));
+      securityChanged();
+    },
+  };
 
   return {
     userId,
@@ -314,6 +507,17 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
         masterKeyListeners.delete(listener);
       };
     },
+    security,
+    verification: {
+      list: () => verification.list(),
+      onChange: (listener) => verification.onChange(listener),
+      requestOwnDevices: (target) => verification.requestOwnDevices(target),
+      requestUser: (target) => verification.requestUser(target),
+      accept: (txnId) => verification.accept(txnId),
+      confirm: (txnId, match) => verification.confirm(txnId, match),
+      cancel: (txnId) => verification.cancel(txnId),
+      dismiss: (txnId) => verification.dismiss(txnId),
+    },
     async whenIdle() {
       for (let round = 0; round < 3; round += 1) {
         while (draining) {
@@ -321,6 +525,7 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
         }
         await olm.whenIdle();
         await megolm.whenIdle();
+        await backup.whenIdle();
       }
       while (draining) {
         await draining;
@@ -329,6 +534,8 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
     stop() {
       stopped = true;
       megolm.stop();
+      backup.stop();
+      verification.stop();
       if (ackTimer) {
         clearTimeout(ackTimer);
       }

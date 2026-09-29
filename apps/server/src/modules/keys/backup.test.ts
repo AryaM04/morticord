@@ -26,6 +26,7 @@ function backupBody(user: TestUser, keys: TestDeviceKeys, publicKey = randomCurv
       passphrase,
       deviceId: user.deviceId,
       signature: keys.signer.sign(backupSignedText(user.userId, publicKey, passphrase)),
+      masterSignature: null,
     },
   };
 }
