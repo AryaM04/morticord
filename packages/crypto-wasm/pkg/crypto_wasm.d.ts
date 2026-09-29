@@ -48,6 +48,21 @@ export class Account {
     readonly max_number_of_one_time_keys: number;
 }
 
+/**
+ * The backup key pair that comes from one recovery key.
+ */
+export class BackupKey {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Decrypt one backup ciphertext. It fails for a wrong key, a wrong
+     * `aad`, a changed byte or an unknown format.
+     */
+    decrypt(ciphertext: Uint8Array, aad: Uint8Array): Uint8Array;
+    constructor(recovery_key: Uint8Array);
+    readonly public_key: string;
+}
+
 export class Decrypted {
     private constructor();
     free(): void;
@@ -62,6 +77,27 @@ export class Encrypted {
     [Symbol.dispose](): void;
     readonly ciphertext: Uint8Array;
     readonly message_type: number;
+}
+
+/**
+ * One side of a SAS verification after the key exchange.
+ */
+export class EstablishedSas {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * The MAC of `input`, as unpadded base64.
+     */
+    calculate_mac(input: string, info: string): string;
+    /**
+     * The 7 emoji indexes (0 to 63) of the Matrix emoji table for this `info`.
+     */
+    emoji_indices(info: string): Uint8Array;
+    /**
+     * True when `mac` is the MAC of `input` for this `info`.
+     */
+    verify_mac(input: string, info: string, mac: string): boolean;
 }
 
 /**
@@ -119,6 +155,24 @@ export class InboundResult {
 }
 
 /**
+ * One side of a SAS verification before the key exchange.
+ */
+export class Sas {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Make the shared secret with the key of the other device. Call it one time only.
+     */
+    diffie_hellman(their_public_key: string): EstablishedSas;
+    constructor();
+    /**
+     * The ephemeral Curve25519 public key to send to the other device.
+     * It is empty after `diffie_hellman`.
+     */
+    readonly public_key: string;
+}
+
+/**
  * An Olm session between two devices.
  */
 export class Session {
@@ -147,7 +201,15 @@ export class Session {
 export class SigningKey {
     free(): void;
     [Symbol.dispose](): void;
+    /**
+     * The 32 secret bytes. Only the key backup uses this, and it encrypts them at once.
+     */
+    export_secret(): Uint8Array;
     static from_pickle(pickle: string, key: Uint8Array): SigningKey;
+    /**
+     * The key from 32 secret bytes, for example from the key backup.
+     */
+    static from_secret(secret: Uint8Array): SigningKey;
     constructor();
     /**
      * Encrypts the secret key with the pickle key (the vodozemac pickle cipher).
@@ -156,6 +218,18 @@ export class SigningKey {
     sign(message: string): string;
     readonly public_key: string;
 }
+
+/**
+ * Encrypt `plaintext` to the backup public key. `aad` is authenticated but
+ * not encrypted. Output: the version byte, the ephemeral public key, then
+ * the AES-256-GCM ciphertext and tag.
+ */
+export function backup_encrypt(public_key: string, plaintext: Uint8Array, aad: Uint8Array): Uint8Array;
+
+/**
+ * Derive a recovery key from a passphrase with Argon2id (version 0x13, 32-byte output).
+ */
+export function derive_recovery_key(passphrase: string, salt: Uint8Array, memory_kib: number, iterations: number, parallelism: number): Uint8Array;
 
 /**
  * Verifies an Ed25519 signature. Returns false for a bad key, a bad
@@ -168,13 +242,16 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_account_free: (a: number, b: number) => void;
+    readonly __wbg_backupkey_free: (a: number, b: number) => void;
     readonly __wbg_decrypted_free: (a: number, b: number) => void;
     readonly __wbg_encrypted_free: (a: number, b: number) => void;
+    readonly __wbg_establishedsas_free: (a: number, b: number) => void;
     readonly __wbg_get_decrypted_message_index: (a: number) => number;
     readonly __wbg_get_encrypted_message_type: (a: number) => number;
     readonly __wbg_groupsession_free: (a: number, b: number) => void;
     readonly __wbg_inboundgroupsession_free: (a: number, b: number) => void;
     readonly __wbg_inboundresult_free: (a: number, b: number) => void;
+    readonly __wbg_sas_free: (a: number, b: number) => void;
     readonly __wbg_session_free: (a: number, b: number) => void;
     readonly __wbg_signingkey_free: (a: number, b: number) => void;
     readonly account_create_inbound_session: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
@@ -192,8 +269,16 @@ export interface InitOutput {
     readonly account_one_time_keys: (a: number) => [number, number];
     readonly account_pickle: (a: number, b: number, c: number) => [number, number, number, number];
     readonly account_sign: (a: number, b: number, c: number) => [number, number];
+    readonly backup_encrypt: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly backupkey_decrypt: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly backupkey_new: (a: number, b: number) => [number, number, number];
+    readonly backupkey_public_key: (a: number) => [number, number];
     readonly decrypted_plaintext: (a: number) => [number, number];
+    readonly derive_recovery_key: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
     readonly encrypted_ciphertext: (a: number) => [number, number];
+    readonly establishedsas_calculate_mac: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+    readonly establishedsas_emoji_indices: (a: number, b: number, c: number) => [number, number];
+    readonly establishedsas_verify_mac: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
     readonly groupsession_encrypt: (a: number, b: number, c: number) => [number, number];
     readonly groupsession_from_pickle: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly groupsession_message_index: (a: number) => number;
@@ -211,6 +296,9 @@ export interface InitOutput {
     readonly inboundgroupsession_session_id: (a: number) => [number, number];
     readonly inboundresult_plaintext: (a: number) => [number, number];
     readonly inboundresult_take_session: (a: number) => [number, number, number];
+    readonly sas_diffie_hellman: (a: number, b: number, c: number) => [number, number, number];
+    readonly sas_new: () => number;
+    readonly sas_public_key: (a: number) => [number, number];
     readonly session_decrypt: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly session_encrypt: (a: number, b: number, c: number) => [number, number, number];
     readonly session_from_pickle: (a: number, b: number, c: number, d: number) => [number, number, number];
@@ -218,7 +306,9 @@ export interface InitOutput {
     readonly session_pickle: (a: number, b: number, c: number) => [number, number, number, number];
     readonly session_session_id: (a: number) => [number, number];
     readonly session_session_matches: (a: number, b: number, c: number, d: number) => number;
+    readonly signingkey_export_secret: (a: number) => [number, number];
     readonly signingkey_from_pickle: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly signingkey_from_secret: (a: number, b: number) => [number, number, number];
     readonly signingkey_new: () => number;
     readonly signingkey_pickle: (a: number, b: number, c: number) => [number, number, number, number];
     readonly signingkey_public_key: (a: number) => [number, number];

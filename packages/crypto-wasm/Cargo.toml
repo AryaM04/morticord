@@ -13,6 +13,13 @@ crate-type = ["cdylib", "rlib"]
 # "low-level-api" gives the pickle cipher for the standalone signing key.
 vodozemac = { version = "0.11", default-features = false, features = ["wasm_js", "low-level-api"] }
 wasm-bindgen = "0.2"
+# The key backup: HKDF-SHA256 and AES-256-GCM for the backup encryption,
+# and Argon2id for the recovery passphrase. vodozemac uses the same
+# versions of hkdf, sha2 and aes, so the WASM file has one copy of each.
+hkdf = "0.13"
+sha2 = "0.11"
+aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
+argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
 
 [profile.release]
 # Make the WASM file small. The client loads it only when E2EE starts.

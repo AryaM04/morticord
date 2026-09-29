@@ -2,9 +2,13 @@ import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   Account,
+  BackupKey,
   GroupSession,
   InboundGroupSession,
+  Sas,
   SigningKey,
+  backup_encrypt,
+  derive_recovery_key,
   initSync,
   verify,
 } from '../pkg/crypto_wasm.js';
@@ -95,5 +99,42 @@ describe('crypto-wasm', () => {
     expect(verify(master.public_key, 'device', copy.sign('device'))).toBe(true);
     expect(() => SigningKey.from_pickle(master.pickle(key), new Uint8Array(32))).toThrow();
     expect(() => master.pickle(new Uint8Array(3))).toThrow();
+  });
+
+  it('encrypts to the backup key and rejects a wrong key or a wrong associated data', () => {
+    const recovery = crypto.getRandomValues(new Uint8Array(32));
+    const key = new BackupKey(recovery);
+    expect(new BackupKey(recovery).public_key).toBe(key.public_key);
+    const sealed = backup_encrypt(key.public_key, text.encode('session'), text.encode('aad'));
+    expect(read(key.decrypt(sealed, text.encode('aad')))).toBe('session');
+    expect(() => key.decrypt(sealed, text.encode('other'))).toThrow();
+    expect(() => new BackupKey(new Uint8Array(32)).decrypt(sealed, text.encode('aad'))).toThrow();
+    expect(() => new BackupKey(new Uint8Array(3))).toThrow();
+  });
+
+  it('derives the same recovery key from the same passphrase and salt', () => {
+    const salt = new Uint8Array(16).fill(7);
+    const derived = derive_recovery_key('correct horse battery staple', salt, 64 * 1024, 3, 1);
+    expect(Buffer.from(derived).toString('hex')).toBe('6ad10af97f1744119bd7135c85121dc589794f9c5d646200b8ad4d6becf15084');
+    expect(() => derive_recovery_key('x', salt, 4 * 1024 * 1024, 3, 1)).toThrow();
+  });
+
+  it('shows the same SAS emojis on both sides and checks the MACs', () => {
+    const alice = new Sas();
+    const bob = new Sas();
+    const aliceKey = alice.public_key;
+    const bobKey = bob.public_key;
+    const a = alice.diffie_hellman(bobKey);
+    const b = bob.diffie_hellman(aliceKey);
+    expect(Array.from(a.emoji_indices('info'))).toEqual(Array.from(b.emoji_indices('info')));
+    expect(b.verify_mac('key', 'mac', a.calculate_mac('key', 'mac'))).toBe(true);
+    expect(b.verify_mac('other', 'mac', a.calculate_mac('key', 'mac'))).toBe(false);
+    expect(() => alice.diffie_hellman(bobKey)).toThrow();
+  });
+
+  it('moves a signing key through its secret bytes', () => {
+    const master = new SigningKey();
+    expect(SigningKey.from_secret(master.export_secret()).public_key).toBe(master.public_key);
+    expect(() => SigningKey.from_secret(new Uint8Array(5))).toThrow();
   });
 });
