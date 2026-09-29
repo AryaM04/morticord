@@ -235,6 +235,20 @@ describe("permissions in a DM", () => {
     }
   });
 
+  it("still works for a guild channel with a partial state, like the settings dialogs build", () => {
+    // The web settings dialogs pass a state with only the guild fields. It has no private channels.
+    const partial = {
+      guilds: { "10": { id: "10", ownerId: "1" } },
+      selfMemberByGuild: { "10": { guildId: "10", userId: "1", nickname: null, joinedAt: "", roles: [] } },
+      rolesByGuild: { "10": [{ id: "10", guildId: "10", name: "@everyone", color: 0, position: 0, permissions: "0", mentionable: true, hoist: false }] },
+      channels: {
+        "11": { id: "11", guildId: "10", type: "text", name: "chat", topic: null, position: 0, parentId: null, lastEventId: null, permissionOverwrites: [] },
+      },
+      selfUserId: "1",
+    } as unknown as RealtimeState;
+    expect(selfChannelPermissions(partial, "11") & Permission.MANAGE_ROLES).toBe(Permission.MANAGE_ROLES);
+  });
+
   it("gives no permission for an unknown channel", () => {
     expect(selfChannelPermissions(readyWith({}), "50")).toBe(0n);
   });
