@@ -64,6 +64,13 @@
       "when": 1790666357216,
       "tag": "0008_m6_keys_and_to_device",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790682870404,
+      "tag": "0009_m6_attachments",
+      "breakpoints": true
     }
   ]
 }

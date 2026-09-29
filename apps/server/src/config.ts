@@ -54,6 +54,11 @@ const envSchema = z.object({
   // Raise this in a test environment to avoid 429s from repeated test runs.
   AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(10),
 
+  // The largest encrypted attachment, in bytes. Default 25 MiB.
+  MAX_ATTACHMENT_BYTES: z.coerce.number().int().positive().default(25 * 1024 * 1024),
+  // The total size of the attachments of one user, in bytes. Default 2 GiB.
+  ATTACHMENT_QUOTA_BYTES: z.coerce.number().int().positive().default(2 * 1024 * 1024 * 1024),
+
   // Set to "true" to accept new events with the plaintext codec (plain-v1).
   // The default rejects them: every client encrypts with megolm-v1. Old
   // plaintext events stay readable in both cases.
@@ -98,6 +103,10 @@ export interface AppConfig {
   };
   /** Accept new events with the plaintext codec. Off by default. */
   allowPlaintextEvents: boolean;
+  /** The largest encrypted attachment, in bytes. */
+  maxAttachmentBytes: number;
+  /** The total size of the attachments of one user, in bytes. */
+  attachmentQuotaBytes: number;
 }
 
 /** Read and check the process environment. Throw a clear error on bad input. */
@@ -150,5 +159,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       forgotPassword: data.AUTH_RATE_LIMIT_PER_MINUTE,
     },
     allowPlaintextEvents: data.ALLOW_PLAINTEXT_EVENTS,
+    maxAttachmentBytes: data.MAX_ATTACHMENT_BYTES,
+    attachmentQuotaBytes: data.ATTACHMENT_QUOTA_BYTES,
   };
 }

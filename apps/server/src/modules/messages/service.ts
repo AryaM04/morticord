@@ -57,7 +57,7 @@ interface ChannelAccess {
  * every recipient has the same permissions (see `DM_PERMISSIONS`).
  * A caller who cannot see the channel gets 404.
  */
-async function loadChannelAccess(db: DbClient, channelId: bigint, userId: bigint): Promise<ChannelAccess> {
+export async function loadChannelAccess(db: DbClient, channelId: bigint, userId: bigint): Promise<ChannelAccess> {
   const rows = await db.select().from(channels).where(eq(channels.id, channelId)).limit(1);
   const channel = rows[0];
   if (!channel) {

@@ -29,6 +29,8 @@ export function buildTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       forgotPassword: 10,
     },
     allowPlaintextEvents: false,
+    maxAttachmentBytes: 25 * 1024 * 1024,
+    attachmentQuotaBytes: 2 * 1024 * 1024 * 1024,
     ...overrides,
   };
 }
