@@ -300,17 +300,23 @@ export async function joinVoiceChannel(guildId: string | null, channelId: string
   if (saved.outputDeviceId) {
     void voiceEngine.setOutputDevice(saved.outputDeviceId);
   }
+  // Set the mic gate before the join, so the engine applies it to the
+  // mic track the moment the track exists. In push-to-talk mode the mic
+  // is closed for the whole join, and the key works while it connects.
+  manualMuted = false;
+  voiceEngine.setDeafen(false);
+  voiceEngine.setMute(saved.inputMode === "push-to-talk");
+  voiceStore.setState({ muted: saved.inputMode === "push-to-talk", deafened: false, pttActive: false });
+  setUpPushToTalkIfNeeded();
   await voiceEngine.join(guildId, channelId);
   if (voiceEngine.channelId === channelId) {
-    manualMuted = false;
-    voiceStore.setState({ status: "connected", muted: false, deafened: false, pttActive: false });
-    setUpPushToTalkIfNeeded();
-    applyMicGate();
+    voiceStore.setState({ status: "connected" });
   } else {
     // join() left the engine in a clean, not-in-call state (for example,
     // the microphone permission was denied). The "error" event already
     // carries the reason.
-    voiceStore.setState({ status: "idle", guildId: null, channelId: null });
+    stopPushToTalkRuntime();
+    voiceStore.setState({ status: "idle", guildId: null, channelId: null, pttActive: false });
   }
 }
 

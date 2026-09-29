@@ -73,7 +73,7 @@ export function VoiceStatusPanel() {
           <span
             className="text-sm font-semibold"
             style={{ color: "var(--color-text-primary)" }}
-            data-voice-status="connected"
+            data-voice-status={status}
           >
             {status === "connecting" ? "Voice connecting" : "Voice connected"}
             {channelName ? `: ${channelName}` : ""}

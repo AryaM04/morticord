@@ -384,6 +384,12 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
   let selfStreamConfirm: ((confirmed: boolean) => void) | null = null;
   let muted = false;
   let deafened = false;
+  /**
+   * Goes up on each join, each leave and each input device change. A mic
+   * request that finishes after a newer one of these started is stale:
+   * its track is stopped, never used.
+   */
+  let micGeneration = 0;
   let inputDeviceId: string | undefined;
   let outputDeviceId: string | undefined;
   let cameraStream: MediaStream | null = null;
@@ -462,6 +468,12 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
       await sender.setParameters(parameters);
     } catch {
       // Not every fake/browser supports sender priority; best-effort.
+    }
+  }
+
+  function stopTracks(stream: MediaStream): void {
+    for (const track of stream.getTracks()) {
+      track.stop();
     }
   }
 
@@ -1204,6 +1216,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
   // ---- public: join/leave ------------------------------------------------------
 
   async function teardown(shouldSendLeave: boolean): Promise<void> {
+    micGeneration += 1;
     const wasActive = currentChannelId !== null || peers.size > 0 || localStream !== null;
     if (!wasActive) {
       return;
@@ -1293,17 +1306,23 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
 
     currentGuildId = guildId;
     currentChannelId = channelId;
+    const generation = ++micGeneration;
+    const requestedDeviceId = inputDeviceId;
 
+    let stream: MediaStream;
     try {
-      localStream = await deps.getUserMedia({
+      stream = await deps.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          ...(inputDeviceId ? { deviceId: inputDeviceId } : {}),
+          ...(requestedDeviceId ? { deviceId: requestedDeviceId } : {}),
         },
       });
     } catch {
+      if (generation !== micGeneration) {
+        return;
+      }
       currentChannelId = null;
       currentGuildId = null;
       emitError({
@@ -1315,8 +1334,19 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
       // the engine already back in a clean, not-in-call state.
       return;
     }
+    if (generation !== micGeneration) {
+      // A leave (or a newer join) started while the browser opened the
+      // mic. This join is void: stop its track and send nothing.
+      stopTracks(stream);
+      return;
+    }
 
+    localStream = stream;
     applyMuteToLocalTrack();
+    if (inputDeviceId !== requestedDeviceId && inputDeviceId !== undefined) {
+      // The user chose another mic while the browser opened this one.
+      setInputDevice(inputDeviceId);
+    }
     audioContext = deps.createAudioContext();
     masterGain = audioContext.createGain();
     masterGain.gain.value = deafened ? 0 : 1;
@@ -1589,7 +1619,11 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
   function setMute(nextMuted: boolean): void {
     muted = nextMuted;
     applyMuteToLocalTrack();
-    deps.sendVoiceState({ selfMute: muted });
+    // Before a join, keep the value only: `join()` applies it to the new
+    // track at once and sends it with VOICE_JOIN.
+    if (currentChannelId !== null) {
+      deps.sendVoiceState({ selfMute: muted });
+    }
   }
 
   function setDeafen(nextDeafened: boolean): void {
@@ -1599,14 +1633,18 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
     }
     // Un-deafening restores whatever `setMute` last set; it does not force an unmute.
     applyMuteToLocalTrack();
-    deps.sendVoiceState({ selfDeaf: deafened });
+    if (currentChannelId !== null) {
+      deps.sendVoiceState({ selfDeaf: deafened });
+    }
   }
 
   function setInputDevice(deviceId: string): void {
     inputDeviceId = deviceId;
-    if (currentChannelId === null) {
+    // Before a join, or while `join()` still opens the mic, keep the value only: `join()` reads it.
+    if (currentChannelId === null || localStream === null) {
       return;
     }
+    const generation = ++micGeneration;
     void (async () => {
       let newStream: MediaStream;
       try {
@@ -1614,6 +1652,9 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, deviceId },
         });
       } catch {
+        if (generation !== micGeneration) {
+          return;
+        }
         emitError({
           kind: "mic-permission-denied",
           message: "The browser did not allow use of the microphone.",
@@ -1621,12 +1662,15 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
         return;
       }
       const newTrack = newStream.getAudioTracks()[0];
-      if (!newTrack) {
+      if (!newTrack || generation !== micGeneration) {
+        // A newer device change, a leave or a new join made this track stale.
+        stopTracks(newStream);
         return;
       }
-      newTrack.enabled = !muted && !deafened;
       const oldStream = localStream;
       localStream = newStream;
+      // Apply the current gate (mute, deafen, push to talk) before any peer can send the track.
+      applyMuteToLocalTrack();
       for (const runtime of peers.values()) {
         const sender = runtime.pc.getSenders().find((s) => s.track?.kind === "audio");
         if (sender) {
@@ -1640,9 +1684,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
         setupLocalSpeakingSource();
       }
       if (oldStream) {
-        for (const track of oldStream.getTracks()) {
-          track.stop();
-        }
+        stopTracks(oldStream);
       }
     })();
   }
