@@ -1,5 +1,5 @@
-// The account settings dialog: display name, status text, avatar, and
-// sign out. Uses the native <dialog> element, which gives us a modal,
+// The account settings dialog: display name, status text, avatar, the
+// security settings (encryption), and sign out. Uses the native <dialog> element, which gives us a modal,
 // focus trapping and Escape-to-close for free.
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { displayNameSchema } from "@discord-clone/shared";
@@ -12,6 +12,7 @@ import { session } from "../lib/session.js";
 
 // The notification part loads only when the dialog opens, to keep the main bundle small.
 const NotificationSettings = lazy(() => import("./NotificationSettings.js"));
+const SecurityDialog = lazy(() => import("./SecurityDialog.js"));
 
 const MAX_AVATAR_BYTES = 1024 * 1024;
 const ALLOWED_AVATAR_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -25,6 +26,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
   const [formError, setFormError] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
   const [, navigate] = useLocation();
 
   useEffect(() => {
@@ -141,6 +143,15 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
       {open && (
         <Suspense fallback={null}>
           <NotificationSettings />
+        </Suspense>
+      )}
+
+      <button type="button" onClick={() => setSecurityOpen(true)} className="mb-4 text-sm underline">
+        Security: devices and secure backup
+      </button>
+      {securityOpen && (
+        <Suspense fallback={null}>
+          <SecurityDialog open onClose={() => setSecurityOpen(false)} />
         </Suspense>
       )}
 

@@ -8,6 +8,7 @@ import { ChatPane } from "../components/ChatPane.js";
 import { MemberList } from "../components/MemberList.js";
 import { VerifyBanner } from "../components/VerifyBanner.js";
 import { NoticeBanner } from "../components/NoticeBanner.js";
+import { SecurityBanner } from "../components/SecurityBanner.js";
 import { HomeView } from "./HomeView.js";
 import { useRealtime } from "../lib/useRealtime.js";
 import { clearLastLocation, readLastLocation, rememberLastLocation } from "../lib/lastLocation.js";
@@ -98,6 +99,7 @@ export function AppShell() {
   return (
     <div className="flex h-full w-full flex-col">
       <VerifyBanner />
+      <SecurityBanner />
       <NoticeBanner />
       <div className="flex flex-1">
         <ServerRail activeGuildId={params.guildId} />
