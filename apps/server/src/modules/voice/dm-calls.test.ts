@@ -231,7 +231,7 @@ describeWithDb("dm calls", () => {
     expect(server.ringer.isRinging(BigInt(channelId))).toBe(false);
   });
 
-  it("relays a signal between two people in a DM call, and allows unmute", async () => {
+  it("lets two people join a DM call, and allows unmute", async () => {
     const alice = await registerUser(server, "signal");
     const bob = await registerUser(server, "signal");
     const channelId = await openDm(alice, bob);
@@ -242,14 +242,6 @@ describeWithDb("dm calls", () => {
     await aliceSocket.event("VOICE_STATE_UPDATE", (d) => d.userId === alice.userId);
     join(bobSocket, channelId);
     await bobSocket.event("VOICE_STATE_UPDATE", (d) => d.userId === bob.userId);
-
-    aliceSocket.send(GatewayOpcode.VOICE_SIGNAL, {
-      channelId,
-      targetUserId: bob.userId,
-      targetDeviceId: bob.deviceId,
-      payload: { sdp: "offer" },
-    });
-    expect(await bobSocket.event("VOICE_SIGNAL")).toMatchObject({ channelId, fromUserId: alice.userId, payload: { sdp: "offer" } });
 
     aliceSocket.send(GatewayOpcode.VOICE_STATE, { selfMute: false, selfVideo: true });
     const update = await bobSocket.event("VOICE_STATE_UPDATE", (d) => d.userId === alice.userId && d.selfVideo === true);

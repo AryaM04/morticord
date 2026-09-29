@@ -12,9 +12,6 @@ import type { VoiceErrorCode, VoiceStateUpdatePayload } from "@discord-clone/sha
 /** How many peers a voice channel can hold at once. */
 export const VOICE_CHANNEL_CAP = 10;
 
-/** The largest signaling payload the server relays, in bytes of its JSON form. */
-export const MAX_SIGNAL_PAYLOAD_BYTES = 16 * 1024;
-
 /** How long a disconnected peer's voice state stays, in case it resumes. Default 15 s. */
 export const DEFAULT_VOICE_GRACE_MS = 15_000;
 
@@ -42,6 +39,8 @@ export interface VoiceState {
   serverMute: boolean;
   serverDeaf: boolean;
   joinedAt: string;
+  /** The random id that the client chose for this join, or undefined. */
+  callId?: string;
 }
 
 export interface JoinInput {
@@ -53,6 +52,7 @@ export interface JoinInput {
   selfDeaf: boolean;
   /** True when the caller lacks SPEAK in this channel: selfMute is forced on. */
   forceMute: boolean;
+  callId?: string;
 }
 
 export interface UpdateStateInput {
@@ -76,6 +76,7 @@ export function toVoiceStateUpdate(state: VoiceState, leaving = false): VoiceSta
     serverMute: state.serverMute,
     serverDeaf: state.serverDeaf,
     joinedAt: state.joinedAt,
+    ...(state.callId === undefined ? {} : { callId: state.callId }),
   };
 }
 
@@ -168,6 +169,7 @@ export class VoiceService {
       serverMute: false,
       serverDeaf: false,
       joinedAt: new Date().toISOString(),
+      callId: input.callId,
     };
     this.addInternal(state);
     return { state, previous };
@@ -222,28 +224,6 @@ export class VoiceService {
       state.selfStream = patch.selfStream;
     }
     return state;
-  }
-
-  /**
-   * Check that a signaling message may be relayed: the sender must be the
-   * live device for its user in `channelId`, and the target must be the
-   * live device for its user in the same channel.
-   */
-  validateSignal(
-    fromUserId: bigint,
-    fromDeviceId: string,
-    channelId: bigint,
-    targetUserId: bigint,
-    targetDeviceId: string,
-  ): void {
-    const fromState = this.userPeer.get(fromUserId.toString());
-    if (!fromState || fromState.deviceId !== fromDeviceId || fromState.channelId !== channelId) {
-      throw new VoiceError("NOT_IN_VOICE", "You are not in this voice channel.");
-    }
-    const targetState = this.userPeer.get(targetUserId.toString());
-    if (!targetState || targetState.deviceId !== targetDeviceId || targetState.channelId !== channelId) {
-      throw new VoiceError("TARGET_NOT_IN_CHANNEL", "That peer is not in this voice channel.");
-    }
   }
 
   /**

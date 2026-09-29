@@ -23,12 +23,13 @@ export const GatewayOpcode = {
   VOICE_JOIN: 6,
   VOICE_LEAVE: 7,
   VOICE_STATE: 8,
+  /** Sent by the client: to-device messages, with the rules of `POST /to-device`. Voice signals use it. */
   TO_DEVICE_SEND: 9,
   TYPING: 10,
   PRESENCE_SET: 11,
   INVALID_SESSION: 12,
   RECONNECT: 13,
-  VOICE_SIGNAL: 14,
+  // 14 was VOICE_SIGNAL, the plaintext signal relay. Voice signals are now Olm to-device messages.
   /** Sent by the client: to-device messages up to an id are processed. */
   TO_DEVICE_ACK: 15,
 } as const;
@@ -179,6 +180,8 @@ export const voiceJoinPayloadSchema = z.object({
   channelId: idSchema,
   selfMute: z.boolean(),
   selfDeaf: z.boolean(),
+  /** A random id for this join. Encrypted voice signals carry it, so that a peer can drop a stale signal. */
+  callId: z.string().min(1).max(64).optional(),
 });
 
 /** Sent by the client to leave voice. It carries no fields. */
@@ -192,29 +195,8 @@ export const voiceStatePayloadSchema = z.object({
   selfStream: z.boolean().optional(),
 });
 
-/**
- * Sent by the client to relay one WebRTC signaling message (an offer, an
- * answer, or an ICE candidate) to one other peer in the same voice
- * channel. The server never reads `payload`; it only checks its size and
- * that both peers are in `channelId`.
- */
-export const voiceSignalPayloadSchema = z.object({
-  channelId: idSchema,
-  targetUserId: idSchema,
-  targetDeviceId: z.string().min(1),
-  payload: z.unknown(),
-});
-
 /** Sent by the server: the current voice state of one peer, to guild members who can view the channel. */
 export const voiceStateUpdatePayloadSchema = voiceStateSchema;
-
-/** Sent by the server: one relayed signaling message, with the sender's identity attached. */
-export const voiceSignalDispatchPayloadSchema = z.object({
-  channelId: idSchema,
-  fromUserId: idSchema,
-  fromDeviceId: z.string().min(1),
-  payload: z.unknown(),
-});
 
 /** The stable codes the server uses to reject a voice op. */
 export const voiceErrorCodeSchema = z.enum([
@@ -223,8 +205,6 @@ export const voiceErrorCodeSchema = z.enum([
   "NOT_A_VOICE_CHANNEL",
   "STREAM_IN_USE",
   "NOT_IN_VOICE",
-  "TARGET_NOT_IN_CHANNEL",
-  "PAYLOAD_TOO_LARGE",
 ]);
 export type VoiceErrorCode = z.infer<typeof voiceErrorCodeSchema>;
 
@@ -262,9 +242,7 @@ export type ReadStateUpdatePayload = z.infer<typeof readStateUpdatePayloadSchema
 export type VoiceJoinPayload = z.infer<typeof voiceJoinPayloadSchema>;
 export type VoiceLeavePayload = z.infer<typeof voiceLeavePayloadSchema>;
 export type VoiceStatePayload = z.infer<typeof voiceStatePayloadSchema>;
-export type VoiceSignalPayload = z.infer<typeof voiceSignalPayloadSchema>;
 export type VoiceStateUpdatePayload = z.infer<typeof voiceStateUpdatePayloadSchema>;
-export type VoiceSignalDispatchPayload = z.infer<typeof voiceSignalDispatchPayloadSchema>;
 export type VoiceErrorPayload = z.infer<typeof voiceErrorPayloadSchema>;
 
 /** Names of every dispatch event ("t" field), for the fan-out code and tests. */
@@ -289,7 +267,6 @@ export const DispatchEvent = {
   TYPING_START: "TYPING_START",
   READ_STATE_UPDATE: "READ_STATE_UPDATE",
   VOICE_STATE_UPDATE: "VOICE_STATE_UPDATE",
-  VOICE_SIGNAL: "VOICE_SIGNAL",
   VOICE_ERROR: "VOICE_ERROR",
   RELATIONSHIP_ADD: "RELATIONSHIP_ADD",
   RELATIONSHIP_REMOVE: "RELATIONSHIP_REMOVE",

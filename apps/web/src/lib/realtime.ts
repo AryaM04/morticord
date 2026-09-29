@@ -25,7 +25,7 @@ let client: GatewayClient | null = null;
 
 // A second, raw listener list for every dispatch, in addition to the
 // realtime store and the message store above. The voice module (loaded
-// only once a call starts) uses this to see VOICE_SIGNAL, VOICE_STATE_UPDATE
+// only once a call starts) uses this to see VOICE_STATE_UPDATE
 // and VOICE_ERROR without this file needing to know voice exists.
 const dispatchListeners = new Set<(event: GatewayDispatch) => void>();
 

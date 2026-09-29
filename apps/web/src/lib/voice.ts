@@ -6,6 +6,7 @@
 import { createStore } from "zustand/vanilla";
 import { GatewayOpcode } from "@discord-clone/shared";
 import { getTurnCredentials } from "@discord-clone/client-core";
+import type { CryptoHandle } from "@discord-clone/client-core/crypto";
 import type {
   VoiceDebugPeerStats,
   VoiceEngine,
@@ -13,6 +14,7 @@ import type {
   VoicePeerState,
 } from "@discord-clone/client-core/voice";
 import { session } from "./session.js";
+import { cryptoReady } from "./messages.js";
 import { gatewaySend, realtimeStore, subscribeDispatch } from "./realtime.js";
 import { effectiveVolumeFor, updateVoiceDeviceSettings, voiceDeviceSettingsStore } from "./voice-settings.js";
 import { startPushToTalkRuntime, stopPushToTalkRuntime } from "./voice-ptt-runtime.js";
@@ -110,6 +112,10 @@ function worstQuality(peers: VoicePeerState[]): VoiceQuality {
 
 let engine: VoiceEngine | null = null;
 let engineLoad: Promise<VoiceEngine> | null = null;
+/** The crypto layer for the signals of the current call. `joinVoiceChannel` sets it before the engine joins. */
+let callCrypto: CryptoHandle | null = null;
+/** The random id of the current join. The signal transport makes it, and VOICE_JOIN sends it. */
+let callId: string | undefined;
 
 /** The user's explicit mute choice, kept apart from `voiceStore.muted` so push-to-talk can gate the mic without losing it. */
 let manualMuted = false;
@@ -182,10 +188,30 @@ async function loadEngine(): Promise<VoiceEngine> {
 
       const created = mod.createVoiceEngine({
         getTurnCredentials: () => getTurnCredentials(session.apiClient),
-        createSignalTransport: (channelId) =>
-          mod.createGatewaySignalTransport({ channelId, send: gatewaySend, subscribe: subscribeDispatch }),
+        createSignalTransport: (channelId) => {
+          const handle = callCrypto;
+          if (!handle) {
+            throw new Error("Cannot start voice before the crypto layer is ready.");
+          }
+          callId = mod.newCallId();
+          return mod.createOlmSignalTransport({
+            channelId,
+            callId,
+            crypto: {
+              async sendToDevice(target, type, content) {
+                const result = await handle.encryptToDevices([target], type, content, { live: true });
+                if (result.failed.length > 0) {
+                  throw new Error(`No Olm session with device ${target.deviceId}.`);
+                }
+              },
+              onToDevice: (handler) => handle.onToDevice(handler),
+            },
+            peerState: (userId) => realtimeStore.getState().voiceStatesByChannel[channelId]?.[userId] ?? null,
+            log: (message) => console.warn(`[voice] ${message}`),
+          });
+        },
         sendVoiceJoin: (channelId, selfMute, selfDeaf) =>
-          gatewaySend(GatewayOpcode.VOICE_JOIN, { channelId, selfMute, selfDeaf }),
+          gatewaySend(GatewayOpcode.VOICE_JOIN, { channelId, selfMute, selfDeaf, callId }),
         sendVoiceLeave: () => gatewaySend(GatewayOpcode.VOICE_LEAVE, {}),
         sendVoiceState: (patch) => gatewaySend(GatewayOpcode.VOICE_STATE, patch),
         getInitialPeers: (channelId) => {
@@ -264,6 +290,8 @@ async function loadEngine(): Promise<VoiceEngine> {
 /** Join a voice channel, or a DM call when `guildId` is null. Leave the current call first if there is one. */
 export async function joinVoiceChannel(guildId: string | null, channelId: string): Promise<void> {
   voiceStore.setState({ status: "connecting", guildId, channelId, errorMessage: null });
+  // Voice signals are Olm messages, so the call needs the crypto layer.
+  callCrypto = await cryptoReady();
   const voiceEngine = await loadEngine();
   const saved = voiceDeviceSettingsStore.getState();
   if (saved.inputDeviceId) {

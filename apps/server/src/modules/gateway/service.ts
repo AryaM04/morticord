@@ -524,28 +524,6 @@ export class GatewayService {
   }
 
   /**
-   * Send one event straight to a user's one live session on `deviceId`,
-   * with no sequence number and no resume buffering. Use this only for
-   * events a resume must never replay, such as VOICE_SIGNAL: a stale SDP
-   * offer or ICE candidate would be harmful, not merely redundant.
-   * Returns true when a live session for that device received it.
-   */
-  sendToDevice(userId: bigint, deviceId: string, t: string, d: unknown): boolean {
-    const sessionIds = this.userSessions.get(userId.toString());
-    if (!sessionIds) {
-      return false;
-    }
-    for (const sessionId of sessionIds) {
-      const session = this.sessions.get(sessionId);
-      if (session && session.deviceId === deviceId && session.ws && session.ws.readyState === OPEN) {
-        session.ws.send(JSON.stringify({ op: GatewayOpcode.DISPATCH, t, d }));
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
    * Send one event to one live session, with no sequence number and no
    * resume buffering. The to-device queue uses this: its table is the
    * durable store, so a resume must not replay it. Returns false when the

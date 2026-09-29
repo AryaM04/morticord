@@ -119,6 +119,29 @@ describeWithDb("to-device queue", () => {
     third.close();
   });
 
+  it("takes messages from the TO_DEVICE_SEND gateway op, with the same rules, in order", async () => {
+    const [sender, recipient] = await pair("op");
+    const stranger = await registerUser(server, "opx");
+    await new TestDeviceKeys(stranger).upload(server);
+    const from = await connectGateway(server, sender);
+    const to = await connectGateway(server, recipient);
+
+    for (let i = 0; i < 20; i += 1) {
+      from.send(GatewayOpcode.TO_DEVICE_SEND, { messages: [message(recipient, `s${i}`)] });
+    }
+    const received = await collect(to, 20);
+    expect(received.map((d) => d.ciphertext)).toEqual(Array.from({ length: 20 }, (_, i) => ciphertext(`s${i}`)));
+    expect(received.every((d) => d.senderDeviceId === sender.deviceId)).toBe(true);
+
+    // A recipient that the sender cannot see: the server stores nothing, and the connection stays open.
+    from.send(GatewayOpcode.TO_DEVICE_SEND, { messages: [message(stranger, "no")] });
+    from.send(GatewayOpcode.TO_DEVICE_SEND, { messages: [message(recipient, "after")] });
+    expect((await to.event("TO_DEVICE")).ciphertext).toBe(ciphertext("after"));
+    expect(await queuedFor(stranger.deviceId)).toBe(0);
+    from.close();
+    to.close();
+  });
+
   it("sends at most 100 unacknowledged messages, and more after an ACK", async () => {
     const [sender, recipient] = await pair("wind");
     const client = await connectGateway(server, recipient);

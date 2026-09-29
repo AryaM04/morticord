@@ -1,6 +1,6 @@
 // The network side of the crypto layer: the key server routes, the
-// to-device route, the channel members route and the TO_DEVICE_ACK
-// gateway op. Tests use a fake in place of the HTTP one.
+// to-device route, the channel members route and the TO_DEVICE_SEND and
+// TO_DEVICE_ACK gateway ops. Tests use a fake in place of the HTTP one.
 import {
   GatewayOpcode,
   channelMembersResponseSchema,
@@ -26,6 +26,8 @@ export interface CryptoTransport {
   queryKeys(userIds: string[]): Promise<QueryKeysResponse>;
   claimKeys(devices: DeviceRef[]): Promise<ClaimKeysResponse>;
   sendToDevice(messages: ToDeviceMessage[]): Promise<SendToDeviceResponse>;
+  /** Send over the gateway op TO_DEVICE_SEND, with no reply. It is faster than the route. It does nothing while the gateway is down. */
+  sendToDeviceLive(messages: ToDeviceMessage[]): void;
   /** The users who can view a channel, with the inputs to check their permissions. */
   channelMembers(channelId: string): Promise<ChannelMembersResponse>;
   /** Send TO_DEVICE_ACK over the gateway. It does nothing while the gateway is down. */
@@ -43,6 +45,7 @@ export function createHttpCryptoTransport(
     claimKeys: (devices) => api.request("POST", "/keys/claim", { body: { devices }, schema: claimKeysResponseSchema }),
     sendToDevice: (messages) =>
       api.request("POST", "/to-device", { body: { messages }, schema: sendToDeviceResponseSchema }),
+    sendToDeviceLive: (messages) => gatewaySend(GatewayOpcode.TO_DEVICE_SEND, { messages }),
     channelMembers: (channelId) =>
       api.request("GET", `/channels/${channelId}/members`, { schema: channelMembersResponseSchema }),
     ackToDevice: (upToId, resync) => gatewaySend(GatewayOpcode.TO_DEVICE_ACK, { upToId, ...(resync ? { resync } : {}) }),

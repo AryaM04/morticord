@@ -138,6 +138,9 @@ export class FakeServer {
         }
         return { keys };
       },
+      sendToDeviceLive: (messages) => {
+        void this.transportFor(userId, deviceId).sendToDevice(messages);
+      },
       sendToDevice: async (messages) => {
         const skipped = [];
         for (const message of messages) {

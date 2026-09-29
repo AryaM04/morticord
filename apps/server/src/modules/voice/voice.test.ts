@@ -1,12 +1,12 @@
 // Integration tests for voice signaling: VOICE_JOIN, VOICE_LEAVE,
-// VOICE_STATE, VOICE_SIGNAL, the disconnect grace period, and the
+// VOICE_STATE, the call id, the disconnect grace period, and the
 // turn-credentials route. Real Postgres and a real `ws` client, the same
 // approach as modules/gateway/gateway.test.ts.
 import type { FastifyInstance } from "fastify";
 import { createHmac } from "node:crypto";
 import WebSocket from "ws";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { GatewayOpcode, Permission, type GatewayEnvelope } from "@discord-clone/shared";
+import { GatewayCloseCode, GatewayOpcode, Permission, type GatewayEnvelope } from "@discord-clone/shared";
 import { buildApp } from "../../app.js";
 import { permissionOverwrites } from "../../db/schema.js";
 import { createFakeMailer } from "../../mailer.js";
@@ -447,87 +447,31 @@ describeWithDb("voice", () => {
     expect((error.d as { code: string }).code).toBe("STREAM_IN_USE");
   });
 
-  describe("VOICE_SIGNAL", () => {
-    it("relays a signal from A to B with the sender's ids, and not to C", async () => {
+  describe("voice signals", () => {
+    it("puts the call id of a join in the voice state", async () => {
       const owner = await registerUser();
       const guild = await createGuild(owner.accessToken);
       const voiceChannelId = voiceChannelOf(guild);
       const a = await identifyExisting(owner);
       openSockets.push(a.ws);
-      const b = await identify();
-      openSockets.push(b.ws);
-      const c = await identify();
-      openSockets.push(c.ws);
-      await inviteAndJoin(owner.accessToken, textChannelOf(guild), b.accessToken);
-      await inviteAndJoin(owner.accessToken, textChannelOf(guild), c.accessToken);
 
-      await joinVoice(a.ws, owner.userId, voiceChannelId);
-      await joinVoice(b.ws, b.userId, voiceChannelId);
-      await joinVoice(c.ws, c.userId, voiceChannelId);
-
-      const bSignalPromise = nextMessage(b.ws, (env) => env.t === "VOICE_SIGNAL");
-      sendOp(a.ws, GatewayOpcode.VOICE_SIGNAL, {
-        channelId: voiceChannelId,
-        targetUserId: b.userId,
-        targetDeviceId: b.deviceId,
-        payload: { type: "offer", sdp: "v=0..." },
-      });
-      const signal = await bSignalPromise;
-      const d = signal.d as { channelId: string; fromUserId: string; fromDeviceId: string; payload: { type: string } };
-      expect(d.channelId).toBe(voiceChannelId);
-      expect(d.fromUserId).toBe(owner.userId);
-      expect(d.fromDeviceId).toBe(a.deviceId);
-      expect(d.payload.type).toBe("offer");
-
-      const missed = await neverArrives(c.ws, (env) => env.t === "VOICE_SIGNAL", 400);
-      expect(missed).toBe(true);
+      const updatePromise = nextMessage(a.ws, (env) => env.t === "VOICE_STATE_UPDATE");
+      sendOp(a.ws, GatewayOpcode.VOICE_JOIN, { channelId: voiceChannelId, selfMute: false, selfDeaf: false, callId: "call-1" });
+      const update = await updatePromise;
+      expect((update.d as { callId?: string }).callId).toBe("call-1");
     });
 
-    it("rejects a signal to a peer that is not in the channel", async () => {
+    it("does not relay plaintext signals: op 14 closes the connection", async () => {
       const owner = await registerUser();
       const guild = await createGuild(owner.accessToken);
       const voiceChannelId = voiceChannelOf(guild);
       const a = await identifyExisting(owner);
       openSockets.push(a.ws);
-      const b = await identify();
-      openSockets.push(b.ws);
-      await inviteAndJoin(owner.accessToken, textChannelOf(guild), b.accessToken);
-
       await joinVoice(a.ws, owner.userId, voiceChannelId);
-      // b never joins voice.
 
-      const errorPromise = nextMessage(a.ws, (env) => env.t === "VOICE_ERROR");
-      sendOp(a.ws, GatewayOpcode.VOICE_SIGNAL, {
-        channelId: voiceChannelId,
-        targetUserId: b.userId,
-        targetDeviceId: b.deviceId,
-        payload: { type: "offer" },
-      });
-      const error = await errorPromise;
-      expect((error.d as { code: string }).code).toBe("TARGET_NOT_IN_CHANNEL");
-    });
-
-    it("rejects a payload over 16 KiB with PAYLOAD_TOO_LARGE", async () => {
-      const owner = await registerUser();
-      const guild = await createGuild(owner.accessToken);
-      const voiceChannelId = voiceChannelOf(guild);
-      const a = await identifyExisting(owner);
-      openSockets.push(a.ws);
-      const b = await identify();
-      openSockets.push(b.ws);
-      await inviteAndJoin(owner.accessToken, textChannelOf(guild), b.accessToken);
-      await joinVoice(a.ws, owner.userId, voiceChannelId);
-      await joinVoice(b.ws, b.userId, voiceChannelId);
-
-      const errorPromise = nextMessage(a.ws, (env) => env.t === "VOICE_ERROR");
-      sendOp(a.ws, GatewayOpcode.VOICE_SIGNAL, {
-        channelId: voiceChannelId,
-        targetUserId: b.userId,
-        targetDeviceId: b.deviceId,
-        payload: { sdp: "x".repeat(17 * 1024) },
-      });
-      const error = await errorPromise;
-      expect((error.d as { code: string }).code).toBe("PAYLOAD_TOO_LARGE");
+      const closed = onClose(a.ws);
+      sendOp(a.ws, 14, { channelId: voiceChannelId, targetUserId: owner.userId, targetDeviceId: a.deviceId, payload: {} });
+      expect((await closed).code).toBe(GatewayCloseCode.UNKNOWN_OPCODE);
     });
   });
 

@@ -101,7 +101,11 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
       registerToDeviceRoutes(instance, { ...deps, delivery, toDeviceQueueLimit: deps.toDeviceQueueLimit ?? TO_DEVICE_QUEUE_LIMIT }),
     { prefix: "/api/v1" },
   );
-  registerGatewayRoute(app, { db: deps.db, config: deps.config, gateway, voice, ringer, delivery }, deps.gatewayTiming);
+  registerGatewayRoute(
+    app,
+    { db: deps.db, config: deps.config, gateway, voice, ringer, delivery, toDeviceQueueLimit: deps.toDeviceQueueLimit },
+    deps.gatewayTiming,
+  );
 
   return app;
 }

@@ -36,7 +36,6 @@ import {
   typingStartPayloadSchema,
   readStateUpdatePayloadSchema,
   voiceStateUpdatePayloadSchema,
-  voiceSignalDispatchPayloadSchema,
   voiceErrorPayloadSchema,
   type DispatchEventName,
 } from "@discord-clone/shared";
@@ -120,7 +119,6 @@ const DISPATCH_SCHEMAS: Record<string, z.ZodType> = {
   TYPING_START: typingStartPayloadSchema,
   READ_STATE_UPDATE: readStateUpdatePayloadSchema,
   VOICE_STATE_UPDATE: voiceStateUpdatePayloadSchema,
-  VOICE_SIGNAL: voiceSignalDispatchPayloadSchema,
   VOICE_ERROR: voiceErrorPayloadSchema,
   RELATIONSHIP_ADD: relationshipAddPayloadSchema,
   RELATIONSHIP_REMOVE: relationshipRemovePayloadSchema,

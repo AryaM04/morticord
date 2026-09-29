@@ -10,16 +10,17 @@ import {
   identifyPayloadSchema,
   presenceSetPayloadSchema,
   resumePayloadSchema,
+  sendToDeviceRequestSchema,
   toDeviceAckPayloadSchema,
   typingPayloadSchema,
   voiceJoinPayloadSchema,
-  voiceSignalPayloadSchema,
   voiceStatePayloadSchema,
   type DispatchEventName,
   type ReadyPayload,
 } from "@discord-clone/shared";
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../../config.js";
+import { AppError } from "../../errors.js";
 import type { DbClient } from "../../db/client.js";
 import { users } from "../../db/schema.js";
 import { verifyAccessToken } from "../auth/tokens.js";
@@ -33,10 +34,9 @@ import {
   broadcastVoiceLeave,
   handleVoiceJoin,
   handleVoiceLeave,
-  handleVoiceSignal,
   handleVoiceState,
 } from "../voice/gateway-ops.js";
-import type { ToDeviceDelivery } from "../to-device/service.js";
+import { sendToDevice, TO_DEVICE_QUEUE_LIMIT, type ToDeviceDelivery } from "../to-device/service.js";
 import type { CallRinger } from "../voice/calls.js";
 import { VoiceError, type VoiceService, type VoiceState } from "../voice/service.js";
 import { GatewayService, loadGuildIdsForUser, type GatewaySocket } from "./service.js";
@@ -61,6 +61,8 @@ interface ConnectionState {
   heartbeatTimer: ReturnType<typeof setTimeout> | null;
   messageTimestamps: number[];
   closed: boolean;
+  /** TO_DEVICE_SEND ops of this connection run one after the other, so the queue keeps their order. */
+  toDeviceChain: Promise<void>;
 }
 
 async function buildReadyPayload(
@@ -106,6 +108,7 @@ export function registerGatewayRoute(
     voice: VoiceService;
     ringer?: CallRinger;
     delivery?: ToDeviceDelivery;
+    toDeviceQueueLimit?: number;
   },
   timing: GatewayTimingOptions = {},
 ): void {
@@ -127,6 +130,7 @@ export function registerGatewayRoute(
       heartbeatTimer: null,
       messageTimestamps: [],
       closed: false,
+      toDeviceChain: Promise.resolve(),
     };
 
     function send(op: number, d?: unknown, extra?: Record<string, unknown>): void {
@@ -358,25 +362,36 @@ export function registerGatewayRoute(
       handleVoiceState(voiceOpsDeps, info.userId, info.deviceId, parsed.data).catch(sendVoiceError);
     }
 
-    function handleVoiceSignalOp(payload: unknown): void {
+    function handleToDeviceSend(payload: unknown): void {
       if (!state.sessionId) {
-        closeConnection(GatewayCloseCode.NOT_AUTHENTICATED, "Identify before sending a voice signal.");
+        closeConnection(GatewayCloseCode.NOT_AUTHENTICATED, "Identify before you send to-device messages.");
         return;
       }
-      const parsed = voiceSignalPayloadSchema.safeParse(payload);
+      const parsed = sendToDeviceRequestSchema.safeParse(payload);
       if (!parsed.success) {
-        closeConnection(GatewayCloseCode.DECODE_ERROR, "The VOICE_SIGNAL payload is not valid.");
+        closeConnection(GatewayCloseCode.DECODE_ERROR, "The TO_DEVICE_SEND payload is not valid.");
         return;
       }
       const info = gateway.getSession(state.sessionId);
-      if (!info) {
+      if (!delivery || !info) {
         return;
       }
-      try {
-        handleVoiceSignal({ gateway, voice }, info.userId, info.deviceId, parsed.data);
-      } catch (error) {
-        sendVoiceError(error);
-      }
+      // The same rules as POST /to-device. The op has no reply: a voice signal that fails is lost, and WebRTC recovers.
+      const toDeviceDeps = { db, delivery, log: app.log };
+      state.toDeviceChain = state.toDeviceChain
+        .then(() =>
+          sendToDevice(toDeviceDeps, info.userId, info.deviceId, parsed.data.messages, deps.toDeviceQueueLimit ?? TO_DEVICE_QUEUE_LIMIT),
+        )
+        .then(
+          () => undefined,
+          (error: unknown) => {
+            if (error instanceof AppError) {
+              app.log.info({ code: error.code }, "The server rejected a TO_DEVICE_SEND op.");
+            } else {
+              app.log.error(error, "The server could not store the messages of a TO_DEVICE_SEND op.");
+            }
+          },
+        );
     }
 
     function handleToDeviceAck(payload: unknown): void {
@@ -446,8 +461,8 @@ export function registerGatewayRoute(
         case GatewayOpcode.VOICE_STATE:
           handleVoiceStateOp(envelope.d);
           break;
-        case GatewayOpcode.VOICE_SIGNAL:
-          handleVoiceSignalOp(envelope.d);
+        case GatewayOpcode.TO_DEVICE_SEND:
+          handleToDeviceSend(envelope.d);
           break;
         case GatewayOpcode.TO_DEVICE_ACK:
           handleToDeviceAck(envelope.d);
