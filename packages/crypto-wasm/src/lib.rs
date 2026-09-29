@@ -3,6 +3,12 @@
 //! Pickles are encrypted with a 32-byte key that the caller supplies.
 //! See docs/concepts/olm-megolm.md for the protocol that uses these types.
 
+mod backup;
+mod sas;
+
+pub use backup::{backup_encrypt, derive_recovery_key, BackupKey};
+pub use sas::{EstablishedSas, Sas};
+
 use vodozemac::megolm::{
     ExportedSessionKey, GroupSession as MGroupSession, GroupSessionPickle,
     InboundGroupSession as MInboundGroupSession, InboundGroupSessionPickle, MegolmMessage,
@@ -265,6 +271,17 @@ impl SigningKey {
         Ok(SigningKey(Ed25519SecretKey::from_slice(&secret)))
     }
 
+    /// The 32 secret bytes. Only the key backup uses this, and it encrypts them at once.
+    pub fn export_secret(&self) -> Vec<u8> {
+        self.0.to_bytes().to_vec()
+    }
+
+    /// The key from 32 secret bytes, for example from the key backup.
+    pub fn from_secret(secret: &[u8]) -> Result<SigningKey> {
+        let bytes: [u8; 32] = secret.try_into().map_err(|_| JsError::new("a signing key must be 32 bytes"))?;
+        Ok(SigningKey(Ed25519SecretKey::from_slice(&bytes)))
+    }
+
     #[wasm_bindgen(getter)]
     pub fn public_key(&self) -> String {
         self.0.public_key().to_base64()
@@ -486,5 +503,8 @@ mod tests {
 
         let copy = SigningKey::from_pickle(&master.pickle(&key).unwrap(), &key).unwrap();
         assert_eq!(copy.public_key(), master.public_key());
+
+        let restored = SigningKey::from_secret(&master.export_secret()).unwrap();
+        assert_eq!(restored.public_key(), master.public_key());
     }
 }

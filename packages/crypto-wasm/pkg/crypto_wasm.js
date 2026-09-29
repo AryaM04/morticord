@@ -220,6 +220,72 @@ export class Account {
 }
 if (Symbol.dispose) Account.prototype[Symbol.dispose] = Account.prototype.free;
 
+/**
+ * The backup key pair that comes from one recovery key.
+ */
+export class BackupKey {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        BackupKeyFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_backupkey_free(ptr, 0);
+    }
+    /**
+     * Decrypt one backup ciphertext. It fails for a wrong key, a wrong
+     * `aad`, a changed byte or an unknown format.
+     * @param {Uint8Array} ciphertext
+     * @param {Uint8Array} aad
+     * @returns {Uint8Array}
+     */
+    decrypt(ciphertext, aad) {
+        const ptr0 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(aad, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.backupkey_decrypt(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+    /**
+     * @param {Uint8Array} recovery_key
+     */
+    constructor(recovery_key) {
+        const ptr0 = passArray8ToWasm0(recovery_key, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.backupkey_new(ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0];
+        BackupKeyFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @returns {string}
+     */
+    get public_key() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.backupkey_public_key(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+}
+if (Symbol.dispose) BackupKey.prototype[Symbol.dispose] = BackupKey.prototype.free;
+
 export class Decrypted {
     static __wrap(ptr) {
         const obj = Object.create(Decrypted.prototype);
@@ -291,6 +357,81 @@ export class Encrypted {
     }
 }
 if (Symbol.dispose) Encrypted.prototype[Symbol.dispose] = Encrypted.prototype.free;
+
+/**
+ * One side of a SAS verification after the key exchange.
+ */
+export class EstablishedSas {
+    static __wrap(ptr) {
+        const obj = Object.create(EstablishedSas.prototype);
+        obj.__wbg_ptr = ptr;
+        EstablishedSasFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        EstablishedSasFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_establishedsas_free(ptr, 0);
+    }
+    /**
+     * The MAC of `input`, as unpadded base64.
+     * @param {string} input
+     * @param {string} info
+     * @returns {string}
+     */
+    calculate_mac(input, info) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(input, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(info, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.establishedsas_calculate_mac(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+            deferred3_0 = ret[0];
+            deferred3_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * The 7 emoji indexes (0 to 63) of the Matrix emoji table for this `info`.
+     * @param {string} info
+     * @returns {Uint8Array}
+     */
+    emoji_indices(info) {
+        const ptr0 = passStringToWasm0(info, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.establishedsas_emoji_indices(this.__wbg_ptr, ptr0, len0);
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
+     * True when `mac` is the MAC of `input` for this `info`.
+     * @param {string} input
+     * @param {string} info
+     * @param {string} mac
+     * @returns {boolean}
+     */
+    verify_mac(input, info, mac) {
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(info, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(mac, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.establishedsas_verify_mac(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        return ret !== 0;
+    }
+}
+if (Symbol.dispose) EstablishedSas.prototype[Symbol.dispose] = EstablishedSas.prototype.free;
 
 /**
  * The send side of a Megolm session. One device owns it for one channel.
@@ -599,6 +740,60 @@ export class InboundResult {
 if (Symbol.dispose) InboundResult.prototype[Symbol.dispose] = InboundResult.prototype.free;
 
 /**
+ * One side of a SAS verification before the key exchange.
+ */
+export class Sas {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        SasFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_sas_free(ptr, 0);
+    }
+    /**
+     * Make the shared secret with the key of the other device. Call it one time only.
+     * @param {string} their_public_key
+     * @returns {EstablishedSas}
+     */
+    diffie_hellman(their_public_key) {
+        const ptr0 = passStringToWasm0(their_public_key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.sas_diffie_hellman(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return EstablishedSas.__wrap(ret[0]);
+    }
+    constructor() {
+        const ret = wasm.sas_new();
+        this.__wbg_ptr = ret;
+        SasFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * The ephemeral Curve25519 public key to send to the other device.
+     * It is empty after `diffie_hellman`.
+     * @returns {string}
+     */
+    get public_key() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.sas_public_key(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+}
+if (Symbol.dispose) Sas.prototype[Symbol.dispose] = Sas.prototype.free;
+
+/**
  * An Olm session between two devices.
  */
 export class Session {
@@ -747,6 +942,16 @@ export class SigningKey {
         wasm.__wbg_signingkey_free(ptr, 0);
     }
     /**
+     * The 32 secret bytes. Only the key backup uses this, and it encrypts them at once.
+     * @returns {Uint8Array}
+     */
+    export_secret() {
+        const ret = wasm.signingkey_export_secret(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * @param {string} pickle
      * @param {Uint8Array} key
      * @returns {SigningKey}
@@ -757,6 +962,20 @@ export class SigningKey {
         const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
         const len1 = WASM_VECTOR_LEN;
         const ret = wasm.signingkey_from_pickle(ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return SigningKey.__wrap(ret[0]);
+    }
+    /**
+     * The key from 32 secret bytes, for example from the key backup.
+     * @param {Uint8Array} secret
+     * @returns {SigningKey}
+     */
+    static from_secret(secret) {
+        const ptr0 = passArray8ToWasm0(secret, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.signingkey_from_secret(ptr0, len0);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -830,6 +1049,54 @@ export class SigningKey {
 if (Symbol.dispose) SigningKey.prototype[Symbol.dispose] = SigningKey.prototype.free;
 
 /**
+ * Encrypt `plaintext` to the backup public key. `aad` is authenticated but
+ * not encrypted. Output: the version byte, the ephemeral public key, then
+ * the AES-256-GCM ciphertext and tag.
+ * @param {string} public_key
+ * @param {Uint8Array} plaintext
+ * @param {Uint8Array} aad
+ * @returns {Uint8Array}
+ */
+export function backup_encrypt(public_key, plaintext, aad) {
+    const ptr0 = passStringToWasm0(public_key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(plaintext, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(aad, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.backup_encrypt(ptr0, len0, ptr1, len1, ptr2, len2);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v4;
+}
+
+/**
+ * Derive a recovery key from a passphrase with Argon2id (version 0x13, 32-byte output).
+ * @param {string} passphrase
+ * @param {Uint8Array} salt
+ * @param {number} memory_kib
+ * @param {number} iterations
+ * @param {number} parallelism
+ * @returns {Uint8Array}
+ */
+export function derive_recovery_key(passphrase, salt, memory_kib, iterations, parallelism) {
+    const ptr0 = passStringToWasm0(passphrase, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(salt, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.derive_recovery_key(ptr0, len0, ptr1, len1, memory_kib, iterations, parallelism);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
  * Verifies an Ed25519 signature. Returns false for a bad key, a bad
  * signature or a signature that does not match.
  * @param {string} public_key
@@ -879,12 +1146,18 @@ function __wbg_get_imports() {
 const AccountFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_account_free(ptr, 1));
+const BackupKeyFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_backupkey_free(ptr, 1));
 const DecryptedFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_decrypted_free(ptr, 1));
 const EncryptedFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_encrypted_free(ptr, 1));
+const EstablishedSasFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_establishedsas_free(ptr, 1));
 const GroupSessionFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_groupsession_free(ptr, 1));
@@ -894,6 +1167,9 @@ const InboundGroupSessionFinalization = (typeof FinalizationRegistry === 'undefi
 const InboundResultFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_inboundresult_free(ptr, 1));
+const SasFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_sas_free(ptr, 1));
 const SessionFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_session_free(ptr, 1));
