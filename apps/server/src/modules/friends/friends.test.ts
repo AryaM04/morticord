@@ -3,6 +3,7 @@
 // a real `ws` client.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { describeWithDb } from "../../../test/db.js";
+import { GatewayService } from "../gateway/service.js";
 import {
   apiFor,
   connectGateway,
@@ -307,6 +308,21 @@ describeWithDb("friends", () => {
       await apiFor(server, bob).put(`/users/@me/relationships/${alice.userId}`, { action: "accept" });
       expect(await aliceSocket.event("PRESENCE_UPDATE", (d) => d.userId === bob.userId)).toMatchObject({ status: "online" });
       expect(await bobSocket.event("PRESENCE_UPDATE", (d) => d.userId === alice.userId)).toMatchObject({ status: "online" });
+    });
+
+    it("loads the friends into a new gateway hub at start", async () => {
+      const alice = await registerUser(server, "prime");
+      const bob = await registerUser(server, "prime");
+      const stranger = await registerUser(server, "prime");
+      await makeFriends(server, alice, bob);
+
+      const hub = new GatewayService();
+      await hub.primeFromDatabase(server.testDb.db);
+      const fakeSocket = { readyState: 1, send: () => undefined, close: () => undefined };
+      for (const user of [bob, stranger]) {
+        hub.createSession(fakeSocket, BigInt(user.userId), user.deviceId);
+      }
+      expect(hub.onlinePresencesFor(BigInt(alice.userId))).toEqual([{ userId: bob.userId, status: "online" }]);
     });
 
     it("stops the presence of a friend after unfriend", async () => {
