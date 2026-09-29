@@ -13,18 +13,39 @@ export class Account {
      */
     create_inbound_session(identity_key: string, message_type: number, ciphertext: Uint8Array): InboundResult;
     create_outbound_session(identity_key: string, one_time_key: string): Session;
+    /**
+     * Returns a JSON object with the unpublished fallback key, or `{}`.
+     */
+    fallback_key(): string;
+    /**
+     * Forgets the previous fallback key. Returns true if there was one.
+     */
+    forget_fallback_key(): boolean;
     static from_pickle(pickle: string, key: Uint8Array): Account;
+    /**
+     * Makes a new fallback key. The account keeps the previous one, so a
+     * late message that uses it still decrypts.
+     */
+    generate_fallback_key(): void;
     generate_one_time_keys(count: number): void;
+    /**
+     * Marks all one-time keys and the fallback key as published.
+     */
     mark_keys_as_published(): void;
     constructor();
     /**
-     * Returns a JSON object: key id to base64 public key.
+     * Returns a JSON object: key id to base64 public key. Only keys that
+     * are not published yet are in it.
      */
     one_time_keys(): string;
     pickle(key: Uint8Array): string;
     sign(message: string): string;
     readonly curve25519_key: string;
     readonly ed25519_key: string;
+    /**
+     * The number of one-time keys that the server should keep for this account.
+     */
+    readonly max_number_of_one_time_keys: number;
 }
 
 export class Decrypted {
@@ -108,8 +129,39 @@ export class Session {
     encrypt(plaintext: Uint8Array): Encrypted;
     static from_pickle(pickle: string, key: Uint8Array): Session;
     pickle(key: Uint8Array): string;
+    /**
+     * True when this pre-key message belongs to this session. Returns
+     * false for a normal message or a message that is not valid.
+     */
+    session_matches(message_type: number, ciphertext: Uint8Array): boolean;
+    /**
+     * True after the session decrypted a message from the other device.
+     */
+    readonly has_received_message: boolean;
     readonly session_id: string;
 }
+
+/**
+ * A standalone Ed25519 key pair. The user master key uses it.
+ */
+export class SigningKey {
+    free(): void;
+    [Symbol.dispose](): void;
+    static from_pickle(pickle: string, key: Uint8Array): SigningKey;
+    constructor();
+    /**
+     * Encrypts the secret key with the pickle key (the vodozemac pickle cipher).
+     */
+    pickle(key: Uint8Array): string;
+    sign(message: string): string;
+    readonly public_key: string;
+}
+
+/**
+ * Verifies an Ed25519 signature. Returns false for a bad key, a bad
+ * signature or a signature that does not match.
+ */
+export function verify(public_key: string, message: string, signature: string): boolean;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -124,13 +176,18 @@ export interface InitOutput {
     readonly __wbg_inboundgroupsession_free: (a: number, b: number) => void;
     readonly __wbg_inboundresult_free: (a: number, b: number) => void;
     readonly __wbg_session_free: (a: number, b: number) => void;
+    readonly __wbg_signingkey_free: (a: number, b: number) => void;
     readonly account_create_inbound_session: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly account_create_outbound_session: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly account_curve25519_key: (a: number) => [number, number];
     readonly account_ed25519_key: (a: number) => [number, number];
+    readonly account_fallback_key: (a: number) => [number, number];
+    readonly account_forget_fallback_key: (a: number) => number;
     readonly account_from_pickle: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly account_generate_fallback_key: (a: number) => void;
     readonly account_generate_one_time_keys: (a: number, b: number) => void;
     readonly account_mark_keys_as_published: (a: number) => void;
+    readonly account_max_number_of_one_time_keys: (a: number) => number;
     readonly account_new: () => number;
     readonly account_one_time_keys: (a: number) => [number, number];
     readonly account_pickle: (a: number, b: number, c: number) => [number, number, number, number];
@@ -157,8 +214,16 @@ export interface InitOutput {
     readonly session_decrypt: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly session_encrypt: (a: number, b: number, c: number) => [number, number, number];
     readonly session_from_pickle: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly session_has_received_message: (a: number) => number;
     readonly session_pickle: (a: number, b: number, c: number) => [number, number, number, number];
     readonly session_session_id: (a: number) => [number, number];
+    readonly session_session_matches: (a: number, b: number, c: number, d: number) => number;
+    readonly signingkey_from_pickle: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly signingkey_new: () => number;
+    readonly signingkey_pickle: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly signingkey_public_key: (a: number) => [number, number];
+    readonly signingkey_sign: (a: number, b: number, c: number) => [number, number];
+    readonly verify: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;

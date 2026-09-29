@@ -86,6 +86,30 @@ export class Account {
         }
     }
     /**
+     * Returns a JSON object with the unpublished fallback key, or `{}`.
+     * @returns {string}
+     */
+    fallback_key() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.account_fallback_key(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Forgets the previous fallback key. Returns true if there was one.
+     * @returns {boolean}
+     */
+    forget_fallback_key() {
+        const ret = wasm.account_forget_fallback_key(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * @param {string} pickle
      * @param {Uint8Array} key
      * @returns {Account}
@@ -102,13 +126,31 @@ export class Account {
         return Account.__wrap(ret[0]);
     }
     /**
+     * Makes a new fallback key. The account keeps the previous one, so a
+     * late message that uses it still decrypts.
+     */
+    generate_fallback_key() {
+        wasm.account_generate_fallback_key(this.__wbg_ptr);
+    }
+    /**
      * @param {number} count
      */
     generate_one_time_keys(count) {
         wasm.account_generate_one_time_keys(this.__wbg_ptr, count);
     }
+    /**
+     * Marks all one-time keys and the fallback key as published.
+     */
     mark_keys_as_published() {
         wasm.account_mark_keys_as_published(this.__wbg_ptr);
+    }
+    /**
+     * The number of one-time keys that the server should keep for this account.
+     * @returns {number}
+     */
+    get max_number_of_one_time_keys() {
+        const ret = wasm.account_max_number_of_one_time_keys(this.__wbg_ptr);
+        return ret >>> 0;
     }
     constructor() {
         const ret = wasm.account_new();
@@ -117,7 +159,8 @@ export class Account {
         return this;
     }
     /**
-     * Returns a JSON object: key id to base64 public key.
+     * Returns a JSON object: key id to base64 public key. Only keys that
+     * are not published yet are in it.
      * @returns {string}
      */
     one_time_keys() {
@@ -621,6 +664,14 @@ export class Session {
         return Session.__wrap(ret[0]);
     }
     /**
+     * True after the session decrypted a message from the other device.
+     * @returns {boolean}
+     */
+    get has_received_message() {
+        const ret = wasm.session_has_received_message(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * @param {Uint8Array} key
      * @returns {string}
      */
@@ -659,8 +710,143 @@ export class Session {
             wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
         }
     }
+    /**
+     * True when this pre-key message belongs to this session. Returns
+     * false for a normal message or a message that is not valid.
+     * @param {number} message_type
+     * @param {Uint8Array} ciphertext
+     * @returns {boolean}
+     */
+    session_matches(message_type, ciphertext) {
+        const ptr0 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.session_session_matches(this.__wbg_ptr, message_type, ptr0, len0);
+        return ret !== 0;
+    }
 }
 if (Symbol.dispose) Session.prototype[Symbol.dispose] = Session.prototype.free;
+
+/**
+ * A standalone Ed25519 key pair. The user master key uses it.
+ */
+export class SigningKey {
+    static __wrap(ptr) {
+        const obj = Object.create(SigningKey.prototype);
+        obj.__wbg_ptr = ptr;
+        SigningKeyFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        SigningKeyFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_signingkey_free(ptr, 0);
+    }
+    /**
+     * @param {string} pickle
+     * @param {Uint8Array} key
+     * @returns {SigningKey}
+     */
+    static from_pickle(pickle, key) {
+        const ptr0 = passStringToWasm0(pickle, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.signingkey_from_pickle(ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return SigningKey.__wrap(ret[0]);
+    }
+    constructor() {
+        const ret = wasm.signingkey_new();
+        this.__wbg_ptr = ret;
+        SigningKeyFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Encrypts the secret key with the pickle key (the vodozemac pickle cipher).
+     * @param {Uint8Array} key
+     * @returns {string}
+     */
+    pickle(key) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passArray8ToWasm0(key, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.signingkey_pickle(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * @returns {string}
+     */
+    get public_key() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.signingkey_public_key(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @param {string} message
+     * @returns {string}
+     */
+    sign(message) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ptr0 = passStringToWasm0(message, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.signingkey_sign(this.__wbg_ptr, ptr0, len0);
+            deferred2_0 = ret[0];
+            deferred2_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+}
+if (Symbol.dispose) SigningKey.prototype[Symbol.dispose] = SigningKey.prototype.free;
+
+/**
+ * Verifies an Ed25519 signature. Returns false for a bad key, a bad
+ * signature or a signature that does not match.
+ * @param {string} public_key
+ * @param {string} message
+ * @param {string} signature
+ * @returns {boolean}
+ */
+export function verify(public_key, message, signature) {
+    const ptr0 = passStringToWasm0(public_key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(message, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(signature, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.verify(ptr0, len0, ptr1, len1, ptr2, len2);
+    return ret !== 0;
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -711,6 +897,9 @@ const InboundResultFinalization = (typeof FinalizationRegistry === 'undefined')
 const SessionFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_session_free(ptr, 1));
+const SigningKeyFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_signingkey_free(ptr, 1));
 
 function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();
