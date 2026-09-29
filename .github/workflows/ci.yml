@@ -52,6 +52,33 @@ jobs:
       - name: Test
         run: pnpm test
 
+  # Separate job: the Rust tests of the WASM crypto wrapper. rustup reads
+  # the pinned toolchain from rust-toolchain.toml in the crate folder.
+  rust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/crypto-wasm
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v5
+
+      - name: Cache the Cargo registry and the build output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/crypto-wasm/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('packages/crypto-wasm/rust-toolchain.toml', 'packages/crypto-wasm/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Test
+        run: cargo test --locked
+
   # Separate job: browser tests that need a real TURN server. It does
   # not run in the "build" job above, since it needs Docker Compose and
   # a real Chromium engine, and it is slower than a unit test run.
