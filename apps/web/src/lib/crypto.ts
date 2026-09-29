@@ -1,8 +1,8 @@
 // Starts the crypto layer in the background once the session signs in,
 // and stops it on sign-out. The crypto code and the WASM file load with a
 // dynamic import, so they are not in the main bundle. Only one tab of a
-// device runs the crypto layer: it holds a Web Lock. A different tab waits
-// for the lock. See docs/concepts/olm-megolm.md.
+// device runs the crypto layer: it holds a Web Lock. A different tab shows
+// a banner and waits for the lock. See docs/concepts/olm-megolm.md.
 import type { BackupStatus, CryptoHandle, VerificationView } from "@discord-clone/client-core/crypto";
 import { ApiError, postEvent, webPlatform } from "@discord-clone/client-core";
 import { encodeBase64Url } from "@discord-clone/shared";
@@ -85,6 +85,9 @@ function watchSecurity(started: CryptoHandle): () => void {
 
 const MAX_RECEIVED = 100;
 
+/** True while another tab of this device runs the crypto layer, and this tab waits for it. */
+export const cryptoTabStore = createStore<{ otherTab: boolean }>(() => ({ otherTab: false }));
+
 let handle: CryptoHandle | null = null;
 let run = 0;
 let releaseLock: (() => void) | null = null;
@@ -95,41 +98,60 @@ function start(userId: string, deviceId: string): void {
   if (typeof navigator === "undefined" || !navigator.locks) {
     return;
   }
-  void navigator.locks
-    .request(`crypto:${userId}:${deviceId}`, async () => {
-      if (current !== run) {
-        return;
-      }
-      const crypto = await import("@discord-clone/client-core/crypto");
-      const started = await crypto.startCrypto({
-        userId,
-        deviceId,
-        secureStore: webPlatform.secureStore,
-        transport: crypto.createHttpCryptoTransport(session.apiClient, gatewaySend),
-        log: (message) => console.warn(`[crypto] ${message}`),
-        isOnline: (userId) => realtimeStore.getState().presences[userId] !== "offline",
-      });
-      if (current !== run) {
-        started.stop();
-        return;
-      }
-      handle = started;
-      setCryptoHandle(started);
-      const unsubscribe = subscribeDispatch((event) => started.handleDispatch(event));
-      const stopSecurity = watchSecurity(started);
-      started.onToDevice((event) => {
-        if (event.type === "debug.ping" && typeof event.content.text === "string") {
-          received.push({ fromUserId: event.sender.userId, fromDeviceId: event.sender.deviceId, text: event.content.text });
-          received.splice(0, received.length - MAX_RECEIVED);
-        }
-      });
-      // Hold the lock until sign-out.
-      await new Promise<void>((resolve) => {
-        releaseLock = resolve;
-      });
-      unsubscribe();
-      stopSecurity();
+  const lockName = `crypto:${userId}:${deviceId}`;
+  const body = async () => {
+    if (current !== run) {
+      return;
+    }
+    const crypto = await import("@discord-clone/client-core/crypto");
+    const started = await crypto.startCrypto({
+      userId,
+      deviceId,
+      secureStore: webPlatform.secureStore,
+      transport: crypto.createHttpCryptoTransport(session.apiClient, gatewaySend),
+      log: (message) => console.warn(`[crypto] ${message}`),
+      isOnline: (userId) => realtimeStore.getState().presences[userId] !== "offline",
+    });
+    if (current !== run) {
       started.stop();
+      return;
+    }
+    handle = started;
+    setCryptoHandle(started);
+    const unsubscribe = subscribeDispatch((event) => started.handleDispatch(event));
+    const stopSecurity = watchSecurity(started);
+    started.onToDevice((event) => {
+      if (event.type === "debug.ping" && typeof event.content.text === "string") {
+        received.push({ fromUserId: event.sender.userId, fromDeviceId: event.sender.deviceId, text: event.content.text });
+        received.splice(0, received.length - MAX_RECEIVED);
+      }
+    });
+    // Hold the lock until sign-out.
+    await new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    unsubscribe();
+    stopSecurity();
+    started.stop();
+  };
+  // Only one tab of a device can run the crypto layer (it owns the Olm
+  // and Megolm state). When another tab holds the lock, show a banner and
+  // wait: this tab takes over when that tab closes. See
+  // docs/concepts/olm-megolm.md, "More than one tab".
+  void navigator.locks
+    .request(lockName, { ifAvailable: true }, async (lock) => {
+      if (lock) {
+        return body();
+      }
+      if (current === run) {
+        cryptoTabStore.setState({ otherTab: true });
+      }
+      return navigator.locks.request(lockName, async () => {
+        if (current === run) {
+          cryptoTabStore.setState({ otherTab: false });
+        }
+        return body();
+      });
     })
     .catch((error: unknown) => {
       console.warn("[crypto] The crypto layer could not start.", error);
@@ -138,6 +160,7 @@ function start(userId: string, deviceId: string): void {
 
 function stop(): void {
   run += 1;
+  cryptoTabStore.setState({ otherTab: false });
   handle = null;
   setCryptoHandle(null);
   securityStore.setState(EMPTY_SECURITY);
