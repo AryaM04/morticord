@@ -28,6 +28,7 @@ export function buildTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       resendVerification: 5,
       forgotPassword: 10,
     },
+    allowPlaintextEvents: false,
     ...overrides,
   };
 }

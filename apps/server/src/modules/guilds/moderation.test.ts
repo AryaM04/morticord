@@ -154,7 +154,7 @@ describeWithDb("kick, ban, unban, voice moderation and ownership transfer", () =
       method: "POST",
       url: `/api/v1/channels/${textChannel}/events`,
       headers: authHeader(target.accessToken),
-      payload: { codec: "plain-v1", ciphertext, nonce: "ban-test-1" },
+      payload: { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext, nonce: "ban-test-1" },
     });
     expect(posted.statusCode).toBe(201);
     const eventId = posted.json().id;
@@ -216,7 +216,7 @@ describeWithDb("kick, ban, unban, voice moderation and ownership transfer", () =
       method: "POST",
       url: `/api/v1/channels/${textChannel}/events`,
       headers: authHeader(target.accessToken),
-      payload: { codec: "plain-v1", ciphertext, nonce: "ban-test-2" },
+      payload: { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext, nonce: "ban-test-2" },
     });
     const eventId = posted.json().id;
 

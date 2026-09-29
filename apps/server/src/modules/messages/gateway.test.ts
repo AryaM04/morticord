@@ -169,7 +169,7 @@ async function postMessage(token: string, channelId: string, body: string) {
     method: "POST",
     url: `/api/v1/channels/${channelId}/events`,
     headers: { authorization: `Bearer ${token}` },
-    payload: { codec: "plain-v1", ciphertext: messageCiphertext(body), nonce: `${Date.now()}-${Math.random()}` },
+    payload: { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext(body), nonce: `${Date.now()}-${Math.random()}` },
   });
 }
 

@@ -3,7 +3,14 @@ import type { FastifyInstance } from "fastify";
 import { createEventRequestSchema, listEventsQuerySchema, updateReadStateRequestSchema } from "@discord-clone/shared";
 import type { AppDeps } from "../../app.js";
 import { AppError } from "../../errors.js";
-import { createEvent, createEventRateLimiter, listEvents, redactEvent, updateReadState } from "./service.js";
+import {
+  createEvent,
+  createEventRateLimiter,
+  listChannelMembers,
+  listEvents,
+  redactEvent,
+  updateReadState,
+} from "./service.js";
 import { toEventJson } from "./serialize.js";
 
 function parseId(text: string): bigint {
@@ -28,6 +35,9 @@ export async function registerMessageRoutes(app: FastifyInstance, deps: AppDeps)
     }
 
     const input = createEventRequestSchema.parse(request.body);
+    if (input.codec === "plain-v1" && !deps.config.allowPlaintextEvents) {
+      throw new AppError(400, "PLAINTEXT_NOT_ALLOWED", "The server does not accept messages that are not encrypted.");
+    }
     const { event, created } = await createEvent(
       deps.db,
       channelId,
@@ -69,7 +79,12 @@ export async function registerMessageRoutes(app: FastifyInstance, deps: AppDeps)
     return reply.status(204).send();
   });
 
-  app.put("/channels/:id/read", { preHandler: app.authenticate }, async (request, reply) => {
+  app.get("/channels/:id/members", { preHandler: app.authenticate }, async (request, reply) => {
+    const channelId = parseId((request.params as { id: string }).id);
+    return reply.send(await listChannelMembers(deps.db, channelId, request.auth!.userId));
+  });
+
+  app.put("/channels/:id/read",{ preHandler: app.authenticate }, async (request, reply) => {
     const channelId = parseId((request.params as { id: string }).id);
     const input = updateReadStateRequestSchema.parse(request.body);
     const { userId, deviceId } = request.auth!;

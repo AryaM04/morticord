@@ -53,6 +53,14 @@ const envSchema = z.object({
   // routes scale this value up or down; see authRateLimit in app config.
   // Raise this in a test environment to avoid 429s from repeated test runs.
   AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(10),
+
+  // Set to "true" to accept new events with the plaintext codec (plain-v1).
+  // The default rejects them: every client encrypts with megolm-v1. Old
+  // plaintext events stay readable in both cases.
+  ALLOW_PLAINTEXT_EVENTS: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
 });
 
 export interface AppConfig {
@@ -88,6 +96,8 @@ export interface AppConfig {
     resendVerification: number;
     forgotPassword: number;
   };
+  /** Accept new events with the plaintext codec. Off by default. */
+  allowPlaintextEvents: boolean;
 }
 
 /** Read and check the process environment. Throw a clear error on bad input. */
@@ -139,5 +149,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       resendVerification: Math.max(1, Math.round(data.AUTH_RATE_LIMIT_PER_MINUTE / 2)),
       forgotPassword: data.AUTH_RATE_LIMIT_PER_MINUTE,
     },
+    allowPlaintextEvents: data.ALLOW_PLAINTEXT_EVENTS,
   };
 }
