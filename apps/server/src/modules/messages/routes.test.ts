@@ -84,7 +84,8 @@ async function insertTimelineEvent(channelId: bigint, senderUserId: bigint, send
     senderUserId,
     senderDeviceId,
     relType: null,
-    codec: "plain-v1",
+    codec: "megolm-v1",
+    megolmSessionId: "test-session",
     ciphertext: encodePlainPayload({ type: "message", body: `bulk-${id}`, mentions: [], attachments: [], embeds: [] }),
     nonce: `bulk-${id}`,
   });
@@ -120,13 +121,13 @@ describeWithDb("channel event routes", () => {
     const channelId = textChannelOf(guild);
     const ciphertext = messageCiphertext("hello there");
 
-    const response = await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext, nonce: nonce() });
+    const response = await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext, nonce: nonce() });
     expect(response.statusCode).toBe(201);
     const event = response.json();
     expect(event.channelId).toBe(channelId);
     expect(event.senderId).toBe(owner.userId);
     expect(event.senderDeviceId).toBe(owner.deviceId);
-    expect(event.codec).toBe("plain-v1");
+    expect(event.codec).toBe("megolm-v1");
     expect(event.relType).toBeNull();
     expect(event.ciphertext).toBe(ciphertext);
     expect(event.redactedAt).toBeNull();
@@ -143,11 +144,97 @@ describeWithDb("channel event routes", () => {
     expect(list.events[0].id).toBe(event.id);
   });
 
+  it("rejects a new plaintext event with PLAINTEXT_NOT_ALLOWED, and a Megolm event without a session id", async () => {
+    const owner = await registerUser();
+    const guild = await createGuild(owner.accessToken);
+    const channelId = textChannelOf(guild);
+
+    const plain = await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext("secret"), nonce: nonce() });
+    expect(plain.statusCode).toBe(400);
+    expect(plain.json().error.code).toBe("PLAINTEXT_NOT_ALLOWED");
+
+    const noSession = await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", ciphertext: messageCiphertext("x"), nonce: nonce() });
+    expect(noSession.statusCode).toBe(400);
+
+    // An old plaintext event from development data still reads back.
+    const id = nextId();
+    await testDb.db.insert(events).values({
+      id,
+      channelId: BigInt(channelId),
+      senderUserId: BigInt(owner.userId),
+      senderDeviceId: owner.deviceId,
+      relType: null,
+      codec: "plain-v1",
+      ciphertext: encodePlainPayload({ type: "message", body: "old", mentions: [], attachments: [], embeds: [] }),
+      nonce: `old-${id}`,
+    });
+    const list = await app.inject({ method: "GET", url: `/api/v1/channels/${channelId}/events`, headers: authHeader(owner.accessToken) });
+    expect(list.json().events.map((event: { codec: string }) => event.codec)).toEqual(["plain-v1"]);
+  });
+
+  it("accepts a plaintext event when the config flag allows it", async () => {
+    const dataDir = await mkTempDataDir();
+    const permissive = await buildApp({
+      db: testDb.db,
+      config: buildTestConfig({ dataDir, allowPlaintextEvents: true }),
+      mailer: createFakeMailer(),
+      rateLimit: false,
+    });
+    try {
+      const owner = await registerUser();
+      const guild = await createGuild(owner.accessToken);
+      const response = await permissive.inject({
+        method: "POST",
+        url: `/api/v1/channels/${textChannelOf(guild)}/events`,
+        headers: authHeader(owner.accessToken),
+        payload: { codec: "plain-v1", ciphertext: messageCiphertext("dev"), nonce: nonce() },
+      });
+      expect(response.statusCode).toBe(201);
+    } finally {
+      await permissive.close();
+    }
+  });
+
+  it("lists the members that can view a channel, with the permission inputs", async () => {
+    const owner = await registerUser();
+    const member = await registerUser();
+    const hidden = await registerUser();
+    const outsider = await registerUser();
+    const guild = await createGuild(owner.accessToken);
+    const channelId = textChannelOf(guild);
+    for (const user of [member, hidden]) {
+      const invite = await app.inject({
+        method: "POST",
+        url: `/api/v1/channels/${channelId}/invites`,
+        headers: authHeader(owner.accessToken),
+        payload: {},
+      });
+      await app.inject({ method: "POST", url: `/api/v1/invites/${invite.json().code}`, headers: authHeader(user.accessToken) });
+    }
+    await denyPermission(channelId, hidden.userId, Permission.VIEW_CHANNEL);
+
+    const response = await app.inject({ method: "GET", url: `/api/v1/channels/${channelId}/members`, headers: authHeader(member.accessToken) });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.guildId).toBe(guild.id);
+    expect(body.ownerId).toBe(owner.userId);
+    expect(body.members.map((entry: { userId: string }) => entry.userId).sort()).toEqual([owner.userId, member.userId].sort());
+    expect(body.overwrites).toEqual([
+      { targetId: hidden.userId, targetType: "member", allow: "0", deny: Permission.VIEW_CHANNEL.toString() },
+    ]);
+    expect(body.roles.some((role: { id: string }) => role.id === guild.id)).toBe(true);
+
+    const hiddenResponse = await app.inject({ method: "GET", url: `/api/v1/channels/${channelId}/members`, headers: authHeader(hidden.accessToken) });
+    expect(hiddenResponse.statusCode).toBe(403);
+    const outsiderResponse = await app.inject({ method: "GET", url: `/api/v1/channels/${channelId}/members`, headers: authHeader(outsider.accessToken) });
+    expect(outsiderResponse.statusCode).toBe(404);
+  });
+
   it("updates the channel's lastEventId on the guild view once a message posts", async () => {
     const owner = await registerUser();
     const guild = await createGuild(owner.accessToken);
     const channelId = textChannelOf(guild);
-    await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext("hi"), nonce: nonce() });
+    await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext("hi"), nonce: nonce() });
 
     const view = await app.inject({ method: "GET", url: `/api/v1/guilds/${guild.id}`, headers: authHeader(owner.accessToken) });
     const channel = view.json().channels.find((c: { id: string }) => c.id === channelId);
@@ -163,7 +250,7 @@ describeWithDb("channel event routes", () => {
     // a well-formed but empty wire request is rejected at the shared schema
     // used by the client, not by the server. The server-side check here is
     // about the wire fields it does own: codec and ciphertext size.
-    const response = await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext: badCiphertext, nonce: nonce() });
+    const response = await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: badCiphertext, nonce: nonce() });
     expect(response.statusCode).toBe(201);
   });
 
@@ -172,7 +259,7 @@ describeWithDb("channel event routes", () => {
     const guild = await createGuild(owner.accessToken);
     const channelId = textChannelOf(guild);
     const huge = encodeBase64Url(new Uint8Array(16 * 1024 + 1));
-    const response = await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext: huge, nonce: nonce() });
+    const response = await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: huge, nonce: nonce() });
     expect(response.statusCode).toBe(400);
   });
 
@@ -183,14 +270,14 @@ describeWithDb("channel event routes", () => {
     const sharedNonce = nonce();
 
     const first = await postEvent(owner.accessToken, channelId, {
-      codec: "plain-v1",
+      codec: "megolm-v1", megolmSessionId: "test-session",
       ciphertext: messageCiphertext("one"),
       nonce: sharedNonce,
     });
     expect(first.statusCode).toBe(201);
 
     const second = await postEvent(owner.accessToken, channelId, {
-      codec: "plain-v1",
+      codec: "megolm-v1", megolmSessionId: "test-session",
       ciphertext: messageCiphertext("a different body, same nonce"),
       nonce: sharedNonce,
     });
@@ -213,7 +300,7 @@ describeWithDb("channel event routes", () => {
 
     const responses = [];
     for (let i = 0; i < 11; i += 1) {
-      responses.push(await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext(`m${i}`), nonce: nonce() }));
+      responses.push(await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext(`m${i}`), nonce: nonce() }));
     }
     expect(responses.slice(0, 10).every((r) => r.statusCode === 201)).toBe(true);
     expect(responses[10]!.statusCode).toBe(429);
@@ -237,7 +324,7 @@ describeWithDb("channel event routes", () => {
     // The guild owner always has every permission, so deny the plain member instead.
     await denyPermission(channelId, member.userId, Permission.SEND_MESSAGES);
 
-    const response = await postEvent(member.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext("nope"), nonce: nonce() });
+    const response = await postEvent(member.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext("nope"), nonce: nonce() });
     expect(response.statusCode).toBe(403);
   });
 
@@ -247,7 +334,7 @@ describeWithDb("channel event routes", () => {
     const channelId = textChannelOf(guild);
     const outsider = await registerUser();
 
-    const response = await postEvent(outsider.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext("nope"), nonce: nonce() });
+    const response = await postEvent(outsider.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext("nope"), nonce: nonce() });
     expect(response.statusCode).toBe(404);
   });
 
@@ -256,7 +343,7 @@ describeWithDb("channel event routes", () => {
     const guild = await createGuild(owner.accessToken);
     const channelId = voiceChannelOf(guild);
 
-    const response = await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext("nope"), nonce: nonce() });
+    const response = await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext("nope"), nonce: nonce() });
     expect(response.statusCode).toBe(400);
   });
 
@@ -272,14 +359,14 @@ describeWithDb("channel event routes", () => {
       payload: {},
     });
     await app.inject({ method: "POST", url: `/api/v1/invites/${invite.json().code}`, headers: authHeader(member.accessToken) });
-    const message = await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext("react to me"), nonce: nonce() });
+    const message = await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext("react to me"), nonce: nonce() });
 
     // The guild owner always has every permission, so deny the plain member instead.
     await denyPermission(channelId, member.userId, Permission.ADD_REACTIONS);
     const denied = await postEvent(member.accessToken, channelId, {
       relType: "reaction",
       relatesToId: message.json().id,
-      codec: "plain-v1",
+      codec: "megolm-v1", megolmSessionId: "test-session",
       ciphertext: reactionCiphertext("👍"),
       nonce: nonce(),
     });
@@ -287,7 +374,7 @@ describeWithDb("channel event routes", () => {
 
     const noTarget = await postEvent(owner.accessToken, channelId, {
       relType: "reaction",
-      codec: "plain-v1",
+      codec: "megolm-v1", megolmSessionId: "test-session",
       ciphertext: reactionCiphertext("👍"),
       nonce: nonce(),
     });
@@ -302,7 +389,7 @@ describeWithDb("channel event routes", () => {
     const response = await postEvent(owner.accessToken, channelId, {
       relType: "reaction",
       relatesToId: "999999999999999999",
-      codec: "plain-v1",
+      codec: "megolm-v1", megolmSessionId: "test-session",
       ciphertext: reactionCiphertext("👍"),
       nonce: nonce(),
     });
@@ -326,12 +413,12 @@ describeWithDb("channel event routes", () => {
       headers: authHeader(other.accessToken),
     });
 
-    const message = await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext("original"), nonce: nonce() });
+    const message = await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext("original"), nonce: nonce() });
 
     const editByOther = await postEvent(other.accessToken, channelId, {
       relType: "edit",
       relatesToId: message.json().id,
-      codec: "plain-v1",
+      codec: "megolm-v1", megolmSessionId: "test-session",
       ciphertext: messageCiphertext("hijacked"),
       nonce: nonce(),
     });
@@ -340,7 +427,7 @@ describeWithDb("channel event routes", () => {
     const editByOwner = await postEvent(owner.accessToken, channelId, {
       relType: "edit",
       relatesToId: message.json().id,
-      codec: "plain-v1",
+      codec: "megolm-v1", megolmSessionId: "test-session",
       ciphertext: messageCiphertext("edited"),
       nonce: nonce(),
     });
@@ -353,25 +440,25 @@ describeWithDb("channel event routes", () => {
     const owner = await registerUser();
     const guild = await createGuild(owner.accessToken);
     const channelId = textChannelOf(guild);
-    const message = await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext("m"), nonce: nonce() });
+    const message = await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext("m"), nonce: nonce() });
     const reaction = await postEvent(owner.accessToken, channelId, {
       relType: "reaction",
       relatesToId: message.json().id,
-      codec: "plain-v1",
+      codec: "megolm-v1", megolmSessionId: "test-session",
       ciphertext: reactionCiphertext("🎉"),
       nonce: nonce(),
     });
     const edit = await postEvent(owner.accessToken, channelId, {
       relType: "edit",
       relatesToId: message.json().id,
-      codec: "plain-v1",
+      codec: "megolm-v1", megolmSessionId: "test-session",
       ciphertext: messageCiphertext("edited"),
       nonce: nonce(),
     });
     const removedReaction = await postEvent(owner.accessToken, channelId, {
       relType: "reaction",
       relatesToId: message.json().id,
-      codec: "plain-v1",
+      codec: "megolm-v1", megolmSessionId: "test-session",
       ciphertext: reactionCiphertext("😂"),
       nonce: nonce(),
     });
@@ -458,7 +545,7 @@ describeWithDb("channel event routes", () => {
     const owner = await registerUser();
     const guild = await createGuild(owner.accessToken);
     const channelId = textChannelOf(guild);
-    const message = await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext("delete me"), nonce: nonce() });
+    const message = await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext("delete me"), nonce: nonce() });
 
     const response = await app.inject({
       method: "DELETE",
@@ -490,7 +577,7 @@ describeWithDb("channel event routes", () => {
     });
     await app.inject({ method: "POST", url: `/api/v1/invites/${invite.json().code}`, headers: authHeader(other.accessToken) });
 
-    const message = await postEvent(other.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext("mod me"), nonce: nonce() });
+    const message = await postEvent(other.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext("mod me"), nonce: nonce() });
 
     const memberSecond = await registerUser();
     await app.inject({ method: "POST", url: `/api/v1/invites/${invite.json().code}`, headers: authHeader(memberSecond.accessToken) });
@@ -515,18 +602,18 @@ describeWithDb("channel event routes", () => {
     const owner = await registerUser();
     const guild = await createGuild(owner.accessToken);
     const channelId = textChannelOf(guild);
-    const message = await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext("m"), nonce: nonce() });
+    const message = await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext("m"), nonce: nonce() });
     const reaction = await postEvent(owner.accessToken, channelId, {
       relType: "reaction",
       relatesToId: message.json().id,
-      codec: "plain-v1",
+      codec: "megolm-v1", megolmSessionId: "test-session",
       ciphertext: reactionCiphertext("🎉"),
       nonce: nonce(),
     });
     const edit = await postEvent(owner.accessToken, channelId, {
       relType: "edit",
       relatesToId: message.json().id,
-      codec: "plain-v1",
+      codec: "megolm-v1", megolmSessionId: "test-session",
       ciphertext: messageCiphertext("edited"),
       nonce: nonce(),
     });
@@ -550,8 +637,8 @@ describeWithDb("channel event routes", () => {
     const owner = await registerUser();
     const guild = await createGuild(owner.accessToken);
     const channelId = textChannelOf(guild);
-    const first = await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext("1"), nonce: nonce() });
-    const second = await postEvent(owner.accessToken, channelId, { codec: "plain-v1", ciphertext: messageCiphertext("2"), nonce: nonce() });
+    const first = await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext("1"), nonce: nonce() });
+    const second = await postEvent(owner.accessToken, channelId, { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext: messageCiphertext("2"), nonce: nonce() });
 
     const readSecond = await app.inject({
       method: "PUT",

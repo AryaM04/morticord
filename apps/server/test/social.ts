@@ -214,7 +214,7 @@ let nonceCounter = 0;
 export function postMessage(api: Api, channelId: string, text = "hello"): Promise<ApiResult> {
   nonceCounter += 1;
   return api.post(`/channels/${channelId}/events`, {
-    codec: "plain-v1",
+    codec: "megolm-v1", megolmSessionId: "test-session",
     ciphertext: encodeBase64Url(new TextEncoder().encode(text)),
     nonce: `nonce-${Date.now()}-${nonceCounter}`,
   });

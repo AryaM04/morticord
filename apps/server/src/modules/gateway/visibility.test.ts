@@ -184,7 +184,7 @@ describeWithDb("gateway effects for visibility and voice moderation", () => {
       method: "POST",
       url: `/api/v1/channels/${textChannel}/events`,
       headers: authHeader(owner.accessToken),
-      payload: { codec: "plain-v1", ciphertext, nonce: "vis-1" },
+      payload: { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext, nonce: "vis-1" },
     });
     await expect(nextMessage(memberWs, (env) => env.t === "EVENT_CREATE")).rejects.toThrow(/Timed out/);
 
@@ -202,7 +202,7 @@ describeWithDb("gateway effects for visibility and voice moderation", () => {
       method: "POST",
       url: `/api/v1/channels/${textChannel}/events`,
       headers: authHeader(owner.accessToken),
-      payload: { codec: "plain-v1", ciphertext, nonce: "vis-2" },
+      payload: { codec: "megolm-v1", megolmSessionId: "test-session", ciphertext, nonce: "vis-2" },
     });
     const eventCreate = await nextMessage(memberWs, (env) => env.t === "EVENT_CREATE");
     expect(eventCreate).toBeDefined();

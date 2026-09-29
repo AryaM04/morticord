@@ -17,6 +17,7 @@ export const MAX_MENTIONS = 50;
 export const MAX_REACTION_KEY_LENGTH = 32;
 export const MAX_CIPHERTEXT_BYTES = 16 * 1024;
 export const MAX_NONCE_LENGTH = 64;
+export const MAX_MEGOLM_SESSION_ID_LENGTH = 64;
 
 // ---- the decrypted payload (client-only; the server never parses this) ----
 
@@ -130,13 +131,17 @@ export const createEventRequestSchema = z
     relType: eventRelTypeSchema.optional(),
     relatesToId: idSchema.optional(),
     codec: eventCodecSchema,
-    megolmSessionId: z.string().optional(),
+    megolmSessionId: z.string().min(1).max(MAX_MEGOLM_SESSION_ID_LENGTH).optional(),
     ciphertext: ciphertextSchema,
     nonce: z.string().min(1).max(MAX_NONCE_LENGTH),
   })
   .refine((value) => value.relType === undefined || value.relatesToId !== undefined, {
     message: "relatesToId is required when relType is set.",
     path: ["relatesToId"],
+  })
+  .refine((value) => value.codec !== "megolm-v1" || value.megolmSessionId !== undefined, {
+    message: "megolmSessionId is required for the megolm-v1 codec.",
+    path: ["megolmSessionId"],
   });
 export type CreateEventRequest = z.infer<typeof createEventRequestSchema>;
 
@@ -176,6 +181,25 @@ export const readStateSchema = z.object({
   lastReadEventId: idSchema.nullable(),
 });
 export type ReadStateJson = z.infer<typeof readStateSchema>;
+
+// ---- REST: GET /channels/:id/members ----
+
+/**
+ * The users who can view one channel, with the inputs of `computePermissions`.
+ * The E2EE layer uses it to find the devices that get the Megolm key. The
+ * client checks the permissions again with these inputs.
+ */
+export const channelMembersResponseSchema = z.object({
+  /** Null for a DM or a group DM. */
+  guildId: idSchema.nullable(),
+  ownerId: idSchema.nullable(),
+  roles: z.array(z.object({ id: idSchema, permissions: z.string() })),
+  overwrites: z.array(
+    z.object({ targetId: idSchema, targetType: z.enum(["role", "member"]), allow: z.string(), deny: z.string() }),
+  ),
+  members: z.array(z.object({ userId: idSchema, roles: z.array(idSchema) })),
+});
+export type ChannelMembersResponse = z.infer<typeof channelMembersResponseSchema>;
 
 // ---- re-export for convenience ----
 export { decodeBase64Url, encodeBase64Url };

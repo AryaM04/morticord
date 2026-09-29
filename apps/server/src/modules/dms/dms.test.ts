@@ -424,7 +424,7 @@ describeWithDb("dms", () => {
       const dm = await openDm(alice, bob);
       const posted = await postMessage(apiFor(server, alice), dm.body.id);
       const reaction = await apiFor(server, bob).post(`/channels/${dm.body.id}/events`, {
-        codec: "plain-v1",
+        codec: "megolm-v1", megolmSessionId: "test-session",
         ciphertext: "AAAA",
         nonce: "reaction-1",
         relType: "reaction",
@@ -491,7 +491,7 @@ describeWithDb("dms", () => {
         expect(result.body.error.code).toBe("CANNOT_MESSAGE_USER");
       }
       const reaction = await apiFor(server, bob).post(`/channels/${dm.body.id}/events`, {
-        codec: "plain-v1",
+        codec: "megolm-v1", megolmSessionId: "test-session",
         ciphertext: "AAAA",
         nonce: "blocked-reaction",
         relType: "reaction",

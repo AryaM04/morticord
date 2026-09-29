@@ -5,14 +5,37 @@
 // the plaintext routing metadata (channel, sender, relation, codec, times)
 // described in docs/concepts/messages.md.
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or } from "drizzle-orm";
-import { decodeBase64Url, DispatchEvent, Permission, type EventCodec, type EventRelType } from "@discord-clone/shared";
+import {
+  computePermissions,
+  decodeBase64Url,
+  DispatchEvent,
+  hasPermission,
+  Permission,
+  type ChannelMembersResponse,
+  type EventCodec,
+  type EventRelType,
+} from "@discord-clone/shared";
 import type { DbClient } from "../../db/client.js";
-import { channels, events, readStates } from "../../db/schema.js";
+import {
+  channelRecipients,
+  channels,
+  events,
+  guildMembers,
+  guilds,
+  memberRoles,
+  readStates,
+  roles,
+} from "../../db/schema.js";
 import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
 import type { GatewayService } from "../gateway/service.js";
 import { dmPermissions, isPrivateChannelType, isRecipient, requireCanMessage, type ChannelRow } from "../dms/access.js";
-import { channelPermissions, loadMemberContext, requireChannelPermission } from "../guilds/member-context.js";
+import {
+  channelPermissions,
+  loadMemberContext,
+  loadOverwrites,
+  requireChannelPermission,
+} from "../guilds/member-context.js";
 import { toEventJson, type EventRow } from "./serialize.js";
 
 /** Timeline events are the ones that advance a channel's `lastEventId`: a plain message or a reply. */
@@ -437,6 +460,84 @@ export async function updateReadState(
       lastReadEventId: eventId.toString(),
     });
   }
+}
+
+// ---- channel members (for the E2EE key share) ----------------------------------
+
+/**
+ * The users who can view a channel now, with the roles, the overwrites and
+ * the owner, so that the client can check each permission again. The
+ * caller must be able to view the channel. The server computes the
+ * permissions in memory with three queries, not with queries for each member.
+ */
+export async function listChannelMembers(db: DbClient, channelId: bigint, userId: bigint): Promise<ChannelMembersResponse> {
+  const access = await loadChannelAccess(db, channelId, userId);
+  requireChannelPermission(await access.permissions(), Permission.VIEW_CHANNEL);
+  const { channel } = access;
+
+  if (channel.guildId === null) {
+    const recipients = await db
+      .select({ userId: channelRecipients.userId })
+      .from(channelRecipients)
+      .where(eq(channelRecipients.channelId, channelId));
+    return {
+      guildId: null,
+      ownerId: null,
+      roles: [],
+      overwrites: [],
+      members: recipients.map((row) => ({ userId: row.userId.toString(), roles: [] })),
+    };
+  }
+
+  const guildId = channel.guildId;
+  const [guildRows, roleRows, memberRows, heldRows, overwrites] = await Promise.all([
+    db.select({ ownerId: guilds.ownerId }).from(guilds).where(eq(guilds.id, guildId)).limit(1),
+    db.select({ id: roles.id, permissions: roles.permissions }).from(roles).where(eq(roles.guildId, guildId)),
+    db.select({ userId: guildMembers.userId }).from(guildMembers).where(eq(guildMembers.guildId, guildId)),
+    db.select({ userId: memberRoles.userId, roleId: memberRoles.roleId }).from(memberRoles).where(eq(memberRoles.guildId, guildId)),
+    loadOverwrites(db, [channelId]),
+  ]);
+  const ownerId = guildRows[0]?.ownerId ?? null;
+  const everyone = roleRows.find((role) => role.id === guildId);
+  if (!everyone) {
+    throw new Error(`Guild ${guildId} has no @everyone role.`);
+  }
+  const permissionsById = new Map(roleRows.map((role) => [role.id, role.permissions]));
+  const heldByUser = new Map<bigint, bigint[]>();
+  for (const row of heldRows) {
+    const list = heldByUser.get(row.userId) ?? [];
+    list.push(row.roleId);
+    heldByUser.set(row.userId, list);
+  }
+  const channelOverwrites = overwrites.get(channelId) ?? [];
+
+  const members: ChannelMembersResponse["members"] = [];
+  for (const { userId: memberId } of memberRows) {
+    const held = (heldByUser.get(memberId) ?? []).filter((roleId) => roleId !== guildId && permissionsById.has(roleId));
+    const permissions = computePermissions({
+      isOwner: ownerId === memberId,
+      everyoneRole: { id: everyone.id, permissions: everyone.permissions },
+      memberRoles: held.map((roleId) => ({ id: roleId, permissions: permissionsById.get(roleId)! })),
+      overwrites: channelOverwrites,
+      memberId,
+    });
+    if (hasPermission(permissions, Permission.VIEW_CHANNEL)) {
+      members.push({ userId: memberId.toString(), roles: held.map((roleId) => roleId.toString()) });
+    }
+  }
+
+  return {
+    guildId: guildId.toString(),
+    ownerId: ownerId?.toString() ?? null,
+    roles: roleRows.map((role) => ({ id: role.id.toString(), permissions: role.permissions.toString() })),
+    overwrites: channelOverwrites.map((overwrite) => ({
+      targetId: overwrite.targetId.toString(),
+      targetType: overwrite.targetType,
+      allow: overwrite.allow.toString(),
+      deny: overwrite.deny.toString(),
+    })),
+    members,
+  };
 }
 
 export async function loadReadStates(db: DbClient, userId: bigint) {
