@@ -13,13 +13,17 @@ export interface MailpitMessage {
 }
 
 export function createMailpitClient(baseUrl: string) {
-  async function listMessages(): Promise<MailpitMessageSummary[]> {
-    const response = await fetch(`${baseUrl}/api/v1/messages`);
+  /** Find the messages to one recipient with one subject, newest first. Other tests cannot change the result. */
+  async function searchMessages(recipient: string, subject: string): Promise<MailpitMessageSummary[]> {
+    const query = encodeURIComponent(`to:"${recipient}" subject:"${subject}"`);
+    const response = await fetch(`${baseUrl}/api/v1/search?query=${query}`);
     if (!response.ok) {
-      throw new Error(`Mailpit list request failed with status ${response.status}.`);
+      throw new Error(`Mailpit search request failed with status ${response.status}.`);
     }
     const body = (await response.json()) as { messages: MailpitMessageSummary[] };
-    return body.messages;
+    return body.messages.filter(
+      (message) => message.Subject === subject && message.To.some((to) => to.Address === recipient),
+    );
   }
 
   async function readMessage(id: string): Promise<MailpitMessage> {
@@ -30,9 +34,10 @@ export function createMailpitClient(baseUrl: string) {
     return (await response.json()) as MailpitMessage;
   }
 
-  /** Poll for the newest message to a recipient, then pull a "#name=value" link out of its text. */
+  /** Poll for the newest message to a recipient with a subject, then pull a "#name=value" link out of its text. */
   async function findHashLinkFor(
     recipient: string,
+    subject: string,
     hashKey: string,
     options: { timeoutMs?: number; intervalMs?: number } = {},
   ): Promise<string> {
@@ -41,8 +46,7 @@ export function createMailpitClient(baseUrl: string) {
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
-      const messages = await listMessages();
-      const match = messages.find((message) => message.To.some((to) => to.Address === recipient));
+      const [match] = await searchMessages(recipient, subject);
       if (match) {
         const full = await readMessage(match.ID);
         const pattern = new RegExp(`${hashKey}=([^\\s]+)`);
@@ -53,12 +57,8 @@ export function createMailpitClient(baseUrl: string) {
       }
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
-    throw new Error(`No email to ${recipient} with a "${hashKey}" link arrived within ${timeoutMs}ms.`);
+    throw new Error(`No email to ${recipient} with the subject "${subject}" and a "${hashKey}" link arrived within ${timeoutMs}ms.`);
   }
 
-  async function deleteAllMessages(): Promise<void> {
-    await fetch(`${baseUrl}/api/v1/messages`, { method: "DELETE" });
-  }
-
-  return { listMessages, readMessage, findHashLinkFor, deleteAllMessages };
+  return { searchMessages, readMessage, findHashLinkFor };
 }

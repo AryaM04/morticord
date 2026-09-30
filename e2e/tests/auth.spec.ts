@@ -96,7 +96,7 @@ test.describe("accounts", () => {
     await page.getByRole("button", { name: "Send reset link" }).click();
     await expect(page.getByText("Check your email")).toBeVisible();
 
-    const token = await mailpit.findHashLinkFor(user.email, "token");
+    const token = await mailpit.findHashLinkFor(user.email, "Reset your password", "token");
 
     const newPassword = "a-brand-new-password-123";
     await page.goto(`${WEB_ORIGIN}/reset-password#token=${token}`);
@@ -121,7 +121,7 @@ test.describe("accounts", () => {
     await expect(page).toHaveURL(`${WEB_ORIGIN}/app`);
     await expect(page.getByText("Your email address is not verified yet.")).toBeVisible();
 
-    const token = await mailpit.findHashLinkFor(user.email, "token");
+    const token = await mailpit.findHashLinkFor(user.email, "Confirm your email address", "token");
 
     await page.goto(`${WEB_ORIGIN}/verify-email#token=${token}`);
     await expect(page.getByText("Your email address is verified.")).toBeVisible();
