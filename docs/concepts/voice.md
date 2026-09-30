@@ -3,7 +3,8 @@
 This note explains the server's part of voice calls: the mesh design, the
 gateway ops, peer identity, the disconnect grace period, and the member
 cap. See `docs/concepts/nat-turn.md` for how a client reaches the TURN
-server. The client side (the WebRTC mesh itself) is a later milestone.
+server. The client side (the WebRTC mesh) is in
+`packages/client-core/src/voice`.
 
 ## The mesh: the server never touches media
 
@@ -130,7 +131,7 @@ never fires against a peer that already left on its own.
 A voice channel holds at most 10 peers; the 11th `VOICE_JOIN` gets
 `CHANNEL_FULL`. When a voice channel is deleted, every peer in it is
 removed and told to leave. When a member leaves a guild, is removed
-from it, or (in a later milestone) loses `VIEW_CHANNEL` or `CONNECT`
+from it, or loses `VIEW_CHANNEL` or `CONNECT`
 through a permission change, the same cleanup runs: the server calls
 `revalidate` for that guild, which drops any peer whose current
 permissions no longer allow them to be there.

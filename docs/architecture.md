@@ -34,7 +34,7 @@ The full plan is in the plan file that `CLAUDE.md` names.
 
 ## 4. Authentication and devices
 
-- One login makes one **device**. The server makes the device ID (random, 16 base64url characters). The E2EE keys of M6 attach to this device ID.
+- One login makes one **device**. The server makes the device ID (random, 16 base64url characters). The E2EE keys attach to this device ID.
 - The **access token** is a JWT (HS256, library `jose`). It is valid for 15 minutes. Claims: `sub` (user ID), `did` (device ID). The client sends it as `Authorization: Bearer <token>`.
 - The **refresh token** is 32 random bytes as base64url. The server keeps only its SHA-256 hash. It is valid for 30 days. Each refresh gives a new refresh token and revokes the old one (rotation).
   If a client sends a revoked refresh token again, the server revokes all refresh tokens of that device, because the token was possibly stolen.

@@ -117,7 +117,7 @@ installer.
 
 To make a new key pair:
 
-1. Run `pnpm --filter desktop-tauri exec tauri signer generate -w <path-outside-the-repo>`.
+1. Run `pnpm --filter @discord-clone/desktop-tauri exec tauri signer generate -w <path-outside-the-repo>`.
 2. Put the content of the `.pub` file in `plugins.updater.pubkey` in
    `tauri.conf.json`.
 3. In the GitHub repository settings, add the secret
@@ -130,7 +130,7 @@ files without a login, so the check fails there.
 
 ## Build and release
 
-- `pnpm --filter desktop-tauri build` makes the MSI and the NSIS installer
+- `pnpm --filter @discord-clone/desktop-tauri build` makes the MSI and the NSIS installer
   on Windows (in `src-tauri/target/release/bundle`). A local build makes
   no updater files, so it needs no signing key.
 - `.github/workflows/release.yml` runs on a tag such as `v0.1.0`. It builds
@@ -333,5 +333,5 @@ capture APIs. It is not part of the normal app.
      and the track settings, then it stops the track.
 
 To run the same check inside the Tauri shell, start the shell in dev mode
-(`pnpm --filter desktop-tauri dev`) and add `?diag` to the window URL
+(`pnpm --filter @discord-clone/desktop-tauri dev`) and add `?diag` to the window URL
 through the same dev server, since the shell loads that URL directly.

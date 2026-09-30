@@ -121,8 +121,8 @@ A save with an old version fails with 409 `VERSION_CONFLICT`. A save that
 works adds 1 to the version and sends `USER_SETTINGS_UPDATE` to the other
 devices of the user.
 
-The server never reads the bytes. The client stores JSON now and encrypts
-it in milestone M6.
+The server never reads the bytes. The client encrypts the JSON with the
+settings key of the user.
 
 ## The web client
 

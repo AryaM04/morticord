@@ -5,9 +5,8 @@ what it never reads, and how a client finds its way through history.
 
 ## Why the server never reads message content
 
-The app is end-to-end encrypted from milestone M6. To make that swap safe,
-the server treats the content of every event as an opaque blob from day
-one, even in this milestone, where the content is only plain JSON. The
+The app is end-to-end encrypted. The server treats the content of every
+event as an opaque blob. Milestone M3 had only plain JSON content. The
 server stores:
 
 - `ciphertext`: raw bytes. The server never parses them.
