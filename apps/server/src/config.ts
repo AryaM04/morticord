@@ -88,6 +88,14 @@ const envSchema = z.object({
     .optional()
     .transform((value) => value === "true"),
 
+  // Set to "true" when a reverse proxy runs in front of the server. The
+  // server then reads the client address from the X-Forwarded-For header.
+  // Never set it when clients can reach the server directly.
+  TRUST_PROXY: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+
   // Write the server log to this file instead of standard output. Empty or
   // unset: standard output.
   LOG_FILE: z.string().optional(),
@@ -138,6 +146,8 @@ export interface AppConfig {
   attachmentQuotaBytes: number;
   /** For tests only: the link preview route can fetch from loopback addresses. */
   linkPreviewTestAllowLoopback: boolean;
+  /** A reverse proxy runs in front of the server. The client address comes from X-Forwarded-For. */
+  trustProxy?: boolean;
   /** The server log goes to this file, or to standard output when it is undefined. */
   logFile?: string;
 }
@@ -224,6 +234,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     maxAttachmentBytes: data.MAX_ATTACHMENT_BYTES,
     attachmentQuotaBytes: data.ATTACHMENT_QUOTA_BYTES,
     linkPreviewTestAllowLoopback: data.LINK_PREVIEW_TEST_ALLOW_LOOPBACK,
+    trustProxy: data.TRUST_PROXY,
     logFile: data.LOG_FILE ? data.LOG_FILE : undefined,
   };
 }

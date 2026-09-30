@@ -287,3 +287,30 @@ jobs:
       - name: Show the API server log
         if: failure()
         run: tail -n 80 server.log
+
+  # Separate job: build the production images and check the production
+  # compose file. It does not push the images.
+  production-images:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v5
+
+      - name: Make a test environment file
+        run: |
+          node scripts/generate-secrets.mjs
+          {
+            echo "DOMAIN=chat.example.com"
+            echo "ACME_EMAIL=admin@example.com"
+            echo "TURN_EXTERNAL_IP=203.0.113.7"
+            echo "SMTP_HOST=smtp.example.com"
+          } >> .env
+
+      - name: Check the compose file
+        run: docker compose --profile ddns --profile ddns-duckdns config --quiet
+
+      - name: Build the images
+        run: docker compose build
+
+      - name: Show the image sizes
+        run: docker images --format '{{.Repository}} {{.Size}}' | grep discord-clone

@@ -1,0 +1,219 @@
+# Production stack for a home server.
+# Start it with: docker compose up -d
+# Fill in the .env file first (see .env.example and docs/deploy.md).
+# For development, use infra/docker-compose.dev.yml.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # Reverse proxy. It gets the TLS certificate, serves the web app and
+  # sends /api and /gateway to the api service.
+  caddy:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: discord-clone-caddy
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+      TLS_MODE: ${TLS_MODE:-}
+      MAX_ATTACHMENT_BYTES: ${MAX_ATTACHMENT_BYTES:-26214400}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [internal]
+    mem_limit: 128m
+    cpus: 1.0
+    logging: *logging
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    image: discord-clone-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # These values come from DOMAIN and the fixed service names. Do not set them in .env.
+    environment:
+      NODE_ENV: production
+      API_PORT: "3000"
+      TRUST_PROXY: "true"
+      DATA_DIR: /data
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      WEB_ORIGIN: https://${DOMAIN}
+      PUBLIC_API_URL: https://${DOMAIN}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      DESKTOP_URL_SCHEME: ${DESKTOP_URL_SCHEME:-discordclone}
+      TURN_SECRET: ${TURN_SECRET}
+      TURN_DOMAIN: ${DOMAIN}
+      TURN_PORT: "3478"
+      TURN_TLS_PORT: "5349"
+      TURN_TLS_ENABLED: ${TURN_TLS_ENABLED:-false}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-10}
+      ALLOW_PLAINTEXT_EVENTS: ${ALLOW_PLAINTEXT_EVENTS:-false}
+      MAX_ATTACHMENT_BYTES: ${MAX_ATTACHMENT_BYTES:-26214400}
+      ATTACHMENT_QUOTA_BYTES: ${ATTACHMENT_QUOTA_BYTES:-2147483648}
+    volumes:
+      - api-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks: [internal]
+    mem_limit: 512m
+    cpus: 1.0
+    logging: *logging
+
+  # The database is reachable only from the internal network. It has no published port.
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+    mem_limit: 512m
+    cpus: 1.0
+    logging: *logging
+
+  # TURN server. It uses the host network, so that the relay port range
+  # needs no port mapping. This works on Linux only. Docker Desktop (Windows
+  # and macOS) does not give a container the real host network, so use
+  # Docker Desktop for development only.
+  # The TLS certificate comes from the Caddy volume. After Caddy renews the
+  # certificate (about every 60 days), run: docker compose restart coturn
+  coturn:
+    image: coturn/coturn:4.7-alpine
+    restart: unless-stopped
+    network_mode: host
+    # coturn reads the private key as root, then it drops its rights.
+    user: "0:0"
+    command:
+      - "-c"
+      - "/etc/coturn/turnserver.conf"
+      - "--static-auth-secret=${TURN_SECRET}"
+      - "--realm=${DOMAIN}"
+      - "--external-ip=${TURN_EXTERNAL_IP:?Set TURN_EXTERNAL_IP in .env}"
+      - "--min-port=${TURN_RELAY_MIN_PORT:-40000}"
+      - "--max-port=${TURN_RELAY_MAX_PORT:-40099}"
+      - "--cert=/caddy-data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN}/${DOMAIN}.crt"
+      - "--pkey=/caddy-data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN}/${DOMAIN}.key"
+    volumes:
+      - ./infra/coturn/turnserver.prod.conf:/etc/coturn/turnserver.conf:ro
+      - caddy-data:/caddy-data:ro
+    mem_limit: 256m
+    cpus: 1.0
+    logging: *logging
+
+  # Nightly backup of the database and the data files. See docs/deploy.md.
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    entrypoint: ["/scripts/backup.sh"]
+    command: ["loop"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_HOUR: ${BACKUP_HOUR:-3}
+    volumes:
+      - ./infra/scripts/backup.sh:/scripts/backup.sh:ro
+      - api-data:/data
+      - ${BACKUP_DIR:-./backups}:/backup
+    networks: [internal]
+    mem_limit: 128m
+    cpus: 0.5
+    logging: *logging
+
+  # Optional DDNS updater for Cloudflare. Start it with: docker compose --profile ddns up -d
+  ddns:
+    profiles: [ddns]
+    image: favonia/cloudflare-ddns:1
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      DOMAINS: ${DOMAIN}
+      PROXIED: "false"
+      IP6_PROVIDER: none
+    networks: [internal]
+    mem_limit: 64m
+    cpus: 0.25
+    logging: *logging
+
+  # Optional DDNS updater for DuckDNS. Start it with: docker compose --profile ddns-duckdns up -d
+  ddns-duckdns:
+    profiles: [ddns-duckdns]
+    image: lscr.io/linuxserver/duckdns:latest
+    restart: unless-stopped
+    environment:
+      SUBDOMAINS: ${DUCKDNS_SUBDOMAIN:-}
+      TOKEN: ${DUCKDNS_TOKEN:-}
+    volumes:
+      - duckdns-config:/config
+    networks: [internal]
+    mem_limit: 64m
+    cpus: 0.25
+    logging: *logging
+
+networks:
+  internal:
+
+volumes:
+  caddy-data:
+  caddy-config:
+  postgres-data:
+  api-data:
+  duckdns-config:

@@ -59,7 +59,10 @@ export interface AppDeps {
 const IMAGE_CONTENT_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: rawDeps.config.logFile ? { file: rawDeps.config.logFile } : true });
+  const app = Fastify({
+    logger: rawDeps.config.logFile ? { file: rawDeps.config.logFile } : true,
+    trustProxy: rawDeps.config.trustProxy ?? false,
+  });
   const gateway = rawDeps.gateway ?? new GatewayService();
   await gateway.primeFromDatabase(rawDeps.db);
   const voice = rawDeps.voice ?? new VoiceService(rawDeps.voiceGraceMs);

@@ -1,0 +1,12 @@
+# Keep the build context small. Each image copies only the files it needs.
+.git
+.env
+**/node_modules
+**/dist
+**/.turbo
+**/target
+e2e
+docs
+apps/desktop-tauri
+apps/desktop-electron
+backups
