@@ -4,16 +4,16 @@
 // key of the user, so the settings wait for the crypto layer.
 import { useStore } from "zustand";
 import { createSettingsStore, type SettingsCipher, type SettingsStore } from "@discord-clone/client-core";
-import type { CryptoHandle } from "@discord-clone/client-core/crypto";
+import type { CryptoClient } from "@discord-clone/client-core/crypto-client";
 import { cryptoReady } from "./messages.js";
 import { session } from "./session.js";
 import { realtimeStore } from "./realtime.js";
 
 const keyListeners = new Set<() => void>();
-let watched: CryptoHandle | null = null;
+let watched: CryptoClient | null = null;
 
 /** Get the crypto layer, and forward its key arrivals to the store one time for each handle. */
-async function settingsCrypto(): Promise<CryptoHandle> {
+async function settingsCrypto(): Promise<CryptoClient> {
   const handle = await cryptoReady();
   if (watched !== handle) {
     watched = handle;

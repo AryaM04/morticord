@@ -18,6 +18,10 @@
       "types": "./src/crypto/index.ts",
       "default": "./src/crypto/index.ts"
     },
+    "./crypto-client": {
+      "types": "./src/crypto/client.ts",
+      "default": "./src/crypto/client.ts"
+    },
     "./search": {
       "types": "./src/search/index.ts",
       "default": "./src/search/index.ts"

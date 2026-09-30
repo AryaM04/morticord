@@ -12,6 +12,14 @@ import {
 } from "@discord-clone/shared";
 import { decodePlainEvent, type PayloadCodec } from "../codec.js";
 import type { SecureStore } from "../platform.js";
+import {
+  applySearchChanges,
+  openLocalSearchIndex,
+  type IndexQuery,
+  type IndexResult,
+  type LocalSearchIndex,
+  type SearchChange,
+} from "../search/local-index.js";
 import { AccountHolder } from "./account.js";
 import { DeviceList } from "./device-list.js";
 import { DeviceManager } from "./device-manager.js";
@@ -34,6 +42,8 @@ export { SettingsKeyMissingError } from "./settings-key.js";
 export { WrongRecoveryKeyError, type BackupStatus, type RestoreProgress, type RestoreResult } from "./key-backup.js";
 export { SAS_EMOJIS, type VerificationPhase, type VerificationView } from "./verification.js";
 export { decodeRecoveryKey, encodeRecoveryKey } from "./recovery-key.js";
+export { createCryptoHost, type CryptoHost, type CryptoHostOptions, type HostedCrypto } from "./host.js";
+export type { CryptoClient } from "./rpc.js";
 
 /** The gateway events that say that a user left a guild, a DM or a channel. */
 const MEMBER_LEFT_EVENTS = new Set([
@@ -166,6 +176,13 @@ export interface CryptoHandle {
    * from the pickle key (HKDF), and page code cannot export them.
    */
   localIndexKeys(): Promise<LocalIndexKeys>;
+  /** The local search index of this device. Only the crypto layer writes it, so two tabs never race. */
+  readonly search: {
+    apply(changes: SearchChange[]): Promise<void>;
+    query(query: IndexQuery): Promise<IndexResult[]>;
+  };
+  /** Ask the server to send again every to-device message after the last processed one. */
+  resyncToDevice(): void;
   /** Wait until every received message is processed. For tests. */
   whenIdle(): Promise<void>;
   stop(): void;
@@ -212,7 +229,8 @@ async function loadPickleKey(secureStore: SecureStore, userId: string, deviceId:
 /**
  * Start the crypto layer of one device: load or make the account, set up
  * the keys on the server and start to handle to-device messages. The
- * caller must make sure that only one tab of a device runs it (a Web Lock).
+ * caller must make sure that only one context of a device runs it (the Web
+ * Lock `crypto:<userId>:<deviceId>`).
  */
 export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHandle> {
   const { userId, deviceId, transport } = options;
@@ -367,6 +385,12 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
   const inbox: ToDeviceDispatchPayload[] = [];
   let draining: Promise<void> | null = null;
   let lastAckedId = await olm.lastProcessed();
+  /**
+   * The highest queue id in the inbox or processed. Every tab forwards the
+   * TO_DEVICE dispatches of its own gateway session, and each session gets
+   * the queue in id order. Thus a lower or equal id is a copy.
+   */
+  let lastQueuedId = BigInt(lastAckedId);
   let lastAckAt = 0;
   let ackTimer: ReturnType<typeof setTimeout> | null = null;
   let sinceAck = 0;
@@ -428,7 +452,8 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
     }
     if (dispatch.t === "TO_DEVICE") {
       const parsed = toDeviceDispatchPayloadSchema.safeParse(dispatch.d);
-      if (parsed.success) {
+      if (parsed.success && BigInt(parsed.data.id) > lastQueuedId) {
+        lastQueuedId = BigInt(parsed.data.id);
         inbox.push(parsed.data);
         void drain();
       }
@@ -511,6 +536,12 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
   };
 
   let indexKeys: Promise<LocalIndexKeys> | null = null;
+  const localIndexKeys = () => (indexKeys ??= deriveLocalIndexKeys(pickleKey));
+  let searchIndex: Promise<LocalSearchIndex> | null = null;
+  const openSearch = () =>
+    (searchIndex ??= localIndexKeys().then((keys) =>
+      openLocalSearchIndex({ name: `search:${userId}:${deviceId}`, keys, indexedDb: options.indexedDb }),
+    ));
   return {
     userId,
     deviceId,
@@ -554,7 +585,12 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
       cancel: (txnId) => verification.cancel(txnId),
       dismiss: (txnId) => verification.dismiss(txnId),
     },
-    localIndexKeys: () => (indexKeys ??= deriveLocalIndexKeys(pickleKey)),
+    localIndexKeys,
+    search: {
+      apply: async (changes) => applySearchChanges(await openSearch(), changes),
+      query: async (query) => (await openSearch()).search(query),
+    },
+    resyncToDevice: () => void resync().catch((error: unknown) => log(`The to-device queue could not resync: ${String(error)}`)),
     async whenIdle() {
       for (let round = 0; round < 3; round += 1) {
         while (draining) {
@@ -578,6 +614,7 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
       }
       inbox.length = 0;
       store.close();
+      void searchIndex?.then((index) => index.close()).catch(() => undefined);
     },
   };
 }

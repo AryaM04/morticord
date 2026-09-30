@@ -3,11 +3,7 @@
 // the index module (`search-indexer.ts`) in batches. That module loads
 // only on the first batch. See docs/concepts/search.md.
 import type { DecryptedPayload, EventJson } from "@discord-clone/shared";
-
-/** One change for the index. */
-export type SearchChange =
-  | { kind: "decoded"; event: EventJson; payload: DecryptedPayload }
-  | { kind: "redacted"; ids: string[] };
+import type { SearchChange } from "@discord-clone/client-core/search";
 
 /** The queue keeps at most this many changes while the index is not ready. The oldest go first. */
 const MAX_QUEUE = 5000;

@@ -10,6 +10,7 @@
 // Both keys come from the pickle key of the crypto store (see
 // `CryptoHandle.localIndexKeys`). The trade-off of word tags against one
 // encrypted blob is in docs/concepts/search.md.
+import type { DecryptedPayload, EventJson } from "@discord-clone/shared";
 import { tokenize, type HasFilter } from "./text.js";
 
 /** The index keeps at most this many messages. It drops the oldest first. */
@@ -114,6 +115,43 @@ export interface LocalSearchIndex {
   search(query: IndexQuery): Promise<IndexResult[]>;
   count(): Promise<number>;
   close(): void;
+}
+
+/** One change for the index: a message that a tab decoded, or deleted messages. */
+export type SearchChange =
+  | { kind: "decoded"; event: EventJson; payload: DecryptedPayload }
+  | { kind: "redacted"; ids: string[] };
+
+/** Write a batch of changes in their order. */
+export async function applySearchChanges(index: LocalSearchIndex, changes: SearchChange[]): Promise<void> {
+  const messages: IndexInput[] = [];
+  const edits: EditInput[] = [];
+  const write = async () => {
+    // Messages first: an edit needs its message in the index.
+    await index.add(messages.splice(0));
+    await index.applyEdits(edits.splice(0));
+  };
+  for (const change of changes) {
+    if (change.kind === "redacted") {
+      await write();
+      await index.remove(change.ids);
+      continue;
+    }
+    const { event, payload } = change;
+    if (payload.type === "message") {
+      messages.push({
+        id: event.id,
+        channelId: event.channelId,
+        senderId: event.senderId,
+        createdAt: event.createdAt,
+        body: payload.body,
+        hasFile: payload.attachments.length > 0,
+      });
+    } else if (payload.type === "edit" && event.relatesToId) {
+      edits.push({ targetId: event.relatesToId, editId: event.id, senderId: event.senderId, body: payload.body });
+    }
+  }
+  await write();
 }
 
 export async function openLocalSearchIndex(options: {

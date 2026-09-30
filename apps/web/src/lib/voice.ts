@@ -6,7 +6,7 @@
 import { createStore } from "zustand/vanilla";
 import { GatewayOpcode } from "@discord-clone/shared";
 import { getTurnCredentials } from "@discord-clone/client-core";
-import type { CryptoHandle } from "@discord-clone/client-core/crypto";
+import type { CryptoClient } from "@discord-clone/client-core/crypto-client";
 import type {
   VoiceDebugPeerStats,
   VoiceEngine,
@@ -113,7 +113,7 @@ function worstQuality(peers: VoicePeerState[]): VoiceQuality {
 let engine: VoiceEngine | null = null;
 let engineLoad: Promise<VoiceEngine> | null = null;
 /** The crypto layer for the signals of the current call. `joinVoiceChannel` sets it before the engine joins. */
-let callCrypto: CryptoHandle | null = null;
+let callCrypto: CryptoClient | null = null;
 /** The random id of the current join. The signal transport makes it, and VOICE_JOIN sends it. */
 let callId: string | undefined;
 

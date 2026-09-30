@@ -4,7 +4,7 @@
 // waits for it. It can still read old plaintext events without it.
 import { createStore } from "zustand/vanilla";
 import { createMessagesStore, decodePlainEvent, type PayloadCodec } from "@discord-clone/client-core";
-import type { CryptoHandle } from "@discord-clone/client-core/crypto";
+import type { CryptoClient } from "@discord-clone/client-core/crypto-client";
 import { session } from "./session.js";
 import { gatewaySend } from "./realtime.js";
 import { queueDecoded, queueRedacted } from "./search-queue.js";
@@ -15,14 +15,14 @@ const SETUP_NOTICE_MS = 500;
 /** True while an encryption waits for the crypto layer or a first key share for more than 500 ms. */
 export const encryptionSetupStore = createStore<{ settingUp: boolean }>(() => ({ settingUp: false }));
 
-let handle: CryptoHandle | null = null;
-let waiters: Array<{ resolve: (handle: CryptoHandle) => void; reject: (error: Error) => void }> = [];
+let handle: CryptoClient | null = null;
+let waiters: Array<{ resolve: (handle: CryptoClient) => void; reject: (error: Error) => void }> = [];
 let stopKeyWatch: (() => void) | null = null;
 let slowEncryptions = 0;
 const keyListeners = new Set<(channelId: string, sessionId: string) => void>();
 
 /** The crypto layer calls this when it starts (with its handle) and when it stops (with null). */
-export function setCryptoHandle(next: CryptoHandle | null): void {
+export function setCryptoHandle(next: CryptoClient | null): void {
   stopKeyWatch?.();
   stopKeyWatch = null;
   handle = next;
@@ -42,7 +42,7 @@ export function setCryptoHandle(next: CryptoHandle | null): void {
 }
 
 /** Wait for the crypto layer of this tab. */
-export function cryptoReady(): Promise<CryptoHandle> {
+export function cryptoReady(): Promise<CryptoClient> {
   return handle ? Promise.resolve(handle) : new Promise((resolve, reject) => waiters.push({ resolve, reject }));
 }
 

@@ -11,6 +11,8 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), tailwindcss()],
+    // The crypto SharedWorker is a module worker: it loads the WASM file with `import.meta.url`.
+    worker: { format: "es" },
     server: {
       proxy: {
         "/api": `http://localhost:${apiPort}`,

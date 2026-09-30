@@ -1,9 +1,12 @@
 // Starts the crypto layer in the background once the session signs in,
-// and stops it on sign-out. The crypto code and the WASM file load with a
-// dynamic import, so they are not in the main bundle. Only one tab of a
-// device runs the crypto layer: it holds a Web Lock. A different tab shows
-// a banner and waits for the lock. See docs/concepts/olm-megolm.md.
-import type { BackupStatus, CryptoHandle, VerificationView } from "@discord-clone/client-core/crypto";
+// and stops it on sign-out. The crypto layer runs in one SharedWorker for
+// each device, so every tab of the device can encrypt and decrypt. This
+// tab loads only the small RPC client, with a dynamic import. A browser
+// without SharedWorker, and the desktop apps, run the crypto layer in the
+// page: then only one tab holds the Web Lock, and a different tab shows a
+// banner and waits for the lock. See docs/concepts/olm-megolm.md section 13.
+import type { BackupStatus, VerificationView } from "@discord-clone/client-core/crypto";
+import type { CryptoClient, CryptoWorkerClient } from "@discord-clone/client-core/crypto-client";
 import { ApiError, postEvent } from "@discord-clone/client-core";
 import { currentPlatform } from "./platform.js";
 import { encodeBase64Url } from "@discord-clone/shared";
@@ -53,12 +56,12 @@ const EMPTY_SECURITY: SecuritySnapshot = {
 export const securityStore = createStore<SecuritySnapshot>(() => EMPTY_SECURITY);
 
 /** The crypto layer of this tab, or null before it starts. The security UI uses it. */
-export function currentCrypto(): CryptoHandle | null {
+export function currentCrypto(): CryptoClient | null {
   return handle;
 }
 
 /** Read the security state again. Several changes in a short time give one read. */
-function watchSecurity(started: CryptoHandle): () => void {
+function watchSecurity(started: CryptoClient): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const read = async () => {
     timer = null;
@@ -84,21 +87,106 @@ function watchSecurity(started: CryptoHandle): () => void {
   };
 }
 
+/** Tell the worker which users are offline. Only online devices send history to a new member. */
+function watchPresence(client: CryptoWorkerClient): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const send = () => {
+    timer = null;
+    const { presences } = realtimeStore.getState();
+    client.setOfflineUsers(Object.keys(presences).filter((userId) => presences[userId] === "offline"));
+  };
+  send();
+  const unsubscribe = realtimeStore.subscribe((state, previous) => {
+    if (state.presences !== previous.presences) {
+      timer ??= setTimeout(send, 1000);
+    }
+  });
+  return () => {
+    unsubscribe();
+    if (timer) {
+      clearTimeout(timer);
+    }
+  };
+}
+
 const MAX_RECEIVED = 100;
 
-/** True while another tab of this device runs the crypto layer, and this tab waits for it. */
+/** True while a different context of this device runs the crypto layer, and this tab waits for it. */
 export const cryptoTabStore = createStore<{ otherTab: boolean }>(() => ({ otherTab: false }));
 
-let handle: CryptoHandle | null = null;
+let handle: CryptoClient | null = null;
 let run = 0;
-let releaseLock: (() => void) | null = null;
+/** Stops the crypto layer of this tab, or the connection to the worker. */
+let teardown: (() => void) | null = null;
 const received: Array<{ fromUserId: string; fromDeviceId: string; text: string }> = [];
 
-function start(userId: string, deviceId: string): void {
-  const current = ++run;
-  if (typeof navigator === "undefined" || !navigator.locks) {
+/** Give the started crypto layer to the rest of the app. Returns a function that takes it back. */
+function attach(started: CryptoClient): () => void {
+  handle = started;
+  setCryptoHandle(started);
+  const stopSecurity = watchSecurity(started);
+  const stopPing = started.onToDevice((event) => {
+    if (event.type === "debug.ping" && typeof event.content.text === "string") {
+      received.push({ fromUserId: event.sender.userId, fromDeviceId: event.sender.deviceId, text: event.content.text });
+      received.splice(0, received.length - MAX_RECEIVED);
+    }
+  });
+  return () => {
+    stopSecurity();
+    stopPing();
+  };
+}
+
+/**
+ * The desktop apps keep the secure store behind their bridge, and only the
+ * page can reach the bridge. They also open only one window. So they keep
+ * the crypto layer in the page.
+ */
+function canUseWorker(): boolean {
+  return typeof SharedWorker !== "undefined" && !("__TAURI_INTERNALS__" in window) && !("desktopBridge" in window);
+}
+
+async function startInWorker(current: number, userId: string, deviceId: string): Promise<void> {
+  const { connectCryptoWorker, createHttpCryptoTransport } = await import("@discord-clone/client-core/crypto-client");
+  if (current !== run) {
     return;
   }
+  let detach: (() => void) | null = null;
+  const client = connectCryptoWorker({
+    userId,
+    deviceId,
+    connect: () =>
+      new SharedWorker(new URL("./crypto-worker.ts", import.meta.url), {
+        type: "module",
+        name: `crypto:${userId}:${deviceId}`,
+      }).port,
+    transport: createHttpCryptoTransport(session.apiClient, gatewaySend),
+    locks: navigator.locks,
+    onState: (state) => {
+      if (current !== run) {
+        return;
+      }
+      // "waiting": an old build of this app, or a tab without the worker, holds the device lock.
+      cryptoTabStore.setState({ otherTab: state === "waiting" });
+      if (state === "ready" && handle !== client) {
+        detach = attach(client);
+      } else if (state === "failed") {
+        console.warn("[crypto] The crypto layer could not start.");
+      }
+    },
+  });
+  // The worker keeps the dispatches that arrive while the crypto layer starts.
+  const unsubscribe = subscribeDispatch((event) => client.handleDispatch(event));
+  const stopPresence = watchPresence(client);
+  teardown = () => {
+    unsubscribe();
+    stopPresence();
+    detach?.();
+    client.stop();
+  };
+}
+
+function startInPage(current: number, userId: string, deviceId: string): void {
   const lockName = `crypto:${userId}:${deviceId}`;
   const body = async () => {
     if (current !== run) {
@@ -117,28 +205,19 @@ function start(userId: string, deviceId: string): void {
       started.stop();
       return;
     }
-    handle = started;
-    setCryptoHandle(started);
     const unsubscribe = subscribeDispatch((event) => started.handleDispatch(event));
-    const stopSecurity = watchSecurity(started);
-    started.onToDevice((event) => {
-      if (event.type === "debug.ping" && typeof event.content.text === "string") {
-        received.push({ fromUserId: event.sender.userId, fromDeviceId: event.sender.deviceId, text: event.content.text });
-        received.splice(0, received.length - MAX_RECEIVED);
-      }
-    });
+    const detach = attach(started);
     // Hold the lock until sign-out.
     await new Promise<void>((resolve) => {
-      releaseLock = resolve;
+      teardown = resolve;
     });
     unsubscribe();
-    stopSecurity();
+    detach();
     started.stop();
   };
-  // Only one tab of a device can run the crypto layer (it owns the Olm
+  // Only one context of a device can run the crypto layer (it owns the Olm
   // and Megolm state). When another tab holds the lock, show a banner and
-  // wait: this tab takes over when that tab closes. See
-  // docs/concepts/olm-megolm.md, "More than one tab".
+  // wait: this tab takes over when that tab closes.
   void navigator.locks
     .request(lockName, { ifAvailable: true }, async (lock) => {
       if (lock) {
@@ -159,6 +238,20 @@ function start(userId: string, deviceId: string): void {
     });
 }
 
+function start(userId: string, deviceId: string): void {
+  const current = ++run;
+  if (typeof navigator === "undefined" || !navigator.locks) {
+    return;
+  }
+  if (canUseWorker()) {
+    startInWorker(current, userId, deviceId).catch((error: unknown) => {
+      console.warn("[crypto] The crypto layer could not start.", error);
+    });
+  } else {
+    startInPage(current, userId, deviceId);
+  }
+}
+
 function stop(): void {
   run += 1;
   cryptoTabStore.setState({ otherTab: false });
@@ -166,8 +259,8 @@ function stop(): void {
   setCryptoHandle(null);
   securityStore.setState(EMPTY_SECURITY);
   received.length = 0;
-  releaseLock?.();
-  releaseLock = null;
+  teardown?.();
+  teardown = null;
 }
 
 let previousStatus = session.store.getState().status;
