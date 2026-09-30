@@ -43,7 +43,7 @@ function IncomingCallCard({ call }: { call: IncomingCall }) {
             void joinVoiceChannel(null, call.channelId);
           }}
           className="flex-1 rounded px-2 py-1 text-sm font-medium"
-          style={{ backgroundColor: "#3ba55d", color: "white" }}
+          style={{ backgroundColor: "var(--color-success)", color: "white" }}
         >
           Accept
         </button>
@@ -51,7 +51,7 @@ function IncomingCallCard({ call }: { call: IncomingCall }) {
           type="button"
           onClick={() => declineCall(call.channelId)}
           className="flex-1 rounded px-2 py-1 text-sm font-medium"
-          style={{ backgroundColor: "#e05252", color: "white" }}
+          style={{ backgroundColor: "var(--color-danger)", color: "white" }}
         >
           Decline
         </button>

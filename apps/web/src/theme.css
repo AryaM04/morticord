@@ -8,7 +8,11 @@
   --color-bg-members: #1b1d24;
   --color-text-primary: #e7e9ee;
   --color-text-muted: #9a9dab;
-  --color-accent: #5b6cff;
+  --color-accent: #5363f0;
+  --color-accent-text: #8c98ff;
+  --color-danger: #c93c3c;
+  --color-danger-text: #f26a6a;
+  --color-success: #2a7f45;
   --color-border: #2a2c37;
 }
 
@@ -24,4 +28,16 @@ body,
     -apple-system,
     "Segoe UI",
     sans-serif;
+}
+
+/* Stop animations and smooth scroll for a user who asks for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -58,7 +58,7 @@ export function VoiceStatusPanel() {
     return errorMessage ? (
       <div
         className="border-t px-3 py-2 text-xs"
-        style={{ borderColor: "var(--color-border)", color: "#e05252" }}
+        style={{ borderColor: "var(--color-border)", color: "var(--color-danger-text)" }}
         role="alert"
       >
         {errorMessage}
@@ -117,7 +117,7 @@ export function VoiceStatusPanel() {
         />
       )}
       {errorMessage && (
-        <span className="text-xs" style={{ color: "#e05252" }} role="alert">
+        <span className="text-xs" style={{ color: "var(--color-danger-text)" }} role="alert">
           {errorMessage}
         </span>
       )}
@@ -168,7 +168,7 @@ export function VoiceStatusPanel() {
       {serverMuted && (
         <span
           className="text-xs"
-          style={{ color: "#e05252" }}
+          style={{ color: "var(--color-danger-text)" }}
           role="status"
           data-voice-server-muted="true"
         >
@@ -178,7 +178,7 @@ export function VoiceStatusPanel() {
       {serverDeafened && (
         <span
           className="text-xs"
-          style={{ color: "#e05252" }}
+          style={{ color: "var(--color-danger-text)" }}
           role="status"
           data-voice-server-deafened="true"
         >
@@ -216,7 +216,7 @@ export function VoiceStatusPanel() {
           type="button"
           onClick={() => void leaveVoice()}
           className="flex-1 rounded px-2 py-1 text-xs"
-          style={{ backgroundColor: "#e05252", color: "white" }}
+          style={{ backgroundColor: "var(--color-danger)", color: "white" }}
         >
           Disconnect
         </button>

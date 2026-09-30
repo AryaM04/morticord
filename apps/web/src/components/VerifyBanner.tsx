@@ -44,7 +44,7 @@ export function VerifyBanner() {
           {pending ? "Sending..." : "Send the email again"}
         </button>
       )}
-      {error && <span style={{ color: "#e05252" }}>{error}</span>}
+      {error && <span style={{ color: "var(--color-danger-text)" }}>{error}</span>}
     </div>
   );
 }

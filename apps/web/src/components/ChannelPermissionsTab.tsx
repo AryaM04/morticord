@@ -286,7 +286,7 @@ export function ChannelPermissionsTab({ channel }: { channel: ChannelJson }) {
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pr-1">
         {error && (
-          <p role="alert" className="mb-2 text-sm" style={{ color: "#e05252" }}>
+          <p role="alert" className="mb-2 text-sm" style={{ color: "var(--color-danger-text)" }}>
             {error}
           </p>
         )}
@@ -306,7 +306,7 @@ export function ChannelPermissionsTab({ channel }: { channel: ChannelJson }) {
                   disabled={pending}
                   onClick={() => void removeOverwrite(selected.targetId, selected.targetType)}
                   className="rounded px-2 py-1 text-xs"
-                  style={{ backgroundColor: "#e05252", color: "white" }}
+                  style={{ backgroundColor: "var(--color-danger)", color: "white" }}
                 >
                   Remove
                 </button>
@@ -355,9 +355,9 @@ export function ChannelPermissionsTab({ channel }: { channel: ChannelJson }) {
                             style={{
                               backgroundColor:
                                 value === "allow"
-                                  ? "#3ba55d"
+                                  ? "var(--color-success)"
                                   : value === "deny"
-                                    ? "#e05252"
+                                    ? "var(--color-danger)"
                                     : "var(--color-bg-main)",
                               color: value === "neutral" ? "var(--color-text-muted)" : "white",
                             }}

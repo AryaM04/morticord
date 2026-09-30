@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 
 export function AuthLayout({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div
+    <main
       className="flex h-full w-full items-center justify-center p-4"
       style={{ backgroundColor: "var(--color-bg-main)" }}
     >
@@ -15,6 +15,6 @@ export function AuthLayout({ title, children }: { title: string; children: React
         <h1 className="mb-4 text-lg font-semibold">{title}</h1>
         {children}
       </div>
-    </div>
+    </main>
   );
 }

@@ -141,7 +141,7 @@ export function CreateOrJoinGuildDialog({ open, onClose }: { open: boolean; onCl
             style={{ backgroundColor: "var(--color-bg-main)", borderColor: "var(--color-border)", color: "var(--color-text-primary)" }}
           />
           {error && (
-            <p role="alert" className="mb-4 text-sm" style={{ color: "#e05252" }}>
+            <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-danger-text)" }}>
               {error}
             </p>
           )}
@@ -174,7 +174,7 @@ export function CreateOrJoinGuildDialog({ open, onClose }: { open: boolean; onCl
             style={{ backgroundColor: "var(--color-bg-main)", borderColor: "var(--color-border)", color: "var(--color-text-primary)" }}
           />
           {error && (
-            <p role="alert" className="mb-4 text-sm" style={{ color: "#e05252" }}>
+            <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-danger-text)" }}>
               {error}
             </p>
           )}

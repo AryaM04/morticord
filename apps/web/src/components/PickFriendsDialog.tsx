@@ -110,7 +110,7 @@ export function PickFriendsDialog({
         })}
       </ul>
       {error && (
-        <p role="alert" className="mb-2 text-sm" style={{ color: "#e05252" }}>
+        <p role="alert" className="mb-2 text-sm" style={{ color: "var(--color-danger-text)" }}>
           {error}
         </p>
       )}

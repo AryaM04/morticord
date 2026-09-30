@@ -25,6 +25,11 @@ function dayLabel(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 }
 
+/** Smooth scroll, unless the user asks for less motion. */
+function smoothScroll(): "smooth" | "auto" {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+}
+
 export function MessageList({
   channelId,
   guildId,
@@ -235,7 +240,7 @@ export function MessageList({
         }
         firstItemIndex={firstItemIndex}
         // Follow only live messages, not a newer page of history (see wasAtLatestRef).
-        followOutput={(isAtBottom) => (isAtBottom && wasAtLatestRef.current ? "smooth" : false)}
+        followOutput={(isAtBottom) => (isAtBottom && wasAtLatestRef.current ? smoothScroll() : false)}
         atBottomStateChange={setAtBottom}
         startReached={() => void messagesStore.getState().loadOlder(channelId)}
         endReached={() => {
@@ -298,7 +303,7 @@ export function MessageList({
         <button
           type="button"
           onClick={() => {
-            virtuosoRef.current?.scrollToIndex({ index: rows.length - 1, behavior: "smooth" });
+            virtuosoRef.current?.scrollToIndex({ index: rows.length - 1, behavior: smoothScroll() });
           }}
           className="absolute bottom-3 right-4 rounded-full px-3 py-1 text-xs font-medium shadow"
           style={{ backgroundColor: "var(--color-accent)", color: "white" }}

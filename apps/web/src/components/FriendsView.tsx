@@ -70,7 +70,7 @@ function ActionButton({
       className="rounded px-2 py-1 text-xs font-medium"
       style={{
         backgroundColor: danger ? "transparent" : "var(--color-bg-sidebar)",
-        color: danger ? "#e05252" : "var(--color-text-primary)",
+        color: danger ? "var(--color-danger-text)" : "var(--color-text-primary)",
       }}
     >
       {label}
@@ -220,7 +220,7 @@ function AddFriendForm() {
         </button>
       </div>
       {result && (
-        <p role={result.ok ? "status" : "alert"} className="text-sm" style={{ color: result.ok ? "#3ba55d" : "#e05252" }}>
+        <p role={result.ok ? "status" : "alert"} className="text-sm" style={{ color: result.ok ? "#3ba55d" : "var(--color-danger-text)" }}>
           {result.text}
         </p>
       )}
@@ -324,14 +324,17 @@ export default function FriendsView() {
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col" style={{ backgroundColor: "var(--color-bg-main)" }}>
+    <main className="flex min-w-0 flex-1 flex-col" style={{ backgroundColor: "var(--color-bg-main)" }}>
+      <h1 className="sr-only">Friends</h1>
       <div
         role="tablist"
         aria-label="Friends"
         className="flex items-center gap-2 border-b px-4 py-2"
         style={{ borderColor: "var(--color-border)" }}
       >
-        <span className="mr-2 font-semibold">Friends</span>
+        <span className="mr-2 font-semibold" aria-hidden="true">
+          Friends
+        </span>
         {TABS.map((option) => (
           <button
             key={option.value}
@@ -346,7 +349,7 @@ export default function FriendsView() {
             style={{
               backgroundColor:
                 option.value === "add"
-                  ? "#3ba55d"
+                  ? "var(--color-success)"
                   : tab === option.value
                     ? "var(--color-bg-sidebar)"
                     : "transparent",
@@ -357,7 +360,7 @@ export default function FriendsView() {
             {option.value === "pending" && incomingCount > 0 && (
               <span
                 className="ml-1 rounded-full px-1.5 text-[10px] font-semibold"
-                style={{ backgroundColor: "#e05252", color: "white" }}
+                style={{ backgroundColor: "var(--color-danger)", color: "white" }}
               >
                 {incomingCount}
               </span>
@@ -366,7 +369,7 @@ export default function FriendsView() {
         ))}
       </div>
       {error && (
-        <p role="alert" className="px-4 pt-2 text-sm" style={{ color: "#e05252" }}>
+        <p role="alert" className="px-4 pt-2 text-sm" style={{ color: "var(--color-danger-text)" }}>
           {error}
         </p>
       )}
@@ -377,6 +380,6 @@ export default function FriendsView() {
         {tab === "blocked" && renderList(blocked, "You did not block a user.")}
         {tab === "add" && <AddFriendForm />}
       </div>
-    </div>
+    </main>
   );
 }

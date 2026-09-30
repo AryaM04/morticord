@@ -2,6 +2,7 @@
 // member list. `/app/@me` is Home: the friends and the DMs.
 import { Suspense, lazy, useEffect, useRef } from "react";
 import { Redirect, useParams, useLocation } from "wouter";
+import { ShortcutHandler } from "../components/ShortcutHandler.js";
 import { ServerRail } from "../components/ServerRail.js";
 import { ChannelColumn } from "../components/ChannelColumn.js";
 import { ChatPane } from "../components/ChatPane.js";
@@ -103,6 +104,7 @@ export function AppShell() {
       <SecurityBanner />
       <NoticeBanner />
       <CryptoTabBanner />
+      <ShortcutHandler guildId={params.guildId} channelId={params.channelId} />
       <div className="flex flex-1">
         <ServerRail activeGuildId={params.guildId} />
         {params.guildId === "@me" ? (

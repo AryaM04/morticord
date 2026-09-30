@@ -83,7 +83,7 @@ function RoleMenu({
         </button>
       </div>
       {error && (
-        <p role="alert" className="mb-1 text-xs" style={{ color: "#e05252" }}>
+        <p role="alert" className="mb-1 text-xs" style={{ color: "var(--color-danger-text)" }}>
           {error}
         </p>
       )}
@@ -265,7 +265,7 @@ export function MembersTab({ guildId }: { guildId: string }) {
         }}
       />
       {error && (
-        <p role="alert" className="mb-2 text-sm" style={{ color: "#e05252" }}>
+        <p role="alert" className="mb-2 text-sm" style={{ color: "var(--color-danger-text)" }}>
           {error}
         </p>
       )}
@@ -346,7 +346,7 @@ export function MembersTab({ guildId }: { guildId: string }) {
                       disabled={busyUserId === member.userId}
                       onClick={() => setBanTarget(member)}
                       className="rounded px-2 py-1 text-xs"
-                      style={{ backgroundColor: "#e05252", color: "white" }}
+                      style={{ backgroundColor: "var(--color-danger)", color: "white" }}
                     >
                       Ban
                     </button>
@@ -427,7 +427,7 @@ export function MembersTab({ guildId }: { guildId: string }) {
                 type="button"
                 onClick={() => void handleBan()}
                 className="rounded px-3 py-1.5 text-sm font-medium"
-                style={{ backgroundColor: "#e05252", color: "white" }}
+                style={{ backgroundColor: "var(--color-danger)", color: "white" }}
               >
                 Ban
               </button>
@@ -481,7 +481,7 @@ export function MembersTab({ guildId }: { guildId: string }) {
                 disabled={transferConfirmText !== transferTarget.user?.username}
                 onClick={() => void handleTransfer()}
                 className="rounded px-3 py-1.5 text-sm font-medium"
-                style={{ backgroundColor: "#e05252", color: "white" }}
+                style={{ backgroundColor: "var(--color-danger)", color: "white" }}
               >
                 Transfer ownership
               </button>

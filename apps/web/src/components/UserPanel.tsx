@@ -1,6 +1,7 @@
 // The signed-in user's panel, at the bottom of the channel column: the
 // avatar, a status menu, and account settings. The ringing cards of
 // incoming DM calls show above it, so they show on every page.
+import { moveMenuFocus } from "../lib/menu-keys.js";
 import { useEffect, useRef, useState } from "react";
 import type { PresenceStatus } from "@discord-clone/shared";
 import { useStore } from "zustand";
@@ -37,10 +38,16 @@ function StatusMenu() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  function onKeyDown(event: React.KeyboardEvent) {
+  useEffect(() => {
+    if (open) menuRef.current?.querySelector<HTMLElement>("[aria-checked=true]")?.focus();
+  }, [open]);
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     if (event.key === "Escape") {
       setOpen(false);
       buttonRef.current?.focus();
+    } else {
+      moveMenuFocus(event);
     }
   }
 

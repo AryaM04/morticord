@@ -54,7 +54,7 @@ export function BansTab({ guildId }: { guildId: string }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {error && (
-        <p role="alert" className="mb-2 text-sm" style={{ color: "#e05252" }}>
+        <p role="alert" className="mb-2 text-sm" style={{ color: "var(--color-danger-text)" }}>
           {error}
         </p>
       )}

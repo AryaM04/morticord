@@ -55,7 +55,7 @@ function MemberRow({
 }) {
   const name = member.nickname ?? member.user?.displayName ?? member.userId;
   return (
-    <li>
+    <>
       <button
         type="button"
         onContextMenu={(e) => {
@@ -95,7 +95,7 @@ function MemberRow({
         </span>
         <span className="sr-only">{PRESENCE_LABEL[status] ?? "Offline"}</span>
       </button>
-    </li>
+    </>
   );
 }
 
@@ -229,7 +229,8 @@ export function MemberList({ guildId }: { guildId: string }) {
   }
 
   return (
-    <div
+    <aside
+      aria-label="Members"
       className="flex w-60 flex-col overflow-y-auto p-2"
       style={{ backgroundColor: "var(--color-bg-members)" }}
     >
@@ -247,7 +248,7 @@ export function MemberList({ guildId }: { guildId: string }) {
                 {section.members.map((member) => {
                   const memberRoles = roles.filter((r) => member.roles.includes(r.id));
                   return (
-                    <div key={member.userId} className="relative">
+                    <li key={member.userId} className="relative">
                       <MemberRow
                         member={member}
                         status={statusOf(member.userId)}
@@ -265,7 +266,7 @@ export function MemberList({ guildId }: { guildId: string }) {
                           onClose={() => setMenuFor(null)}
                         />
                       )}
-                    </div>
+                    </li>
                   );
                 })}
               </ul>
@@ -273,6 +274,6 @@ export function MemberList({ guildId }: { guildId: string }) {
           ),
       )}
       <div ref={sentinelRef} aria-hidden="true" style={{ height: 1 }} />
-    </div>
+    </aside>
   );
 }

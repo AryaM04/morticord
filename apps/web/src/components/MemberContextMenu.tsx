@@ -51,7 +51,7 @@ function IdentityRow({ userId }: { userId: string }) {
   }
   return (
     <div className="flex items-center justify-between px-2 py-1 text-sm">
-      <span style={{ color: trust.verified ? "#3ba55d" : trust.changed ? "#e05252" : "var(--color-text-muted)" }}>
+      <span style={{ color: trust.verified ? "#3ba55d" : trust.changed ? "var(--color-danger-text)" : "var(--color-text-muted)" }}>
         {trust.changed ? "Identity changed" : trust.verified ? "Identity verified" : "Identity not verified"}
       </span>
       {!trust.verified && (
@@ -193,7 +193,7 @@ export function MemberContextMenu({
       </div>
 
       {error && (
-        <p role="alert" className="mb-2 text-xs" style={{ color: "#e05252" }}>
+        <p role="alert" className="mb-2 text-xs" style={{ color: "var(--color-danger-text)" }}>
           {error}
         </p>
       )}
@@ -417,7 +417,7 @@ export function MemberContextMenu({
                   )
                 }
                 className="rounded px-2 py-1 text-left text-sm"
-                style={{ color: "#e05252" }}
+                style={{ color: "var(--color-danger-text)" }}
               >
                 Disconnect from voice
               </button>
@@ -442,7 +442,7 @@ export function MemberContextMenu({
               })
             }
             className="rounded px-2 py-1 text-left text-sm"
-            style={{ color: "#e05252" }}
+            style={{ color: "var(--color-danger-text)" }}
           >
             Kick
           </button>
@@ -453,7 +453,7 @@ export function MemberContextMenu({
             type="button"
             onClick={() => setConfirmingBan(true)}
             className="rounded px-2 py-1 text-left text-sm"
-            style={{ color: "#e05252" }}
+            style={{ color: "var(--color-danger-text)" }}
           >
             Ban
           </button>
@@ -502,7 +502,7 @@ export function MemberContextMenu({
                   })
                 }
                 className="rounded px-2 py-1 text-xs font-medium"
-                style={{ backgroundColor: "#e05252", color: "white" }}
+                style={{ backgroundColor: "var(--color-danger)", color: "white" }}
               >
                 Ban
               </button>

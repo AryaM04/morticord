@@ -24,13 +24,13 @@ export function FormField({ label, error, id, ...inputProps }: FormFieldProps) {
         className="rounded border px-3 py-2 text-sm"
         style={{
           backgroundColor: "var(--color-bg-main)",
-          borderColor: error ? "#e05252" : "var(--color-border)",
+          borderColor: error ? "var(--color-danger-text)" : "var(--color-border)",
           color: "var(--color-text-primary)",
         }}
         {...inputProps}
       />
       {error && (
-        <p id={errorId} role="alert" style={{ color: "#e05252" }} className="text-sm">
+        <p id={errorId} role="alert" style={{ color: "var(--color-danger-text)" }} className="text-sm">
           {error}
         </p>
       )}

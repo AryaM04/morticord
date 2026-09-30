@@ -76,7 +76,7 @@ export default function GroupDmMembers({ channel }: { channel: DmChannelJson }) 
                 aria-label={`Remove ${user.displayName} from the group`}
                 onClick={() => void run(() => removeDmRecipient(session.apiClient, channel.id, user.id))}
                 className="hidden rounded px-1 text-xs group-hover:block group-focus-within:block"
-                style={{ color: "#e05252" }}
+                style={{ color: "var(--color-danger-text)" }}
               >
                 Remove
               </button>
@@ -85,7 +85,7 @@ export default function GroupDmMembers({ channel }: { channel: DmChannelJson }) 
         ))}
       </ul>
       {error && (
-        <p role="alert" className="px-2 text-xs" style={{ color: "#e05252" }}>
+        <p role="alert" className="px-2 text-xs" style={{ color: "var(--color-danger-text)" }}>
           {error}
         </p>
       )}
@@ -113,7 +113,7 @@ export default function GroupDmMembers({ channel }: { channel: DmChannelJson }) 
                 type="button"
                 onClick={() => void run(() => removeDmRecipient(session.apiClient, channel.id, selfUserId ?? ""))}
                 className="rounded px-2 py-1 text-xs font-medium"
-                style={{ backgroundColor: "#e05252", color: "white" }}
+                style={{ backgroundColor: "var(--color-danger)", color: "white" }}
               >
                 Leave group
               </button>
@@ -124,7 +124,7 @@ export default function GroupDmMembers({ channel }: { channel: DmChannelJson }) 
             type="button"
             onClick={() => setConfirmingLeave(true)}
             className="rounded px-2 py-1 text-left text-sm"
-            style={{ color: "#e05252" }}
+            style={{ color: "var(--color-danger-text)" }}
           >
             Leave group
           </button>

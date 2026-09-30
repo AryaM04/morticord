@@ -63,7 +63,7 @@ function TestButton({ name, onRun }: { name: string; onRun: () => Promise<CheckR
       <button onClick={handleClick} disabled={busy}>
         {busy ? "Testing..." : name}
       </button>
-      {typeof state === "string" && <p style={{ color: "#e05252" }}>Error: {state}</p>}
+      {typeof state === "string" && <p style={{ color: "var(--color-danger-text)" }}>Error: {state}</p>}
       {state !== null && typeof state !== "string" && (
         <p>
           Track kind: {state.kind}. Label: {state.label}. Settings: {state.settings}

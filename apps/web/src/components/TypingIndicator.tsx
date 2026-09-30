@@ -25,29 +25,27 @@ export function TypingIndicator({ channelId, guildId }: { channelId: string; gui
     return () => clearInterval(timer);
   }, [channelId]);
 
-  if (settingUp) {
-    return (
-      <div role="status" className="h-5 truncate px-4 text-xs" style={{ color: "var(--color-text-muted)" }}>
-        Setting up encryption…
-      </div>
-    );
-  }
-  if (userIds.length === 0) {
-    return <div className="h-5" />;
-  }
-
   const names = userIds.map((id) => displayNameOf(state, guildId, id));
-  let text: string;
-  if (names.length === 1) {
+  let text = "";
+  if (settingUp) {
+    text = "Setting up encryption…";
+  } else if (names.length === 1) {
     text = `${names[0]} is typing…`;
   } else if (names.length === 2) {
     text = `${names[0]} and ${names[1]} are typing…`;
-  } else {
+  } else if (names.length > 2) {
     text = "Several people are typing…";
   }
 
+  // One live region stays in the page, so a screen reader reads each change.
   return (
-    <div className="h-5 truncate px-4 text-xs" style={{ color: "var(--color-text-muted)" }}>
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className="h-5 truncate px-4 text-xs"
+      style={{ color: "var(--color-text-muted)" }}
+    >
       {text}
     </div>
   );

@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@discord-clone/server": "workspace:*",
     "@discord-clone/shared": "workspace:*",
     "@playwright/test": "^1.49.0",

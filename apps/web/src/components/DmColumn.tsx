@@ -30,7 +30,7 @@ function GroupIcon({ channel }: { channel: DmChannelJson }) {
     <div
       aria-hidden="true"
       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold"
-      style={{ backgroundColor: "#3ba55d", color: "white" }}
+      style={{ backgroundColor: "var(--color-success)", color: "white" }}
     >
       {channel.recipients.length}
     </div>
@@ -87,7 +87,7 @@ function DmRow({
       {unreadCount > 0 && (
         <span
           className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none"
-          style={{ backgroundColor: "#e05252", color: "white" }}
+          style={{ backgroundColor: "var(--color-danger)", color: "white" }}
           data-dm-badge={unreadCount}
         >
           <span aria-hidden="true">{formatBadgeCount(unreadCount)}</span>
@@ -125,7 +125,7 @@ export function DmColumn({ activeChannelId }: { activeChannelId: string | null }
   );
 
   return (
-    <div className="flex w-60 shrink-0 flex-col" style={{ backgroundColor: "var(--color-bg-sidebar)" }}>
+    <aside aria-label="Conversations" className="flex w-60 shrink-0 flex-col" style={{ backgroundColor: "var(--color-bg-sidebar)" }}>
       <div className="border-b px-3 py-3 font-semibold" style={{ borderColor: "var(--color-border)" }}>
         Home
       </div>
@@ -185,6 +185,6 @@ export function DmColumn({ activeChannelId }: { activeChannelId: string | null }
           <NewGroupDmDialog onClose={() => setNewGroupOpen(false)} />
         </Suspense>
       )}
-    </div>
+    </aside>
   );
 }

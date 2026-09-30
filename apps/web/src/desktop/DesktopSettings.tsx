@@ -42,7 +42,7 @@ export default function DesktopSettings() {
         Keep the app in the tray when I close the window
       </label>
       {error && (
-        <p role="alert" className="text-xs" style={{ color: "#e05252" }}>
+        <p role="alert" className="text-xs" style={{ color: "var(--color-danger-text)" }}>
           {error}
         </p>
       )}

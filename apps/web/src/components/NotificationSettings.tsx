@@ -47,7 +47,7 @@ export default function NotificationSettings() {
         Play ring sound
       </label>
       {saveError && (
-        <p role="alert" className="text-xs" style={{ color: "#e05252" }}>
+        <p role="alert" className="text-xs" style={{ color: "var(--color-danger-text)" }}>
           {saveError}
         </p>
       )}

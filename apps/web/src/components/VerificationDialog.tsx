@@ -100,7 +100,7 @@ export default function VerificationDialog() {
             ))}
           </ol>
           <div className="flex justify-end gap-2">
-            <button type="button" className={button} style={{ color: "#e05252" }} onClick={() => void crypto?.verification.confirm(txnId, false)}>
+            <button type="button" className={button} style={{ color: "var(--color-danger-text)" }} onClick={() => void crypto?.verification.confirm(txnId, false)}>
               They do not match
             </button>
             <button type="button" className={button} style={primary} onClick={() => void crypto?.verification.confirm(txnId, true)}>

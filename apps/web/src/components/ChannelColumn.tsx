@@ -106,7 +106,7 @@ function GuildMenu({
                 item.onSelect();
               }}
               className="block w-full px-3 py-2 text-left text-sm"
-              style={{ color: item.danger ? "#e05252" : "var(--color-text-primary)" }}
+              style={{ color: item.danger ? "var(--color-danger-text)" : "var(--color-text-primary)" }}
             >
               {item.label}
             </button>
@@ -180,7 +180,7 @@ function ChannelRow({
         {mentionCount > 0 && (
           <span
             className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none"
-            style={{ backgroundColor: "#e05252", color: "white" }}
+            style={{ backgroundColor: "var(--color-danger)", color: "white" }}
           >
             <span aria-hidden="true">{formatBadgeCount(mentionCount)}</span>
             <span className="sr-only">
@@ -366,7 +366,7 @@ export function ChannelColumn({ guildId, activeChannelId }: { guildId: string; a
     .filter((c): c is ChannelJson => !!c && c.type === "category");
 
   return (
-    <div className="flex w-60 flex-col" style={{ backgroundColor: "var(--color-bg-sidebar)" }}>
+    <aside aria-label="Channels" className="flex w-60 flex-col" style={{ backgroundColor: "var(--color-bg-sidebar)" }}>
       <div ref={headerRef} className="border-b px-3 py-3" style={{ borderColor: "var(--color-border)" }}>
         <GuildMenu
           items={[
@@ -484,6 +484,6 @@ export function ChannelColumn({ guildId, activeChannelId }: { guildId: string; a
           onClose={() => setCreateDialog(null)}
         />
       )}
-    </div>
+    </aside>
   );
 }

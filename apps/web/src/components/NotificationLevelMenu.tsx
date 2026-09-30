@@ -1,5 +1,6 @@
 // A small menu that sets the notification level of one guild: all
 // messages, only @mentions, or nothing. The level is a synced setting.
+import { moveMenuFocus } from "../lib/menu-keys.js";
 import { useEffect, useRef } from "react";
 import { notificationLevelOf, type NotificationLevel } from "@discord-clone/client-core";
 import { settingsStore, useSettings } from "../lib/settings.js";
@@ -56,6 +57,7 @@ export function NotificationLevelMenu({
     <div
       ref={menuRef}
       role="menu"
+      onKeyDown={moveMenuFocus}
       aria-label={`Notification settings for ${guildName}`}
       className="fixed z-40 w-56 rounded border py-1 shadow-lg"
       style={{

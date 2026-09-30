@@ -95,7 +95,7 @@ function FileAttachment({ attachment }: { attachment: Attachment }) {
       <span aria-hidden="true">📄</span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{attachment.name}</div>
-        <div className="text-xs" style={{ color: state === "failed" ? "#e05252" : "var(--color-text-muted)" }}>
+        <div className="text-xs" style={{ color: state === "failed" ? "var(--color-danger-text)" : "var(--color-text-muted)" }}>
           {state === "failed" ? "The file could not be downloaded." : formatFileSize(attachment.size)}
         </div>
       </div>

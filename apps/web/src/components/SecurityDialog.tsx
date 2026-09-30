@@ -10,7 +10,7 @@ import { describeError } from "../lib/errors.js";
 
 const button = "rounded px-3 py-2 text-sm";
 const primary = { backgroundColor: "var(--color-accent)", color: "white" };
-const danger = { color: "#e05252" };
+const danger = { color: "var(--color-danger-text)" };
 const field = "w-full rounded border px-2 py-1 text-sm";
 const fieldStyle = { backgroundColor: "var(--color-bg-main)", borderColor: "var(--color-border)", color: "var(--color-text-primary)" };
 

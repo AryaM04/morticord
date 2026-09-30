@@ -239,7 +239,7 @@ export function GuildSettingsDialog({
                   }}
                 />
                 {error && (
-                  <p role="alert" className="mb-4 text-sm" style={{ color: "#e05252" }}>
+                  <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-danger-text)" }}>
                     {error}
                   </p>
                 )}
@@ -249,7 +249,7 @@ export function GuildSettingsDialog({
                       type="button"
                       onClick={() => setConfirmingDelete(true)}
                       className="rounded px-3 py-2 text-sm"
-                      style={{ color: "#e05252" }}
+                      style={{ color: "var(--color-danger-text)" }}
                     >
                       Delete server
                     </button>
@@ -300,7 +300,7 @@ export function GuildSettingsDialog({
                       disabled={pending || confirmDeleteText !== guild.name}
                       onClick={handleDelete}
                       className="rounded px-3 py-2 text-sm font-medium"
-                      style={{ backgroundColor: "#e05252", color: "white" }}
+                      style={{ backgroundColor: "var(--color-danger)", color: "white" }}
                     >
                       {pending ? "Deleting..." : "Delete server"}
                     </button>

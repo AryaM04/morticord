@@ -46,7 +46,7 @@ export function LinkEmbedCard({
           target="_blank"
           rel="noopener noreferrer nofollow"
           className="block truncate text-sm font-semibold underline"
-          style={{ color: "var(--color-accent)" }}
+          style={{ color: "var(--color-accent-text)" }}
         >
           {embed.title ?? embed.url}
         </a>

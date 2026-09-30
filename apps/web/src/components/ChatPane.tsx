@@ -12,6 +12,7 @@ import { ConnectionBanner } from "./ConnectionBanner.js";
 import { Composer, type EditTarget, type ReplyTarget } from "./Composer.js";
 import { MessageList } from "./MessageList.js";
 import { TypingIndicator } from "./TypingIndicator.js";
+import { MessageAnnouncer } from "./MessageAnnouncer.js";
 import { VoiceCallView } from "./VoiceCallView.js";
 import { DmHeader } from "./DmHeader.js";
 import { useRealtime } from "../lib/useRealtime.js";
@@ -106,12 +107,12 @@ export function ChatPane({ channelId }: { channelId: string | null }) {
 
   if (!channelId || !channel) {
     return (
-      <div className="flex flex-1 flex-col" style={{ backgroundColor: "var(--color-bg-main)" }}>
+      <main className="flex flex-1 flex-col" style={{ backgroundColor: "var(--color-bg-main)" }}>
         <ConnectionBanner />
         <div className="flex flex-1 items-center justify-center" style={{ color: "var(--color-text-muted)" }}>
           Choose a channel to start.
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -126,7 +127,7 @@ export function ChatPane({ channelId }: { channelId: string | null }) {
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col" style={{ backgroundColor: "var(--color-bg-main)" }}>
+    <main className="flex min-w-0 flex-1 flex-col" style={{ backgroundColor: "var(--color-bg-main)" }}>
       <ConnectionBanner />
       {dmChannel ? (
         <div className="relative flex items-center">
@@ -137,9 +138,9 @@ export function ChatPane({ channelId }: { channelId: string | null }) {
         </div>
       ) : (
         <div className="relative flex items-center gap-2 border-b px-4 py-3" style={{ borderColor: "var(--color-border)" }}>
-          <span className="font-semibold">
+          <h1 className="font-semibold">
             {channel.type === "voice" ? "\u{1F50A}" : "#"} {channel.name}
-          </span>
+          </h1>
           {guildChannel?.topic && (
             <span className="truncate text-sm" style={{ color: "var(--color-text-muted)" }}>
               {guildChannel.topic}
@@ -174,6 +175,7 @@ export function ChatPane({ channelId }: { channelId: string | null }) {
             onReply={startReply}
             onEdit={startEdit}
           />
+          <MessageAnnouncer channelId={channelId} guildId={guildId} />
           <TypingIndicator channelId={channelId} guildId={guildId} />
           <Composer
             channelId={channelId}
@@ -202,6 +204,6 @@ export function ChatPane({ channelId }: { channelId: string | null }) {
           />
         </>
       )}
-    </div>
+    </main>
   );
 }

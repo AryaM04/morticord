@@ -29,7 +29,7 @@ function DeleteConfirmDialog({ open, onCancel, onConfirm }: { open: boolean; onC
         <button type="button" onClick={onCancel} className="rounded px-3 py-1 text-sm">
           Cancel
         </button>
-        <button type="button" onClick={onConfirm} className="rounded px-3 py-1 text-sm" style={{ backgroundColor: "#e05252", color: "white" }}>
+        <button type="button" onClick={onConfirm} className="rounded px-3 py-1 text-sm" style={{ backgroundColor: "var(--color-danger)", color: "white" }}>
           Delete
         </button>
       </div>
@@ -252,8 +252,8 @@ export function DayDivider({ label }: { label: string }) {
 
 export function NewDivider() {
   return (
-    <div className="my-1 flex items-center gap-2 px-4 text-xs font-semibold" style={{ color: "#e05252" }}>
-      <div className="h-px flex-1" style={{ backgroundColor: "#e05252" }} />
+    <div className="my-1 flex items-center gap-2 px-4 text-xs font-semibold" style={{ color: "var(--color-danger-text)" }}>
+      <div className="h-px flex-1" style={{ backgroundColor: "var(--color-danger)" }} />
       New
     </div>
   );
@@ -280,7 +280,7 @@ export function PendingMessageRow({
       <div className="min-w-0 flex-1 text-sm">
         <MarkdownInline text={body} />
         {failed && (
-          <span className="ml-2 text-xs" style={{ color: "#e05252" }} role="alert">
+          <span className="ml-2 text-xs" style={{ color: "var(--color-danger-text)" }} role="alert">
             Not sent.{error ? ` ${error}` : ""}{" "}
             <button type="button" onClick={onRetry} className="underline">
               Try again

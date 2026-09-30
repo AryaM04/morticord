@@ -139,7 +139,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         </div>
       </div>
       {avatarError && (
-        <p role="alert" className="mb-4 text-sm" style={{ color: "#e05252" }}>
+        <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-danger-text)" }}>
           {avatarError}
         </p>
       )}
@@ -175,12 +175,12 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           onChange={(e) => setStatusText(e.target.value)}
         />
         {formError && (
-          <p role="alert" className="mb-4 text-sm" style={{ color: "#e05252" }}>
+          <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-danger-text)" }}>
             {formError}
           </p>
         )}
         <div className="flex justify-between gap-2">
-          <button type="button" onClick={handleSignOut} className="rounded px-3 py-2 text-sm" style={{ color: "#e05252" }}>
+          <button type="button" onClick={handleSignOut} className="rounded px-3 py-2 text-sm" style={{ color: "var(--color-danger-text)" }}>
             Sign out
           </button>
           <div className="flex gap-2">

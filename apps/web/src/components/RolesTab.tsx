@@ -465,7 +465,7 @@ export function RolesTab({ guildId }: { guildId: string }) {
             </div>
 
             {error && (
-              <p role="alert" className="mt-4 text-sm" style={{ color: "#e05252" }}>
+              <p role="alert" className="mt-4 text-sm" style={{ color: "var(--color-danger-text)" }}>
                 {error}
               </p>
             )}
@@ -477,7 +477,7 @@ export function RolesTab({ guildId }: { guildId: string }) {
                     type="button"
                     onClick={() => setConfirmingDelete(true)}
                     className="text-sm"
-                    style={{ color: "#e05252" }}
+                    style={{ color: "var(--color-danger-text)" }}
                   >
                     Delete role
                   </button>
@@ -496,7 +496,7 @@ export function RolesTab({ guildId }: { guildId: string }) {
                       disabled={pending}
                       onClick={() => void handleDelete()}
                       className="rounded px-2 py-1 text-sm font-medium"
-                      style={{ backgroundColor: "#e05252", color: "white" }}
+                      style={{ backgroundColor: "var(--color-danger)", color: "white" }}
                     >
                       Delete
                     </button>

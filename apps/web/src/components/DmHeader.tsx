@@ -62,7 +62,7 @@ function GroupNameEditor({ channel, onDone }: { channel: DmChannelJson; onDone: 
         Cancel
       </button>
       {error && (
-        <span role="alert" className="text-xs" style={{ color: "#e05252" }}>
+        <span role="alert" className="text-xs" style={{ color: "var(--color-danger-text)" }}>
           {error}
         </span>
       )}
@@ -85,9 +85,9 @@ export function DmHeader({ channel }: { channel: DmChannelJson }) {
       {editing ? (
         <GroupNameEditor channel={channel} onDone={() => setEditing(false)} />
       ) : (
-        <span className="truncate font-semibold" data-dm-title={name}>
+        <h1 className="truncate font-semibold" data-dm-title={name}>
           {name}
-        </span>
+        </h1>
       )}
       {isGroup && !editing && (
         <button
@@ -105,7 +105,7 @@ export function DmHeader({ channel }: { channel: DmChannelJson }) {
           type="button"
           onClick={() => void leaveVoice()}
           className="rounded px-3 py-1 text-sm font-medium"
-          style={{ backgroundColor: "#e05252", color: "white" }}
+          style={{ backgroundColor: "var(--color-danger)", color: "white" }}
         >
           Leave call
         </button>
@@ -114,7 +114,7 @@ export function DmHeader({ channel }: { channel: DmChannelJson }) {
           type="button"
           onClick={() => void joinVoiceChannel(null, channel.id)}
           className="rounded px-3 py-1 text-sm font-medium"
-          style={{ backgroundColor: "#3ba55d", color: "white" }}
+          style={{ backgroundColor: "var(--color-success)", color: "white" }}
         >
           {callSize > 0 ? "Join call" : "Start call"}
         </button>

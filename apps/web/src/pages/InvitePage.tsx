@@ -68,7 +68,7 @@ export function InvitePage() {
         style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-bg-sidebar)", color: "var(--color-text-primary)" }}
       >
         {error && !preview && (
-          <p role="alert" className="text-sm" style={{ color: "#e05252" }}>
+          <p role="alert" className="text-sm" style={{ color: "var(--color-danger-text)" }}>
             {error}
           </p>
         )}
@@ -95,7 +95,7 @@ export function InvitePage() {
               </div>
             </div>
             {error && (
-              <p role="alert" className="mb-4 text-sm" style={{ color: "#e05252" }}>
+              <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-danger-text)" }}>
                 {error}
               </p>
             )}

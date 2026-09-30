@@ -245,7 +245,7 @@ export function VoiceSettingsDialog({ open, onClose }: { open: boolean; onClose:
         </div>
       )}
       {permissionError && (
-        <p role="alert" className="mb-4 text-sm" style={{ color: "#e05252" }}>
+        <p role="alert" className="mb-4 text-sm" style={{ color: "var(--color-danger-text)" }}>
           {permissionError}
         </p>
       )}

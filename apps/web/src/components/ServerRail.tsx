@@ -74,7 +74,7 @@ function GuildIcon({
       {mentionCount > 0 ? (
         <span
           className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none"
-          style={{ backgroundColor: "#e05252", color: "white" }}
+          style={{ backgroundColor: "var(--color-danger)", color: "white" }}
         >
           <span aria-hidden="true">{formatBadgeCount(mentionCount)}</span>
           <span className="sr-only">
@@ -99,7 +99,7 @@ function UnreadBadge({ count, label }: { count: number; label: string }) {
   return (
     <span
       className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none"
-      style={{ backgroundColor: "#e05252", color: "white" }}
+      style={{ backgroundColor: "var(--color-danger)", color: "white" }}
     >
       <span aria-hidden="true">{formatBadgeCount(count)}</span>
       <span className="sr-only">
@@ -171,7 +171,8 @@ export function ServerRail({ activeGuildId }: { activeGuildId?: string }) {
   }
 
   return (
-    <div
+    <nav
+      aria-label="Servers"
       className="flex w-[72px] flex-col items-center gap-2 overflow-y-auto py-3"
       style={{ backgroundColor: "var(--color-bg-rail)" }}
     >
@@ -212,6 +213,6 @@ export function ServerRail({ activeGuildId }: { activeGuildId?: string }) {
           onClose={() => setMenu(null)}
         />
       )}
-    </div>
+    </nav>
   );
 }

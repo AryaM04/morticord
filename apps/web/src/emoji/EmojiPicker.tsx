@@ -212,7 +212,7 @@ export function EmojiPicker({ anchorEl, onPick, onClose }: EmojiPickerProps) {
           ))}
         </div>
       )}
-      <div className="grid max-h-56 grid-cols-8 gap-0.5 overflow-y-auto p-2" role="grid">
+      <div className="grid max-h-56 grid-cols-8 gap-0.5 overflow-y-auto p-2" role="group" aria-label="Emoji">
         {items.length === 0 && (
           <p className="col-span-8 py-4 text-center text-xs" style={{ color: "var(--color-text-muted)" }}>
             No emoji found.

@@ -518,11 +518,11 @@ export function Composer(props: ComposerProps) {
             <li
               key={upload.key}
               className="flex items-center gap-2 rounded border px-2 py-1 text-xs"
-              style={{ borderColor: upload.error ? "#e05252" : "var(--color-border)" }}
+              style={{ borderColor: upload.error ? "var(--color-danger-text)" : "var(--color-border)" }}
               data-upload-state={upload.error ? "failed" : upload.result ? "ready" : "uploading"}
             >
               <span className="max-w-40 truncate">{upload.name}</span>
-              <span style={{ color: upload.error ? "#e05252" : "var(--color-text-muted)" }}>
+              <span style={{ color: upload.error ? "var(--color-danger-text)" : "var(--color-text-muted)" }}>
                 {upload.error ?? (upload.result ? formatFileSize(upload.size) : `${Math.round(upload.progress * 100)}%`)}
               </span>
               <button type="button" onClick={() => removeUpload(upload.key)} aria-label={`Remove ${upload.name}`}>
@@ -606,7 +606,7 @@ export function Composer(props: ComposerProps) {
         {remaining <= COUNTER_THRESHOLD && (
           <span
             className="pb-1 text-xs"
-            style={{ color: remaining < 0 ? "#e05252" : "var(--color-text-muted)" }}
+            style={{ color: remaining < 0 ? "var(--color-danger-text)" : "var(--color-text-muted)" }}
           >
             {remaining}
           </span>
