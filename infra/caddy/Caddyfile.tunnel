@@ -1,0 +1,28 @@
+# Caddy configuration for the stack behind a Cloudflare Tunnel
+# (PROXY_MODE=cloudflare-tunnel). See docs/deploy.md.
+#
+# Cloudflare serves HTTPS. cloudflared on the host sends the requests to
+# HTTP_BIND (default 127.0.0.1:8480). Docker sends them to port 8080 of
+# this container. Caddy gets no certificate.
+
+{
+	auto_https off
+	servers {
+		# Limits against slow clients. See Caddyfile.
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
+		# The requests from cloudflared come through the Docker bridge, from a
+		# private address. Caddy then takes the client address from the
+		# headers that cloudflared sets. A client on the internet cannot send
+		# a false header here: HTTP_BIND binds only to 127.0.0.1, so only a
+		# process on the host (cloudflared) can open this port.
+		trusted_proxies static private_ranges
+		client_ip_headers CF-Connecting-IP X-Forwarded-For
+	}
+}
+
+http://:8080 {
+	import /etc/caddy/site.caddy
+}

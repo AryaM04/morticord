@@ -3,6 +3,7 @@
 This guide shows how to run the full stack on a home machine. The stack
 has a web server with automatic HTTPS (Caddy), the API, PostgreSQL, a TURN
 server (coturn), and a nightly backup. One command starts all of it.
+To run the stack behind a Cloudflare Tunnel, see step 13.
 
 ## 1. What you need
 
@@ -331,3 +332,129 @@ To see the user of a service, run `docker compose exec <service> id`.
   above. Check CGNAT (step 5).
 - **The site does not open on the home network.** See step 10.
 - **Disk space.** Run `docker system df`. Run `docker image prune -f`.
+
+## 13. Deploy behind a Cloudflare Tunnel
+
+Use this mode when a different web server already uses ports 80 and 443
+on the host, or when you cannot forward these ports. A `cloudflared`
+tunnel on the host sends the web traffic to Caddy. Cloudflare serves
+HTTPS, so Caddy gets no certificate. The direct mode of steps 4 to 6 stays
+the default.
+
+A Cloudflare tunnel or proxy cannot carry TURN. TURN uses its own DNS-only
+name, and the router forwards the TURN ports to the host. This mode has no
+TURN over TLS, because the host has no public certificate.
+
+The example below uses these values. Change them for your server:
+
+| Item | Value |
+| --- | --- |
+| Web address | `morticord.haumlab.com` (through the tunnel) |
+| TURN name | `turn.haumlab.com` (DNS only) |
+| TURN port | 3479 (a different service uses 3478) |
+| Relay ports | 40000-40099 |
+| Local Caddy port | `127.0.0.1:8480` |
+
+### Settings
+
+Do steps 1 to 3 first. Then set these values in `.env`:
+
+```
+PROXY_MODE=cloudflare-tunnel
+HTTP_BIND=127.0.0.1:8480
+DOMAIN=morticord.haumlab.com
+TURN_PORT=3479
+TURN_PUBLIC_HOST=turn.haumlab.com
+TURN_TLS_ENABLED=false
+TURN_RELAY_MIN_PORT=40000
+TURN_RELAY_MAX_PORT=40099
+TURN_EXTERNAL_IP=<PUBLIC_IP>/<LAN_IP>
+```
+
+- Keep `HTTP_BIND` on `127.0.0.1`. Caddy trusts the client address in the
+  `CF-Connecting-IP` header. Only a process on the host (cloudflared) can
+  open a port on `127.0.0.1`, so a client on the internet cannot send a
+  false address. The API rate limits then apply to each real user.
+- Tunnel mode does not use `ACME_EMAIL` and `TLS_MODE`.
+- Keep `MAX_ATTACHMENT_BYTES` below 100 MB. The Cloudflare free plan
+  refuses a request body larger than 100 MB. The default (25 MiB) is
+  correct.
+
+### Start
+
+Start the stack with the same command as in direct mode:
+`docker compose up -d --build`. Caddy then listens only on
+`127.0.0.1:8480`. The stack does not use ports 80, 443 and 3478 of the
+host.
+
+### Tunnel public hostname
+
+Add one public hostname to the tunnel. It sends `morticord.haumlab.com` to
+`http://localhost:8480`.
+
+- Tunnel managed in the Cloudflare dashboard: open Zero Trust, then
+  Networks, then Tunnels. Select the tunnel and open "Public Hostname".
+  Add a hostname: subdomain `morticord`, domain `haumlab.com`, type
+  `HTTP`, URL `localhost:8480`. Cloudflare makes the DNS record.
+- Tunnel with a local `config.yml`: add this rule above the last rule (the
+  rule without a hostname):
+
+  ```
+  ingress:
+    - hostname: morticord.haumlab.com
+      service: http://localhost:8480
+    # ... other rules ...
+    - service: http_status:404
+  ```
+
+  Then make the DNS record and start cloudflared again:
+
+  ```
+  cloudflared tunnel route dns <TUNNEL_NAME> morticord.haumlab.com
+  sudo systemctl restart cloudflared
+  ```
+
+In the Cloudflare dashboard of the zone, keep "WebSockets" on (Network
+settings). Turn off "Rocket Loader": it changes the scripts, and the
+Content-Security-Policy then blocks them.
+
+### DNS for TURN
+
+Make an `A` record `turn` (`turn.haumlab.com`) with the public IP address
+of the home network. Set the proxy status to "DNS only" (grey cloud). If
+your public IP address changes, use dynamic DNS for this name (see step 4)
+and change `TURN_EXTERNAL_IP`.
+
+### Router and firewall
+
+Forward these ports to the LAN address of the server. Do not forward 80
+and 443 for Morticord: the tunnel needs no open port.
+
+| Port | Protocol | Use |
+| --- | --- | --- |
+| 3479 | UDP and TCP | TURN |
+| 40000-40099 | UDP | TURN relay ports |
+
+If the host uses ufw, run these commands:
+
+```
+sudo ufw allow 3479
+sudo ufw allow 40000:40099/udp
+```
+
+### Check list
+
+1. Health: `curl http://127.0.0.1:8480/api/v1/health` on the host, and
+   `curl https://morticord.haumlab.com/api/v1/health` from a different
+   network. Both must give `{"status":"ok"}`.
+2. Web app: open `https://morticord.haumlab.com`. Register and sign in.
+3. WebSocket: do the WebSocket check of step 12 with
+   `DOMAIN=morticord.haumlab.com`. The status must be 101. The gateway
+   sends a heartbeat each 30 seconds, so the Cloudflare idle limit (100
+   seconds) does not close the connection.
+4. Client address: run `docker compose logs --tail 20 api`. The
+   `remoteAddress` values must be public IP addresses of the users, not
+   `172.x.x.x` addresses.
+5. TURN: do the TURN check of step 12 with the URL
+   `turn:turn.haumlab.com:3479`. The result must have a candidate of the
+   type `relay`.

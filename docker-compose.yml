@@ -18,9 +18,14 @@ x-hardening: &hardening
     - no-new-privileges:true
 
 services:
-  # Reverse proxy. It gets the TLS certificate, serves the web app and
-  # sends /api and /gateway to the api service.
+  # Reverse proxy. It serves the web app and sends /api and /gateway to the
+  # api service. PROXY_MODE in .env selects the file with the mode settings
+  # (ports, certificate): infra/proxy/direct.yml or
+  # infra/proxy/cloudflare-tunnel.yml.
   caddy:
+    extends:
+      file: infra/proxy/${PROXY_MODE:-direct}.yml
+      service: caddy
     build:
       context: .
       dockerfile: apps/web/Dockerfile
@@ -31,13 +36,8 @@ services:
         condition: service_healthy
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
-      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
       TLS_MODE: ${TLS_MODE:-}
       MAX_ATTACHMENT_BYTES: ${MAX_ATTACHMENT_BYTES:-26214400}
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
     volumes:
       - caddy-data:/data
       - caddy-config:/config
@@ -87,7 +87,8 @@ services:
       DESKTOP_URL_SCHEME: ${DESKTOP_URL_SCHEME:-morticord}
       TURN_SECRET: ${TURN_SECRET}
       TURN_DOMAIN: ${DOMAIN}
-      TURN_PORT: "3478"
+      TURN_PORT: ${TURN_PORT:-3478}
+      TURN_PUBLIC_HOST: ${TURN_PUBLIC_HOST:-}
       TURN_TLS_PORT: "5349"
       TURN_TLS_ENABLED: ${TURN_TLS_ENABLED:-false}
       SMTP_HOST: ${SMTP_HOST}
@@ -159,6 +160,7 @@ services:
     entrypoint: ["/bin/sh", "/usr/local/bin/start-coturn.sh"]
     command:
       - "--realm=${DOMAIN}"
+      - "--listening-port=${TURN_PORT:-3478}"
       - "--min-port=${TURN_RELAY_MIN_PORT:-40000}"
       - "--max-port=${TURN_RELAY_MAX_PORT:-40099}"
     # start.sh writes the secret into a file. It is then not on the command line.

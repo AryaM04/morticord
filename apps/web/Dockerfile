@@ -33,6 +33,6 @@ RUN setcap -r /usr/bin/caddy \
   && addgroup -S -g 10001 caddy \
   && adduser -S -D -H -u 10001 -G caddy caddy \
   && chown -R caddy:caddy /data /config
-COPY infra/caddy/Caddyfile /etc/caddy/Caddyfile
+COPY infra/caddy/Caddyfile infra/caddy/Caddyfile.tunnel infra/caddy/site.caddy /etc/caddy/
 COPY --from=build /repo/apps/web/dist /srv
 USER caddy

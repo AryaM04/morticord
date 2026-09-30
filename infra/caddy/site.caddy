@@ -1,0 +1,51 @@
+# The site part of the Caddy configuration. Both modes use it: Caddyfile
+# (direct TLS) and Caddyfile.tunnel (behind a Cloudflare Tunnel).
+#
+# Caddy sends one X-Forwarded-For value to the API: {client_ip}. It
+# replaces the header from the client, so the API can trust the last
+# entry (TRUST_PROXY). In direct mode, {client_ip} is the address of the
+# TCP connection. In tunnel mode, it is the address that Cloudflare gives.
+
+encode zstd gzip
+
+header {
+	Strict-Transport-Security "max-age=31536000"
+	X-Content-Type-Options "nosniff"
+	Referrer-Policy "no-referrer"
+	# A page of another site that opens this site in a window cannot control that window.
+	Cross-Origin-Opener-Policy "same-origin"
+	# Voice and video calls need the microphone, the camera and screen share.
+	Permissions-Policy "microphone=(self), camera=(self), display-capture=(self), geolocation=(), payment=(), usb=()"
+	# The crypto WASM needs 'wasm-unsafe-eval'. This policy is the same as the one of the desktop apps.
+	Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' wss://{$DOMAIN}; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'"
+	-Server
+}
+
+# The body limit is the size of the largest encrypted attachment.
+handle /api/* {
+	request_body {
+		max_size {$MAX_ATTACHMENT_BYTES}
+	}
+	reverse_proxy api:3000 {
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+# Caddy proxies the WebSocket upgrade without extra settings.
+handle /gateway {
+	reverse_proxy api:3000 {
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+handle {
+	root * /srv
+	# File names in /assets/ hold a hash of the content, so they never change.
+	@hashed path /assets/*
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+	# Every other path returns index.html, and the browser must check it each time.
+	@shell not path /assets/*
+	header @shell Cache-Control "no-cache"
+	try_files {path} /index.html
+	file_server
+}

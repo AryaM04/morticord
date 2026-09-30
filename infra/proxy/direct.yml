@@ -1,0 +1,11 @@
+# The Caddy settings for PROXY_MODE=direct (the default). docker-compose.yml
+# includes this file with "extends". Caddy gets a Let's Encrypt certificate
+# and serves HTTPS on ports 80 and 443 of the host.
+services:
+  caddy:
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"

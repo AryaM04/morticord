@@ -1,0 +1,10 @@
+# The Caddy settings for PROXY_MODE=cloudflare-tunnel. docker-compose.yml
+# includes this file with "extends". Caddy serves plain HTTP on HTTP_BIND.
+# cloudflared on the host sends the requests from Cloudflare to it.
+# Keep HTTP_BIND on 127.0.0.1. Then only processes on the host can send
+# requests with a CF-Connecting-IP header (see infra/caddy/Caddyfile.tunnel).
+services:
+  caddy:
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile.tunnel", "--adapter", "caddyfile"]
+    ports:
+      - "${HTTP_BIND:-127.0.0.1:8480}:8080"
