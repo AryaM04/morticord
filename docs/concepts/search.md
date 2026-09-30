@@ -30,8 +30,10 @@ Search shows only messages this device has seen.
 ## Storage and encryption at rest
 
 One IndexedDB database for each user and device: `search:<userId>:<deviceId>`.
-Two keys come from the pickle key of the crypto store with HKDF-SHA-256
-(`CryptoHandle.localIndexKeys`). Page code cannot export them.
+Two keys come from the pickle key of the crypto store with HKDF-SHA-256.
+The crypto layer derives the keys. It runs in the crypto SharedWorker, and
+the worker is the only writer of the index. Page code cannot export the keys.
+The page sends changes and queries to the worker through `CryptoHandle.search`.
 
 Each message record holds:
 

@@ -16,3 +16,4 @@ e2e/playwright-report/
 e2e/.server-data/
 
 backups/
+apps/server/data/

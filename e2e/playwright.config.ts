@@ -30,7 +30,9 @@ mkdirSync(E2E_DATA_DIR, { recursive: true });
 
 const postgresPort = Number(process.env.POSTGRES_PORT ?? 5432);
 const mailpitUiPort = Number(process.env.MAILPIT_UI_PORT ?? 8025);
-const apiPort = Number(process.env.API_PORT ?? 3000);
+// The e2e API server has its own port and its own database. The config never
+// reuses a server that it did not start: such a server can use another database.
+const apiPort = Number(process.env.E2E_API_PORT ?? 3100);
 
 const [postgresReachable, mailpitReachable] = await Promise.all([
   isPortReachable("localhost", postgresPort),
@@ -78,12 +80,13 @@ if (authInfraAvailable) {
     {
       command: "pnpm --filter @discord-clone/server dev",
       url: `http://localhost:${apiPort}/api/v1/health`,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       cwd: repoRoot,
       // A high rate limit stops repeated local e2e runs from hitting 429s
       // on the auth routes. Production config is untouched.
       env: {
         ...process.env,
+        API_PORT: String(apiPort),
         POSTGRES_DB: "discord_clone_e2e",
         AUTH_RATE_LIMIT_PER_MINUTE: "1000",
         // attachments.spec.ts reads the stored files here.
@@ -97,8 +100,11 @@ if (authInfraAvailable) {
     {
       command: "pnpm --filter @discord-clone/web dev",
       url: `http://localhost:${WEB_PORT}`,
-      reuseExistingServer: !process.env.CI,
+      // A reused web server can proxy to an API server with another database.
+      reuseExistingServer: false,
       cwd: repoRoot,
+      // The Vite proxy reads API_PORT, so it points to the e2e API server.
+      env: { ...process.env, API_PORT: String(apiPort) } as Record<string, string>,
       timeout: 30_000,
     },
   );

@@ -8,7 +8,7 @@
 // - the ids of the event, the channel and the sender, and the time. The
 //   server knows these already.
 // Both keys come from the pickle key of the crypto store (see
-// `CryptoHandle.localIndexKeys`). The trade-off of word tags against one
+// `deriveLocalIndexKeys`). The trade-off of word tags against one
 // encrypted blob is in docs/concepts/search.md.
 import type { DecryptedPayload, EventJson } from "@discord-clone/shared";
 import { tokenize, type HasFilter } from "./text.js";
