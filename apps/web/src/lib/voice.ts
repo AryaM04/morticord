@@ -284,6 +284,10 @@ async function loadEngine(): Promise<VoiceEngine> {
       engine = created;
       return created;
     })();
+    // A failed load must not stay in the cache: the next join tries again.
+    engineLoad.catch(() => {
+      engineLoad = null;
+    });
   }
   return engineLoad;
 }
@@ -291,12 +295,21 @@ async function loadEngine(): Promise<VoiceEngine> {
 /** Join a voice channel, or a DM call when `guildId` is null. Leave the current call first if there is one. */
 export async function joinVoiceChannel(guildId: string | null, channelId: string): Promise<void> {
   voiceStore.setState({ status: "connecting", guildId, channelId, errorMessage: null });
-  __t("join start");
-  // Voice signals are Olm messages, so the call needs the crypto layer.
-  callCrypto = await cryptoReady();
-  __t("cryptoReady resolved");
-  const voiceEngine = await loadEngine();
-  __t("engine loaded");
+  let voiceEngine: VoiceEngine;
+  try {
+    // Voice signals are Olm messages, so the call needs the crypto layer.
+    callCrypto = await cryptoReady();
+    voiceEngine = await loadEngine();
+  } catch (error) {
+    // Do not leave the panel in "connecting" for a join that cannot start.
+    voiceStore.setState({
+      status: "idle",
+      guildId: null,
+      channelId: null,
+      errorMessage: error instanceof Error ? error.message : "The voice call could not start.",
+    });
+    return;
+  }
   const saved = voiceDeviceSettingsStore.getState();
   if (saved.inputDeviceId) {
     voiceEngine.setInputDevice(saved.inputDeviceId);

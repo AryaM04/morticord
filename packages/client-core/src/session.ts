@@ -71,16 +71,19 @@ export function createSession(options: CreateSessionOptions): Session {
     onSignedOut: () => handleSignedOut(),
   });
 
-  function applyAuthResult(result: AuthResult, set: (partial: Partial<SessionState>) => void): Promise<void> {
+  async function applyAuthResult(result: AuthResult, set: (partial: Partial<SessionState>) => void): Promise<void> {
     const tokens: TokenSet = {
       accessToken: result.accessToken,
       accessTokenExpiresAt: result.accessTokenExpiresAt,
       refreshToken: result.refreshToken,
       deviceId: result.deviceId,
     };
+    // Store the tokens first. The gateway and the crypto layer start on
+    // "signedIn" and read the tokens at once. Another tab reads them on
+    // "signed-in".
+    await apiClient.setTokens(tokens);
     set({ status: "signedIn", user: result.user, deviceId: result.deviceId });
     channel?.postMessage({ type: "signed-in" } satisfies BroadcastMessage);
-    return apiClient.setTokens(tokens);
   }
 
   const store = createStore<SessionStore>((set, get) => {
