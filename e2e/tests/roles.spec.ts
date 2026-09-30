@@ -268,4 +268,60 @@ test.describe("roles", () => {
     await contextB.close();
     await contextC.close();
   });
+
+  // Regression: the gateway event of a save can come before the HTTP reply.
+  // Then the grid shows the new value, but the save still runs. An "Add" in
+  // that time made two saves overlap: the first reply enabled the grid of the
+  // old overwrite, and the next click changed the wrong overwrite.
+  test("a new overwrite waits for the save that runs", async ({ page, request }) => {
+    const user = uniqueUser("A");
+    const session = await registerApi(request, user);
+    const guild = await createGuildApi(request, session.accessToken, "Overwrite Guild");
+    const general = guild.channels.find((c) => c.type === "text" && c.name === "general")!;
+    const role = await request.post(`${WEB_ORIGIN}/api/v1/guilds/${guild.id}/roles`, {
+      headers: { authorization: `Bearer ${session.accessToken}` },
+      data: { name: "Mods" },
+    });
+    expect(role.ok()).toBe(true);
+
+    await loginThroughUi(page, user);
+    await page.goto(`${WEB_ORIGIN}/app/${guild.id}/${general.id}`);
+    await page.locator('[data-channel-row="general"]').hover();
+    await page.getByRole("button", { name: "general settings" }).click();
+    const dialog = page.getByRole("dialog", { name: "Channel settings" });
+    await dialog.getByRole("button", { name: "Permissions", exact: true }).click();
+    const addRoleSelect = dialog.getByLabel("Add a role overwrite");
+    const addRoleButton = addRoleSelect.locator("xpath=following-sibling::button[1]");
+    await addRoleSelect.selectOption({ label: "@everyone" });
+    await addRoleButton.click();
+    await dialog.getByRole("button", { name: "View Channel: neutral" }).click();
+    await expect(dialog.getByRole("button", { name: "View Channel: allow" })).toBeEnabled();
+
+    // Hold the reply of the next save until the gateway event shows its value.
+    let releaseReply: () => void = () => {};
+    const replyReleased = new Promise<void>((resolve) => (releaseReply = resolve));
+    let held = false;
+    await page.route("**/api/v1/channels/*/overwrites/*", async (route) => {
+      if (held) {
+        await route.continue();
+        return;
+      }
+      held = true;
+      const response = await route.fetch();
+      await replyReleased;
+      await route.fulfill({ response });
+    });
+    await dialog.getByRole("button", { name: "View Channel: allow" }).click();
+    await expect(dialog.getByRole("button", { name: "View Channel: deny" })).toBeVisible();
+    await addRoleSelect.selectOption({ label: "Mods" });
+    await expect(addRoleButton).toBeDisabled();
+    releaseReply();
+
+    await addRoleButton.click();
+    await dialog.getByRole("button", { name: /View Channel/ }).click();
+    await expect(dialog.getByRole("heading", { name: "Mods" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "View Channel: allow" })).toBeVisible();
+    await dialog.getByRole("button", { name: "@ @everyone" }).click();
+    await expect(dialog.getByRole("button", { name: "View Channel: deny" })).toBeVisible();
+  });
 });

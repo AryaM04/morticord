@@ -93,6 +93,12 @@ export function ChannelPermissionsTab({ channel }: { channel: ChannelJson }) {
     (member) => !overwrites.some((o) => o.targetType === "member" && o.targetId === member.userId),
   );
 
+  // The channel as the store holds it now, not as this render saw it.
+  // Gateway events can change it while a request runs.
+  function latestChannel(): ChannelJson {
+    return (realtimeStore.getState().channels[channel.id] as ChannelJson | undefined) ?? liveChannel;
+  }
+
   async function saveOverwrite(
     targetId: string,
     targetType: "role" | "member",
@@ -107,15 +113,16 @@ export function ChannelPermissionsTab({ channel }: { channel: ChannelJson }) {
         allow: allow.toString(),
         deny: deny.toString(),
       });
+      const current = latestChannel();
       const nextOverwrites = [
-        ...overwrites.filter((o) => !(o.targetId === targetId && o.targetType === targetType)),
+        ...current.permissionOverwrites.filter((o) => !(o.targetId === targetId && o.targetType === targetType)),
         { targetId, targetType, allow: allow.toString(), deny: deny.toString() },
       ];
       realtimeStore
         .getState()
         .applyDispatch({
           t: "CHANNEL_UPDATE",
-          d: { ...liveChannel, permissionOverwrites: nextOverwrites },
+          d: { ...current, permissionOverwrites: nextOverwrites },
         });
       setSelectedKey(`${targetType}:${targetId}`);
     } catch (err) {
@@ -130,14 +137,15 @@ export function ChannelPermissionsTab({ channel }: { channel: ChannelJson }) {
     setError(null);
     try {
       await deleteChannelOverwrite(session.apiClient, channel.id, targetId, targetType);
-      const nextOverwrites = overwrites.filter(
+      const current = latestChannel();
+      const nextOverwrites = current.permissionOverwrites.filter(
         (o) => !(o.targetId === targetId && o.targetType === targetType),
       );
       realtimeStore
         .getState()
         .applyDispatch({
           t: "CHANNEL_UPDATE",
-          d: { ...liveChannel, permissionOverwrites: nextOverwrites },
+          d: { ...current, permissionOverwrites: nextOverwrites },
         });
       setSelectedKey(null);
     } catch (err) {
@@ -204,7 +212,7 @@ export function ChannelPermissionsTab({ channel }: { channel: ChannelJson }) {
                 </select>
                 <button
                   type="button"
-                  disabled={!addingRoleId}
+                  disabled={!addingRoleId || pending}
                   onClick={() => {
                     if (addingRoleId) void saveOverwrite(addingRoleId, "role", 0n, 0n);
                     setAddingRoleId("");
@@ -238,7 +246,7 @@ export function ChannelPermissionsTab({ channel }: { channel: ChannelJson }) {
                 </select>
                 <button
                   type="button"
-                  disabled={!addingMemberId}
+                  disabled={!addingMemberId || pending}
                   onClick={() => {
                     if (addingMemberId) void saveOverwrite(addingMemberId, "member", 0n, 0n);
                     setAddingMemberId("");
