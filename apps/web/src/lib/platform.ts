@@ -9,6 +9,8 @@ export interface DesktopFeatures {
   os: "windows" | "macos" | "linux";
   /** A reason in plain words when this app cannot share a screen, or null. */
   screenShareUnavailableReason: string | null;
+  /** The text under the push-to-talk key in the voice settings. */
+  pushToTalkHint: string;
   /**
    * Register a global shortcut, such as "Control+Shift+KeyT", for push to
    * talk. It works while the app window has no focus. Returns a function

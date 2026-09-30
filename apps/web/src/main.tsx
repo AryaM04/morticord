@@ -2,6 +2,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import type { VoiceDebugPeerStats } from "@discord-clone/client-core/voice";
+import type { DesktopBridge } from "@discord-clone/shared";
 import { App } from "./App.js";
 import { cryptoDebug, type CryptoDebug } from "./lib/crypto.js";
 import { getVoiceDebugStats, isLocalVoiceTrackEnabled } from "./lib/voice.js";
@@ -35,14 +36,22 @@ if (!rootElement) {
 }
 
 /**
- * The desktop app (Tauri) puts `__TAURI_INTERNALS__` on the window. Its
- * platform loads with a dynamic import, so the web bundle does not grow.
- * It sets the server address and the platform before the app renders.
+ * The Tauri app (Windows, macOS) puts `__TAURI_INTERNALS__` on the window.
+ * The Electron app (Linux) puts `desktopBridge` there with its preload
+ * script. The desktop platform loads with a dynamic import, so the web
+ * bundle does not grow. It sets the server address and the platform
+ * before the app renders.
  */
 async function start(root: HTMLElement): Promise<void> {
   if ("__TAURI_INTERNALS__" in window) {
-    const { startDesktop } = await import("./desktop/tauri-platform.js");
-    await startDesktop(root);
+    const [{ startDesktop }, { tauriBridge }] = await Promise.all([
+      import("./desktop/desktop-platform.js"),
+      import("./desktop/tauri-bridge.js"),
+    ]);
+    await startDesktop(root, tauriBridge);
+  } else if ("desktopBridge" in window) {
+    const { startDesktop } = await import("./desktop/desktop-platform.js");
+    await startDesktop(root, (window as unknown as { desktopBridge: DesktopBridge }).desktopBridge);
   }
   createRoot(root).render(
     <StrictMode>

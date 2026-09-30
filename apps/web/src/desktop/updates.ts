@@ -3,7 +3,8 @@
 // checks the signature of the download. The app installs an update only
 // after the user clicks "Install and restart". The prompt is plain DOM, so
 // it adds no code to the web bundle.
-import { commands, type UpdateInfo } from "./commands.js";
+import type { DesktopUpdateInfo as UpdateInfo } from "@discord-clone/shared";
+import { commands, errorText } from "./bridge.js";
 
 const FIRST_CHECK_DELAY_MS = 30_000;
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -56,7 +57,7 @@ function showPrompt(update: UpdateInfo): void {
     later.disabled = true;
     status.textContent = "Downloading the update…";
     commands.installUpdate().catch((error: unknown) => {
-      status.textContent = `The update did not install: ${String(error)}`;
+      status.textContent = `The update did not install: ${errorText(error)}`;
       later.disabled = false;
     });
   };

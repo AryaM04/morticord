@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { serverOrigin } from "../lib/server-url.js";
 import { session } from "../lib/session.js";
-import { commands } from "./commands.js";
+import { commands, errorText } from "./bridge.js";
 import { readCloseToTray, writeCloseToTray } from "./close-to-tray.js";
 
 export default function DesktopSettings() {
@@ -19,13 +19,13 @@ export default function DesktopSettings() {
     try {
       await commands.setServerUrl(null);
     } catch (reason) {
-      setError(String(reason));
+      setError(errorText(reason));
     }
   }
 
   function toggleCloseToTray(enabled: boolean): void {
     setCloseToTray(enabled);
-    writeCloseToTray(enabled).catch((reason: unknown) => setError(String(reason)));
+    writeCloseToTray(enabled).catch((reason: unknown) => setError(errorText(reason)));
   }
 
   return (

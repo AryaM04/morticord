@@ -12,7 +12,7 @@ import type { AppDeps } from "../../app.js";
 import { AppError } from "../../errors.js";
 import { checkRate } from "../keys/routes.js";
 import { createEventRateLimiter } from "../messages/service.js";
-import { createLinkPreviewFetcher, LinkPreviewError, type LinkPreviewFetcher } from "./fetcher.js";
+import { createLinkPreviewFetcher, LinkPreviewError, type LinkPreviewFetcher } from "@discord-clone/link-preview-fetch";
 
 export const PREVIEWS_PER_MINUTE = 20;
 export const CACHE_TTL_MS = 10 * 60_000;

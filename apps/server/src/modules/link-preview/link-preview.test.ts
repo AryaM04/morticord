@@ -14,10 +14,9 @@ import type { AppDeps } from "../../app.js";
 import { signAccessToken } from "../auth/tokens.js";
 import {
   createLinkPreviewFetcher,
-  isBlockedAddress,
   LinkPreviewError,
   MAX_HTML_BYTES,
-} from "./fetcher.js";
+} from "@discord-clone/link-preview-fetch";
 import { PREVIEWS_PER_MINUTE, PreviewCache, registerLinkPreviewRoutes } from "./routes.js";
 
 const PNG = Buffer.from(
@@ -125,46 +124,6 @@ async function expectCode(
   expect(error).toBeInstanceOf(LinkPreviewError);
   expect((error as LinkPreviewError).code).toBe(code);
 }
-
-describe("isBlockedAddress", () => {
-  it("blocks private, loopback, link-local, multicast and unique local addresses", () => {
-    for (const address of [
-      "127.0.0.1",
-      "10.1.2.3",
-      "172.16.0.1",
-      "192.168.1.1",
-      "169.254.169.254",
-      "100.64.0.1",
-      "0.0.0.0",
-      "224.0.0.1",
-      "255.255.255.255",
-      "::1",
-      "::",
-      "fc00::1",
-      "fd12:3456::1",
-      "fe80::1",
-      "ff02::1",
-      "::ffff:127.0.0.1",
-      "::ffff:7f00:1",
-      "::ffff:10.0.0.1",
-    ]) {
-      expect(isBlockedAddress(address), address).toBe(true);
-    }
-  });
-
-  it("allows public addresses", () => {
-    for (const address of ["93.184.216.34", "1.1.1.1", "2606:4700:4700::1111"]) {
-      expect(isBlockedAddress(address), address).toBe(false);
-    }
-  });
-
-  it("allows only loopback in the test mode", () => {
-    expect(isBlockedAddress("127.0.0.1", true)).toBe(false);
-    expect(isBlockedAddress("::1", true)).toBe(false);
-    expect(isBlockedAddress("10.0.0.1", true)).toBe(true);
-    expect(isBlockedAddress("169.254.169.254", true)).toBe(true);
-  });
-});
 
 describe("the SSRF rules", () => {
   const strict = createLinkPreviewFetcher({

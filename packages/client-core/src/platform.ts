@@ -1,7 +1,7 @@
 // A platform gives client-core the things it needs from the host: a
 // secure place to keep the session and the crypto pickle key, and desktop
 // notifications. The web app uses IndexedDB and the Notification API. The
-// desktop app (apps/web/src/desktop/tauri-platform.ts) supplies the OS key
+// desktop app (apps/web/src/desktop/desktop-platform.ts) supplies the OS key
 // store, system notifications and its own link preview fetch.
 import type { FetchLinkPreview } from "./link-preview.js";
 

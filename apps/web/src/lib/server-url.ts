@@ -1,7 +1,7 @@
 // The address of the server. In a browser, the server is the page origin,
 // so every URL stays relative. The desktop app loads this web build from
 // its own origin, and sets the server origin once at start (see
-// `desktop/tauri-platform.ts`). Every REST, gateway, avatar and attachment
+// `desktop/desktop-platform.ts`). Every REST, gateway, avatar and attachment
 // URL goes through this file.
 
 /** The server origin, such as "https://chat.example.com". Empty: the page origin. */

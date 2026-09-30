@@ -41,6 +41,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@discord-clone/link-preview-fetch':
+        specifier: workspace:*
+        version: link:../../packages/link-preview-fetch
       '@discord-clone/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -212,6 +215,22 @@ importers:
 
   packages/crypto-wasm:
     devDependencies:
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.4)(lightningcss@1.32.0)
+
+  packages/link-preview-fetch:
+    dependencies:
+      '@discord-clone/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.1
+        version: 22.20.4
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
       vitest:
         specifier: ^2.1.5
         version: 2.1.9(@types/node@22.20.4)(lightningcss@1.32.0)

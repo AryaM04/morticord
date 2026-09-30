@@ -1,36 +1,33 @@
-// The platform of the desktop app (Tauri). `main.tsx` loads this file with
-// a dynamic import, only when the page runs in the desktop app. It gives:
+// The platform of the desktop apps: Tauri (Windows, macOS) and Electron
+// (Linux). `main.tsx` loads this file with a dynamic import, only when the
+// page runs in a desktop app, and gives it the bridge of that shell. It
+// gives:
 //
-// - the OS key store (Windows Credential Manager, macOS Keychain) as the
-//   secure store,
+// - the secure store of the shell (OS key store, or Electron safeStorage),
 // - system notifications, and link previews that the app fetches itself,
 // - a global push-to-talk shortcut, a tray menu, an unread badge, deep
 //   links and update prompts.
 //
 // See docs/concepts/desktop-shells.md.
-import { createElement } from "react";
+import { createElement, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { navigate } from "wouter/use-browser-location";
 import {
   countMentions,
   countUnreadMessages,
-  type FetchLinkPreview,
-  type LinkPreviewData,
   type NotifyOptions,
   type Platform,
 } from "@discord-clone/client-core";
-import { decodeBase64Url, decodeHtml, readHtmlMeta } from "@discord-clone/shared";
+import type { DesktopBridge, DesktopInit } from "@discord-clone/shared";
 import { installDesktopPlatform, type DesktopFeatures } from "../lib/platform.js";
 import { setServerOrigin } from "../lib/server-url.js";
 import { messagesStore } from "../lib/messages.js";
 import { realtimeStore } from "../lib/realtime.js";
 import { toggleDeafen, toggleMute, voiceStore } from "../lib/voice.js";
-import { commands, onDesktopEvent, type DesktopInit } from "./commands.js";
+import { commands, onDesktopEvent, setDesktopBridge } from "./bridge.js";
 import { readCloseToTray } from "./close-to-tray.js";
 import { startUpdateChecks } from "./updates.js";
 
-/** One time limit for the page and its image, the same as the server route. */
-const LINK_PREVIEW_TIMEOUT_MS = 3000;
 /** The app keeps the click actions of this many recent notifications. */
 const MAX_NOTIFICATION_ACTIONS = 50;
 const INVITE_CODE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -55,36 +52,6 @@ function notify(options: NotifyOptions): void {
   });
 }
 
-async function fetchResource(url: string, kind: "page" | "image", deadline: number) {
-  const resource = await commands.linkPreviewFetch(url, kind, Math.max(0, deadline - Date.now()));
-  return { ...resource, bytes: decodeBase64Url(resource.body) };
-}
-
-/** Fetch a page and its image here, with the same address rules as the server route. */
-const fetchLinkPreview: FetchLinkPreview = async (url) => {
-  const deadline = Date.now() + LINK_PREVIEW_TIMEOUT_MS;
-  let page;
-  try {
-    page = await fetchResource(url, "page", deadline);
-  } catch {
-    return null;
-  }
-  const meta = readHtmlMeta(decodeHtml(page.bytes, page.contentType));
-  let image: LinkPreviewData["image"];
-  if (meta.image) {
-    try {
-      const fetched = await fetchResource(new URL(meta.image, page.url).href, "image", deadline);
-      image = { bytes: fetched.bytes, mime: fetched.contentType };
-    } catch {
-      // A preview without its image is still a preview.
-    }
-  }
-  if (!meta.title && !meta.description && !image) {
-    return null;
-  }
-  return { url, title: meta.title, description: meta.description, siteName: meta.siteName, image };
-};
-
 const platform: Platform = {
   secureStore: {
     get: (key) => commands.secureGet(key),
@@ -92,15 +59,31 @@ const platform: Platform = {
     delete: (key) => commands.secureDelete(key),
   },
   notify,
-  fetchLinkPreview,
+  fetchLinkPreview: (url) => commands.fetchLinkPreview(url),
 };
+
+/** The text under the push-to-talk key in the voice settings. */
+function pushToTalkHint(init: DesktopInit): string {
+  if (init.pushToTalkUnavailableReason) {
+    return `${init.pushToTalkUnavailableReason} Push to talk works only while this window has focus.`;
+  }
+  if (init.os === "linux") {
+    // The Linux app reads the key without taking it from other apps.
+    return "Push to talk works in all apps. Other apps also get this key, so use a key that they do not use, such as a function key.";
+  }
+  return "Push to talk works in all apps. Other apps do not get this key, so use a function key or add Ctrl, Alt or Shift.";
+}
 
 function makeFeatures(init: DesktopInit): DesktopFeatures {
   return {
     os: init.os,
     screenShareUnavailableReason:
       init.os === "macos" ? "Screen share is not available in this app on macOS. Use the web app." : null,
+    pushToTalkHint: pushToTalkHint(init),
     async registerPushToTalk(shortcut, onChange) {
+      if (init.pushToTalkUnavailableReason) {
+        throw new Error(init.pushToTalkUnavailableReason);
+      }
       const unlisten = await onDesktopEvent("push-to-talk", onChange);
       try {
         await commands.setPushToTalk(shortcut);
@@ -135,7 +118,7 @@ function openDeepLink(link: string): void {
   } else if (parts[0] === "auth" && parts[1] === "callback" && parts.length === 2) {
     navigate(`/auth/callback${url.hash}`);
   } else if (parts[0] === "notification" && parts.length === 2) {
-    // A click on a notification (Windows). The id is unknown after a restart: the window then only shows.
+    // A click on a notification (Windows, Linux). The id is unknown after a restart: the window then only shows.
     notificationActions.get(parts[1]!)?.();
   }
 }
@@ -191,18 +174,23 @@ function wireTray(): void {
   });
 }
 
-/** Show the server address page. The app restarts once the user saves an address, so this never resolves. */
-async function askForServer(root: HTMLElement): Promise<never> {
-  const { ServerAddressPage } = await import("./ServerAddressPage.js");
-  createRoot(root).render(createElement(ServerAddressPage));
+/** Show a page in place of the app. The app starts again after the page does its job, so this never resolves. */
+function showStartPage(root: HTMLElement, page: ReactElement): Promise<never> {
+  createRoot(root).render(page);
   return new Promise<never>(() => {});
 }
 
 /** Set up the desktop platform. `main.tsx` calls this before the app renders. */
-export async function startDesktop(root: HTMLElement): Promise<void> {
+export async function startDesktop(root: HTMLElement, bridge: DesktopBridge): Promise<void> {
+  setDesktopBridge(bridge);
   const init = await commands.init();
   if (!init.serverUrl) {
-    await askForServer(root);
+    const { ServerAddressPage } = await import("./ServerAddressPage.js");
+    await showStartPage(root, createElement(ServerAddressPage));
+  }
+  if (init.secureStoreUnavailableReason) {
+    const { SecureStoreUnavailablePage } = await import("./SecureStoreUnavailablePage.js");
+    await showStartPage(root, createElement(SecureStoreUnavailablePage, { reason: init.secureStoreUnavailableReason }));
   }
   setServerOrigin(init.serverUrl ?? "");
   installDesktopPlatform(platform, makeFeatures(init));

@@ -8,9 +8,11 @@ RUN corepack enable
 FROM base AS build
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
 COPY packages/shared/package.json packages/shared/package.json
+COPY packages/link-preview-fetch/package.json packages/link-preview-fetch/package.json
 COPY apps/server/package.json apps/server/package.json
 RUN pnpm install --frozen-lockfile
 COPY packages/shared packages/shared
+COPY packages/link-preview-fetch packages/link-preview-fetch
 COPY apps/server apps/server
 COPY tsconfig.base.json tsconfig.base.json
 RUN pnpm --filter @discord-clone/shared build

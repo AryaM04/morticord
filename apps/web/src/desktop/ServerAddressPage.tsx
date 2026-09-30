@@ -5,7 +5,7 @@
 import { useState, type FormEvent } from "react";
 import { AuthLayout } from "../components/AuthLayout.js";
 import { FormField } from "../components/FormField.js";
-import { commands } from "./commands.js";
+import { commands, errorText } from "./bridge.js";
 
 export function ServerAddressPage() {
   const [address, setAddress] = useState("");
@@ -20,7 +20,7 @@ export function ServerAddressPage() {
       const origin = await commands.checkServer(address.trim());
       await commands.setServerUrl(origin);
     } catch (reason) {
-      setError(String(reason));
+      setError(errorText(reason));
       setPending(false);
     }
   }

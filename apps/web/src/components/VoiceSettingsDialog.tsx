@@ -404,9 +404,7 @@ export function VoiceSettingsDialog({ open, onClose }: { open: boolean; onClose:
               {capturingKey ? "Press a key…" : settings.pttKeyCode ? `Key: ${describeKeyCode(settings.pttKeyCode)}` : "Set key"}
             </button>
             <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-              {desktopFeatures()
-                ? "Push to talk works in all apps. Other apps do not get this key, so use a function key or add Ctrl, Alt or Shift."
-                : "Push to talk works only while this window has focus."}
+              {desktopFeatures()?.pushToTalkHint ?? "Push to talk works only while this window has focus."}
             </span>
           </div>
         )}
