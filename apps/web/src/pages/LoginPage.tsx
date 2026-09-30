@@ -1,7 +1,7 @@
 // The sign-in page.
 import { useState, type FormEvent } from "react";
 import { Link, useLocation } from "wouter";
-import { loginRequestSchema } from "@discord-clone/shared";
+import { loginRequestSchema } from "@morticord/shared";
 import { AuthLayout } from "../components/AuthLayout.js";
 import { FormField } from "../components/FormField.js";
 import { OAuthButtons } from "../components/OAuthButtons.js";

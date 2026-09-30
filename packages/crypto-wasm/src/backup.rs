@@ -17,6 +17,7 @@ type Plain<T> = std::result::Result<T, &'static str>;
 
 /// The first byte of each backup ciphertext.
 const FORMAT_VERSION: u8 = 1;
+// These labels keep the old project name. A new name would make old backups unreadable.
 const KEY_INFO: &[u8] = b"discord-clone:backup-key:v1";
 const ENCRYPT_INFO: &[u8] = b"discord-clone:backup-ecies:v1";
 const PUBLIC_KEY_BYTES: usize = 32;

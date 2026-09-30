@@ -31,7 +31,7 @@ const envSchema = z.object({
 
   // Other origins that can call the API and open the gateway, as a comma
   // list. The desktop app uses "http://tauri.localhost" on Windows,
-  // "tauri://localhost" on macOS and "app://discord-clone" on Linux.
+  // "tauri://localhost" on macOS and "app://morticord" on Linux.
   // Empty: only the web app origin.
   CORS_ALLOWED_ORIGINS: z.string().optional(),
 
@@ -40,7 +40,7 @@ const envSchema = z.object({
   DESKTOP_URL_SCHEME: z
     .string()
     .regex(/^[a-z][a-z0-9+.-]*$/, "DESKTOP_URL_SCHEME must be a lowercase URL scheme.")
-    .default("discordclone"),
+    .default("morticord"),
 
   // Directory for files the server keeps on disk, such as avatars.
   DATA_DIR: z.string().min(1).default("./data"),

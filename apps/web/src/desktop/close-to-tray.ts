@@ -4,7 +4,7 @@
 // start and on each change.
 import { commands } from "./bridge.js";
 
-const KEY = "discord-clone:close-to-tray";
+const KEY = "morticord:close-to-tray";
 
 export function readCloseToTray(): boolean {
   try {

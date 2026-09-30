@@ -20,7 +20,7 @@ import {
   shell,
   type WebContents,
 } from "electron";
-import type { DesktopEvents, DesktopOs } from "@discord-clone/shared";
+import type { DesktopEvents, DesktopOs } from "@morticord/shared";
 import { APP_HOST, APP_ORIGIN, APP_SCHEME, DEEP_LINK_SCHEME, eventChannel } from "../shared/channels.js";
 import { createAppProtocolHandler } from "./app-protocol.js";
 import { deepLinksIn, PendingLinks } from "./deep-links.js";
@@ -162,7 +162,7 @@ function start(): void {
       ...(state?.bounds ?? DEFAULT_SIZE),
       minWidth: MIN_SIZE.width,
       minHeight: MIN_SIZE.height,
-      title: "Discord Clone",
+      title: "Morticord",
       icon: iconPath,
       show: false,
       backgroundColor: "#313338",

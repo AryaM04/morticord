@@ -28,7 +28,7 @@ import {
   type UploadKeysRequest,
   type UploadKeysResponse,
   type UploadSignatureRequest,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import type { ApiClient } from "../api.js";
 
 export interface CryptoTransport {

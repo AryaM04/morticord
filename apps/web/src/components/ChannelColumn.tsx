@@ -2,7 +2,7 @@
 // drag-and-drop reorder) and their channels, and the user panel.
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { Permission, hasPermission, type ChannelJson, type ChannelOrderRequest } from "@discord-clone/shared";
+import { Permission, hasPermission, type ChannelJson, type ChannelOrderRequest } from "@morticord/shared";
 import {
   countMentions,
   formatBadgeCount,
@@ -10,7 +10,7 @@ import {
   leaveGuild,
   reorderChannels,
   selfGuildPermissions,
-} from "@discord-clone/client-core";
+} from "@morticord/client-core";
 import { useStore } from "zustand";
 import { session } from "../lib/session.js";
 import { realtimeStore } from "../lib/realtime.js";

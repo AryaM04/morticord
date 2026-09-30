@@ -6,7 +6,7 @@ import {
   putSettingsRequestSchema,
   settingsResponseSchema,
   type SettingsResponse,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import type { ApiClient } from "./api.js";
 
 export function getSettings(api: ApiClient): Promise<SettingsResponse> {

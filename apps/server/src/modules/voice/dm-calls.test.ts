@@ -2,7 +2,7 @@
 // CALL_RING to the other recipients, and every way the ring stops. Real
 // Postgres and a real `ws` client. The ring timeout is short here.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { GatewayOpcode } from "@discord-clone/shared";
+import { GatewayOpcode } from "@morticord/shared";
 import { describeWithDb } from "../../../test/db.js";
 import {
   apiFor,

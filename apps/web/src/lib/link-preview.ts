@@ -3,8 +3,8 @@
 // The web platform asks our own server for the page data (browsers block
 // other sites). The preview image is encrypted and uploaded as an
 // attachment. See docs/concepts/link-previews.md.
-import { createServerLinkPreviewFetcher, type FetchLinkPreview } from "@discord-clone/client-core";
-import type { LinkEmbed } from "@discord-clone/shared";
+import { createServerLinkPreviewFetcher, type FetchLinkPreview } from "@morticord/client-core";
+import type { LinkEmbed } from "@morticord/shared";
 import { prepareAttachment } from "./attachment-files.js";
 import { currentPlatform } from "./platform.js";
 import { session } from "./session.js";

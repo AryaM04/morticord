@@ -9,8 +9,8 @@ import {
   Permission,
   type ChannelMembersResponse,
   type EventJson,
-} from "@discord-clone/shared";
-import { Account, GroupSession, InboundGroupSession } from "@discord-clone/crypto-wasm";
+} from "@morticord/shared";
+import { Account, GroupSession, InboundGroupSession } from "@morticord/crypto-wasm";
 import { cryptoStoreName, openCryptoStore } from "./store.js";
 import { FakeServer, initWasmForTests, newClient, verifyWithSas, type TestClient } from "./test/fake-server.js";
 

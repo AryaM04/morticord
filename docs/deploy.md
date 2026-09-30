@@ -27,8 +27,8 @@ server (coturn), and a nightly backup. One command starts all of it.
 
 ## 3. Get the code and make the settings file
 
-1. Get the code: `git clone <repository URL> discord-clone`.
-2. Go into the folder: `cd discord-clone`.
+1. Get the code: `git clone <repository URL> morticord`.
+2. Go into the folder: `cd morticord`.
 3. Make the `.env` file with random secrets: `node scripts/generate-secrets.mjs`.
    If Node.js is not installed, use Docker instead:
    `docker run --rm -v "$PWD":/work -w /work node:24-alpine node scripts/generate-secrets.mjs`.
@@ -137,10 +137,10 @@ The desktop apps open the server from a different origin. Add the origins to
 `CORS_ALLOWED_ORIGINS` in `.env`, separated by commas:
 
 ```
-CORS_ALLOWED_ORIGINS=app://discord-clone,http://tauri.localhost,tauri://localhost
+CORS_ALLOWED_ORIGINS=app://morticord,http://tauri.localhost,tauri://localhost
 ```
 
-- `app://discord-clone`: the Linux app (Electron).
+- `app://morticord`: the Linux app (Electron).
 - `http://tauri.localhost`: the Windows app (Tauri).
 - `tauri://localhost`: the macOS app (Tauri).
 

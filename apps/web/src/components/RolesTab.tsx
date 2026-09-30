@@ -9,7 +9,7 @@ import {
   Permission,
   type PermissionName,
   type RoleJson,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import {
   buildSelfContext,
   canManageRole,
@@ -17,8 +17,8 @@ import {
   deleteRole,
   reorderRoles,
   updateRole,
-} from "@discord-clone/client-core";
-import type { RealtimeState } from "@discord-clone/client-core";
+} from "@morticord/client-core";
+import type { RealtimeState } from "@morticord/client-core";
 import { session } from "../lib/session.js";
 import { describeError } from "../lib/errors.js";
 import { realtimeStore } from "../lib/realtime.js";

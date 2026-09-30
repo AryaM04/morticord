@@ -1,7 +1,7 @@
 // Tests for computing the caller's own permissions from realtime-store
 // data: guild-level, channel overwrites, and the "no context" fallback.
 import { describe, expect, it } from "vitest";
-import { Permission } from "@discord-clone/shared";
+import { Permission } from "@morticord/shared";
 import { applyDispatch, createInitialRealtimeState } from "./realtime-store.js";
 import {
   buildSelfContext,

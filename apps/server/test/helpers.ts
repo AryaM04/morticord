@@ -18,7 +18,7 @@ export function buildTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     turnTlsPort: 5349,
     webOrigin: "http://localhost:5173",
     corsAllowedOrigins: [],
-    desktopUrlScheme: "discordclone",
+    desktopUrlScheme: "morticord",
     dataDir: "./data-test",
     smtp: { host: "localhost", port: 1025, from: "Test <no-reply@example.com>" },
     oauth: {},
@@ -42,5 +42,5 @@ export function buildTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 }
 
 export async function mkTempDataDir(): Promise<string> {
-  return mkdtemp(path.join(tmpdir(), "discord-clone-test-"));
+  return mkdtemp(path.join(tmpdir(), "morticord-test-"));
 }

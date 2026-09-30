@@ -1,4 +1,4 @@
-# Discord Clone
+# Morticord
 
 A self-hosted chat and voice app with full end-to-end encryption. It has a
 Discord-style layout. Voice and video go directly between the users
@@ -170,7 +170,7 @@ one throwaway database for each test file. Without the variable, these
 tests skip and all other tests still run.
 
 ```sh
-export TEST_DATABASE_URL="postgres://discord_clone:<password-from-.env>@localhost:5432/postgres"
+export TEST_DATABASE_URL="postgres://morticord:<password-from-.env>@localhost:5432/postgres"
 pnpm test
 ```
 
@@ -178,7 +178,7 @@ For the end-to-end tests, install the browser one time and start the
 development stack:
 
 ```sh
-pnpm --filter @discord-clone/e2e exec playwright install chromium
+pnpm --filter @morticord/e2e exec playwright install chromium
 docker compose --env-file .env -f infra/docker-compose.dev.yml up -d
 pnpm e2e
 ```
@@ -199,8 +199,8 @@ WebView has weak WebRTC support (see
 [ADR 0003](docs/adr/0003-tauri-and-electron-linux.md)).
 
 ```sh
-pnpm --filter @discord-clone/desktop-tauri build
-pnpm --filter @discord-clone/desktop-electron package
+pnpm --filter @morticord/desktop-tauri build
+pnpm --filter @morticord/desktop-electron package
 ```
 
 The first command makes the Windows installers (and the macOS app on a

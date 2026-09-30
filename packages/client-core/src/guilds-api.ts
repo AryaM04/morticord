@@ -49,7 +49,7 @@ import {
   type UpdateMemberRequest,
   type UpdateRoleRequest,
   type VoiceModerationRequest,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import type { ApiClient } from "./api.js";
 
 const membersPageSchema = z.object({ members: z.array(guildMemberSchema) });

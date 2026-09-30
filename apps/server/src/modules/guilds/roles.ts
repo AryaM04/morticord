@@ -9,7 +9,7 @@ import {
   type CreateRoleRequest,
   type RoleOrderRequest,
   type UpdateRoleRequest,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import type { DbClient } from "../../db/client.js";
 import { guildMembers, memberRoles, roles } from "../../db/schema.js";
 import { AppError } from "../../errors.js";

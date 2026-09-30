@@ -1,11 +1,11 @@
 // Auth logic and database access. Routes stay thin and call these functions.
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { hash, verify } from "@node-rs/argon2";
-import type { AuthResult, RefreshResult } from "@discord-clone/shared";
+import type { AuthResult, RefreshResult } from "@morticord/shared";
 import type { AppConfig } from "../../config.js";
 import { isUniqueViolation, type DbClient } from "../../db/client.js";
 import { devices, emailTokens, refreshTokens, users } from "../../db/schema.js";
-import { GatewayCloseCode } from "@discord-clone/shared";
+import { GatewayCloseCode } from "@morticord/shared";
 import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
 import type { Mailer } from "../../mailer.js";
@@ -137,7 +137,7 @@ async function sendVerificationEmail(deps: AuthDeps, userId: bigint, email: stri
   await deps.mailer.send(
     email,
     "Confirm your email address",
-    `Welcome to Discord Clone.\n\nUse this link to confirm your email address. The link is valid for 24 hours.\n\n${link}\n\nIf you did not make this account, ignore this mail.`,
+    `Welcome to Morticord.\n\nUse this link to confirm your email address. The link is valid for 24 hours.\n\n${link}\n\nIf you did not make this account, ignore this mail.`,
   );
 }
 

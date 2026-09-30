@@ -12,8 +12,8 @@ import {
   isChannelUnread,
   isDmHidden,
   sortDmChannels,
-} from "@discord-clone/client-core";
-import type { DmChannelJson } from "@discord-clone/shared";
+} from "@morticord/client-core";
+import type { DmChannelJson } from "@morticord/shared";
 import { Avatar } from "./Avatar.js";
 import { UserPanel } from "./UserPanel.js";
 import { VoiceStatusPanel } from "./VoiceStatusPanel.js";

@@ -8,8 +8,8 @@ import {
   type GatewayClient,
   type GatewayDispatch,
   type GatewayState,
-} from "@discord-clone/client-core";
-import { GatewayOpcode } from "@discord-clone/shared";
+} from "@morticord/client-core";
+import { GatewayOpcode } from "@morticord/shared";
 import { session } from "./session.js";
 import { messagesStore } from "./messages.js";
 import { gatewayUrl } from "./server-url.js";

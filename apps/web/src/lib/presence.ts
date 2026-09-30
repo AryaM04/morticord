@@ -2,7 +2,7 @@
 // input while the chosen status is Online, switch to Idle; any input
 // switches back. One listener set and one timeout at a time, no polling.
 import { createStore } from "zustand/vanilla";
-import type { PresenceStatus } from "@discord-clone/shared";
+import type { PresenceStatus } from "@morticord/shared";
 import { setPresence } from "./realtime.js";
 
 const IDLE_AFTER_MS = 10 * 60_000;

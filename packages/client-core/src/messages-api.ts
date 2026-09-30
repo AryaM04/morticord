@@ -9,7 +9,7 @@ import {
   type CreateEventRequest,
   type EventJson,
   type ListEventsResponse,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import type { ApiClient } from "./api.js";
 
 export function postEvent(api: ApiClient, channelId: string, input: CreateEventRequest): Promise<EventJson> {

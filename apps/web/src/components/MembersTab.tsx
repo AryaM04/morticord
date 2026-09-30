@@ -2,7 +2,7 @@
 // only roles the caller can manage), kick, ban, and (owner only) transfer
 // ownership. Loaded only when the Members tab opens.
 import { useEffect, useMemo, useState } from "react";
-import type { GuildMemberJson } from "@discord-clone/shared";
+import type { GuildMemberJson } from "@morticord/shared";
 import {
   addMemberRole,
   banMember,
@@ -13,8 +13,8 @@ import {
   listGuildMembers,
   removeMemberRole,
   transferGuildOwnership,
-} from "@discord-clone/client-core";
-import type { RealtimeState } from "@discord-clone/client-core";
+} from "@morticord/client-core";
+import type { RealtimeState } from "@morticord/client-core";
 import { session } from "../lib/session.js";
 import { describeError } from "../lib/errors.js";
 import { realtimeStore } from "../lib/realtime.js";

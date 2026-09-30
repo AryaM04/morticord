@@ -11,7 +11,7 @@ import {
   type DeviceRef,
   type ToDeviceDispatchPayload,
   type ToDeviceMessage,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import type { AccountHolder } from "./account.js";
 import type { DeviceList } from "./device-list.js";
 import { checkBinding, newEnvelopeId, parseEnvelope, type ToDeviceEnvelope } from "./envelope.js";

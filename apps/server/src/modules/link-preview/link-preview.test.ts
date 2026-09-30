@@ -6,7 +6,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { readHtmlMeta } from "@discord-clone/shared";
+import { readHtmlMeta } from "@morticord/shared";
 import { registerErrorHandler } from "../../errors.js";
 import { authGuardPlugin } from "../../plugins/auth-guard.js";
 import { buildTestConfig } from "../../../test/helpers.js";
@@ -16,7 +16,7 @@ import {
   createLinkPreviewFetcher,
   LinkPreviewError,
   MAX_HTML_BYTES,
-} from "@discord-clone/link-preview-fetch";
+} from "@morticord/link-preview-fetch";
 import { PREVIEWS_PER_MINUTE, PreviewCache, registerLinkPreviewRoutes } from "./routes.js";
 
 const PNG = Buffer.from(

@@ -17,7 +17,7 @@ import {
   voiceStatePayloadSchema,
   type DispatchEventName,
   type ReadyPayload,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { AppConfig } from "../../config.js";
 import { AppError } from "../../errors.js";

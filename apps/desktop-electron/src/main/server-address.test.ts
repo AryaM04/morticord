@@ -39,7 +39,7 @@ describe("normalizeServerAddress", () => {
 });
 
 describe("checkServer", () => {
-  const APP_ORIGIN = "app://discord-clone";
+  const APP_ORIGIN = "app://morticord";
   let server: Server;
   let base: string;
   const seenOrigins: Array<string | undefined> = [];
@@ -75,7 +75,7 @@ describe("checkServer", () => {
   it("tells the user to add the app origin when CORS does not allow it", async () => {
     mode = "deny";
     await expect(checkServer(base, APP_ORIGIN)).rejects.toThrow(
-      "The server does not allow this app. Add app://discord-clone to CORS_ALLOWED_ORIGINS in the .env file of the server.",
+      "The server does not allow this app. Add app://morticord to CORS_ALLOWED_ORIGINS in the .env file of the server.",
     );
   });
 

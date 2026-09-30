@@ -64,7 +64,7 @@ function messageRow(page: Page, text: string) {
 }
 
 function database() {
-  const user = process.env.POSTGRES_USER ?? "discord_clone";
+  const user = process.env.POSTGRES_USER ?? "morticord";
   const password = encodeURIComponent(process.env.POSTGRES_PASSWORD ?? "");
   const host = process.env.POSTGRES_HOST ?? "localhost";
   const port = process.env.POSTGRES_PORT ?? "5432";

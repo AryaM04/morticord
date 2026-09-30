@@ -3,11 +3,11 @@
 
 /** The origin of the web build in the app window. The server must list it in CORS_ALLOWED_ORIGINS. */
 export const APP_SCHEME = "app";
-export const APP_HOST = "discord-clone";
+export const APP_HOST = "morticord";
 export const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
 
 /** The URL scheme of deep links. It must match DESKTOP_URL_SCHEME on the server. */
-export const DEEP_LINK_SCHEME = "discordclone";
+export const DEEP_LINK_SCHEME = "morticord";
 
 /** The calls from the app window to the main process (ipcRenderer.invoke). */
 export const CALLS = [

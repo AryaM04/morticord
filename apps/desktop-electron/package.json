@@ -1,22 +1,22 @@
 {
-  "name": "@discord-clone/desktop-electron",
-  "productName": "Discord Clone",
-  "desktopName": "discord-clone.desktop",
+  "name": "@morticord/desktop-electron",
+  "productName": "Morticord",
+  "desktopName": "morticord.desktop",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "The Linux desktop app of Discord Clone.",
+  "description": "The Linux desktop app of Morticord.",
   "author": {
     "name": "Arya Mortazavi",
     "email": "arya.mortazavi2004@gmail.com"
   },
-  "homepage": "https://github.com/AryaM04/discord-clone",
+  "homepage": "https://github.com/AryaM04/morticord",
   "license": "UNLICENSED",
   "main": "dist/main.cjs",
   "scripts": {
     "build": "node build.mjs",
-    "start": "pnpm --filter @discord-clone/web build && node build.mjs && electron .",
-    "package": "pnpm --filter @discord-clone/web build && node build.mjs && electron-builder --linux",
+    "start": "pnpm --filter @morticord/web build && node build.mjs && electron .",
+    "package": "pnpm --filter @morticord/web build && node build.mjs && electron-builder --linux",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run"
@@ -25,8 +25,8 @@
     "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
-    "@discord-clone/link-preview-fetch": "workspace:*",
-    "@discord-clone/shared": "workspace:*",
+    "@morticord/link-preview-fetch": "workspace:*",
+    "@morticord/shared": "workspace:*",
     "@types/node": "^22.10.1",
     "electron": "^44.5.0",
     "electron-builder": "^26.15.3",

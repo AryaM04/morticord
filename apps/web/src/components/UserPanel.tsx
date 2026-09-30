@@ -3,7 +3,7 @@
 // incoming DM calls show above it, so they show on every page.
 import { moveMenuFocus } from "../lib/menu-keys.js";
 import { useEffect, useRef, useState } from "react";
-import type { PresenceStatus } from "@discord-clone/shared";
+import type { PresenceStatus } from "@morticord/shared";
 import { useStore } from "zustand";
 import { Avatar } from "./Avatar.js";
 import { SettingsDialog } from "./SettingsDialog.js";

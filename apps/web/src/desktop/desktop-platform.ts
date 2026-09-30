@@ -17,8 +17,8 @@ import {
   countUnreadMessages,
   type NotifyOptions,
   type Platform,
-} from "@discord-clone/client-core";
-import type { DesktopBridge, DesktopInit } from "@discord-clone/shared";
+} from "@morticord/client-core";
+import type { DesktopBridge, DesktopInit } from "@morticord/shared";
 import { installDesktopPlatform, type DesktopFeatures } from "../lib/platform.js";
 import { setServerOrigin } from "../lib/server-url.js";
 import { messagesStore } from "../lib/messages.js";
@@ -101,8 +101,8 @@ function makeFeatures(init: DesktopInit): DesktopFeatures {
 }
 
 /**
- * Open a deep link: "discordclone://invite/<code>", "discordclone://auth/callback#code=<code>"
- * or "discordclone://notification/<id>".
+ * Open a deep link: "morticord://invite/<code>", "morticord://auth/callback#code=<code>"
+ * or "morticord://notification/<id>".
  */
 function openDeepLink(link: string): void {
   let url: URL;
@@ -111,7 +111,7 @@ function openDeepLink(link: string): void {
   } catch {
     return;
   }
-  // In "discordclone://invite/abc", the host is "invite" and the path is "/abc".
+  // In "morticord://invite/abc", the host is "invite" and the path is "/abc".
   const parts = `${url.host}${url.pathname}`.split("/").filter((part) => part.length > 0);
   if (parts[0] === "invite" && parts.length === 2 && INVITE_CODE.test(parts[1]!)) {
     navigate(`/invite/${parts[1]}`);

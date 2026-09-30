@@ -8,7 +8,7 @@ import {
   Permission,
   type GuildMemberJson,
   type RoleJson,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import {
   addMemberRole,
   applyVoiceModeration,
@@ -21,7 +21,7 @@ import {
   sendFriendRequest,
   updateMember,
   type SelfContext,
-} from "@discord-clone/client-core";
+} from "@morticord/client-core";
 import { session } from "../lib/session.js";
 import { describeError } from "../lib/errors.js";
 import { realtimeStore } from "../lib/realtime.js";

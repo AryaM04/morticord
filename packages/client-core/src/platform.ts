@@ -36,7 +36,7 @@ export interface Platform {
   fetchLinkPreview?: FetchLinkPreview;
 }
 
-const DB_NAME = "discord-clone-secure-store";
+const DB_NAME = "morticord-secure-store";
 const DB_VERSION = 1;
 const STORE_NAME = "kv";
 

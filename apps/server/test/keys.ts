@@ -7,7 +7,7 @@ import {
   masterKeySignedText,
   oneTimeKeySignedText,
   type DeviceKeys,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import { apiFor, type TestServer, type TestUser } from "./social.js";
 
 /** Unpadded standard base64, the vodozemac form. */

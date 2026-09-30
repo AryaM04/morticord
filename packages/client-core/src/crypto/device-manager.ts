@@ -9,7 +9,7 @@ import {
   oneTimeKeySignedText,
   type UploadKeysRequest,
   type UploadKeysResponse,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import type { AccountHolder } from "./account.js";
 import type { DeviceList } from "./device-list.js";
 import type { CryptoStore } from "./store.js";

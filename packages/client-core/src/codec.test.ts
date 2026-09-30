@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { encodeBase64Url, encodePlainPayload, type EventJson } from "@discord-clone/shared";
+import { encodeBase64Url, encodePlainPayload, type EventJson } from "@morticord/shared";
 import { decodePlainEvent } from "./codec.js";
 
 function baseEvent(overrides: Partial<EventJson> = {}): EventJson {

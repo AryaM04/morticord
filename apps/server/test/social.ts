@@ -3,7 +3,7 @@
 // call the API, and read gateway dispatches.
 import type { FastifyInstance } from "fastify";
 import WebSocket from "ws";
-import { encodeBase64Url, GatewayOpcode, type GatewayEnvelope } from "@discord-clone/shared";
+import { encodeBase64Url, GatewayOpcode, type GatewayEnvelope } from "@morticord/shared";
 import { buildApp } from "../src/app.js";
 import { createFakeMailer } from "../src/mailer.js";
 import { GatewayService } from "../src/modules/gateway/service.js";

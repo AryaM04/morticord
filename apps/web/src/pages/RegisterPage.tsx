@@ -1,7 +1,7 @@
 // The registration page.
 import { useState, type FormEvent } from "react";
 import { Link, useLocation } from "wouter";
-import { registerRequestSchema } from "@discord-clone/shared";
+import { registerRequestSchema } from "@morticord/shared";
 import { AuthLayout } from "../components/AuthLayout.js";
 import { FormField } from "../components/FormField.js";
 import { OAuthButtons } from "../components/OAuthButtons.js";

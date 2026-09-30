@@ -1,5 +1,5 @@
 {
-  "name": "@discord-clone/link-preview-fetch",
+  "name": "@morticord/link-preview-fetch",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@discord-clone/shared": "workspace:*"
+    "@morticord/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

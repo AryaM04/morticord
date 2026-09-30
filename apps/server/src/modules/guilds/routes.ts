@@ -20,7 +20,7 @@ import {
   updateRoleRequestSchema,
   voiceModerationRequestSchema,
   channelOrderRequestSchema,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import type { AppDeps } from "../../app.js";
 import { guilds } from "../../db/schema.js";
 import { AppError } from "../../errors.js";

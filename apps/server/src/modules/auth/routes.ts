@@ -11,7 +11,7 @@ import {
   resetPasswordRequestSchema,
   verifyEmailRequestSchema,
   type OAuthProvider,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import { generateCodeVerifier, generateState, type GitHub, type Google } from "arctic";
 import type { AppDeps } from "../../app.js";
 import { AppError } from "../../errors.js";

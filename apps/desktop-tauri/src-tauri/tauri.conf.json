@@ -1,19 +1,19 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Discord Clone",
+  "productName": "Morticord",
   "version": "0.1.0",
-  "identifier": "com.discordclone.desktop",
+  "identifier": "com.morticord.desktop",
   "build": {
     "devUrl": "http://localhost:5173",
     "frontendDist": "../../web/dist",
-    "beforeDevCommand": "pnpm --filter @discord-clone/web dev",
-    "beforeBuildCommand": "pnpm --filter @discord-clone/web build"
+    "beforeDevCommand": "pnpm --filter @morticord/web dev",
+    "beforeBuildCommand": "pnpm --filter @morticord/web build"
   },
   "app": {
     "windows": [
       {
         "label": "main",
-        "title": "Discord Clone",
+        "title": "Morticord",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
@@ -58,14 +58,14 @@
     "deep-link": {
       "desktop": {
         "schemes": [
-          "discordclone"
+          "morticord"
         ]
       }
     },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ1RTQ2Qjg1NTgwMDZGQjIKUldTeWJ3QlloV3ZrMWJvdlZsQlpORG9jRXVqbGtPYy8xKyszNi8wcmpyckk5TDdnTzVZMSsya2UK",
       "endpoints": [
-        "https://github.com/AryaM04/discord-clone/releases/latest/download/latest.json"
+        "https://github.com/AryaM04/morticord/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

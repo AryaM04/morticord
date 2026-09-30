@@ -8,8 +8,8 @@ import {
   blockUser,
   removeRelationship,
   sendFriendRequest,
-} from "@discord-clone/client-core";
-import { usernameSchema, type RelationshipJson, type User } from "@discord-clone/shared";
+} from "@morticord/client-core";
+import { usernameSchema, type RelationshipJson, type User } from "@morticord/shared";
 import { Avatar } from "./Avatar.js";
 import { session } from "../lib/session.js";
 import { realtimeStore } from "../lib/realtime.js";

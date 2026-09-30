@@ -7,15 +7,15 @@ import {
   type ChannelJson,
   type PermissionName,
   type PermissionOverwriteJson,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import {
   buildSelfContext,
   canManageRole,
   deleteChannelOverwrite,
   putChannelOverwrite,
   selfChannelPermissions,
-} from "@discord-clone/client-core";
-import type { RealtimeState } from "@discord-clone/client-core";
+} from "@morticord/client-core";
+import type { RealtimeState } from "@morticord/client-core";
 import { session } from "../lib/session.js";
 import { describeError } from "../lib/errors.js";
 import { realtimeStore } from "../lib/realtime.js";

@@ -14,8 +14,8 @@ import {
   type ToDeviceDispatchPayload,
   type UploadKeysRequest,
   type UploadKeysResponse,
-} from "@discord-clone/shared";
-import { initSync, verify } from "@discord-clone/crypto-wasm";
+} from "@morticord/shared";
+import { initSync, verify } from "@morticord/crypto-wasm";
 import type { SecureStore } from "../../platform.js";
 import { startCrypto, type CryptoHandle, type CryptoTransport, type StartCryptoOptions } from "../index.js";
 
@@ -32,7 +32,7 @@ function codeError(code: string, status = 400): Error {
 /** Load the WASM file from disk, as the browser loads it from a URL. */
 export function initWasmForTests(): void {
   const require = createRequire(import.meta.url);
-  initSync({ module: readFileSync(require.resolve("@discord-clone/crypto-wasm/pkg/crypto_wasm_bg.wasm")) });
+  initSync({ module: readFileSync(require.resolve("@morticord/crypto-wasm/pkg/crypto_wasm_bg.wasm")) });
 }
 
 interface FakeDevice {

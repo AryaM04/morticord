@@ -14,7 +14,7 @@ import type {
   User,
   VisiblePresenceStatus,
   VoiceStateJson,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import type { GatewayDispatch } from "./gateway.js";
 
 export interface RealtimeState {

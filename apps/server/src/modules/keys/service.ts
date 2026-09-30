@@ -17,7 +17,7 @@ import {
   type UploadKeysRequest,
   type UploadSignatureRequest,
   type UploadKeysResponse,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import type { DbClient } from "../../db/client.js";
 import { crossSigningKeys, devices, fallbackKeys, oneTimeKeys, toDeviceQueue, users } from "../../db/schema.js";
 import { AppError } from "../../errors.js";

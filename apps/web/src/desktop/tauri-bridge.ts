@@ -11,7 +11,7 @@ import {
   type DesktopInit,
   type DesktopLinkPreview,
   type DesktopUpdateInfo,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 
 /** One time limit for the page and its image, the same as the server route. */
 const LINK_PREVIEW_TIMEOUT_MS = 3000;

@@ -8,8 +8,8 @@ import {
   isInlineImage,
   thumbnailSize,
   type FileSecrets,
-} from "@discord-clone/client-core";
-import type { Attachment, AttachmentThumbnail } from "@discord-clone/shared";
+} from "@morticord/client-core";
+import type { Attachment, AttachmentThumbnail } from "@morticord/shared";
 import { session } from "./session.js";
 import { apiBaseUrl } from "./server-url.js";
 

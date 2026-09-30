@@ -144,7 +144,7 @@ provider page must open in the system browser. The flow has two changes:
    value `desktop`.
 2. After the callback, the server sends the browser to
    `<DESKTOP_URL_SCHEME>://auth/callback#code=...` (default scheme:
-   `discordclone`). The operating system gives this link to the desktop
+   `morticord`). The operating system gives this link to the desktop
    app, and the app exchanges the code as the web app does.
 
 An error goes to the same link, with `#error=<code>`. A sign-in from the

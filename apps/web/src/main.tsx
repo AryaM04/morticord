@@ -1,8 +1,8 @@
 // Web app entry point.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { VoiceDebugPeerStats } from "@discord-clone/client-core/voice";
-import type { DesktopBridge } from "@discord-clone/shared";
+import type { VoiceDebugPeerStats } from "@morticord/client-core/voice";
+import type { DesktopBridge } from "@morticord/shared";
 import { App } from "./App.js";
 import { cryptoDebug, type CryptoDebug } from "./lib/crypto.js";
 import { getVoiceDebugStats, isLocalVoiceTrackEnabled } from "./lib/voice.js";

@@ -2,7 +2,7 @@
 // app. `main.tsx` checks for the desktop app before the app renders, and
 // loads its platform with a dynamic import, so the web bundle does not
 // grow. Every module reads the platform through this file.
-import { webPlatform, type Platform } from "@discord-clone/client-core";
+import { webPlatform, type Platform } from "@morticord/client-core";
 
 /** Services that only the desktop app has. */
 export interface DesktopFeatures {

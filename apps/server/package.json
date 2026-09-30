@@ -1,5 +1,5 @@
 {
-  "name": "@discord-clone/server",
+  "name": "@morticord/server",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -16,8 +16,8 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
-    "@discord-clone/link-preview-fetch": "workspace:*",
-    "@discord-clone/shared": "workspace:*",
+    "@morticord/link-preview-fetch": "workspace:*",
+    "@morticord/shared": "workspace:*",
     "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^11.3.0",
     "@fastify/rate-limit": "^11.2.0",

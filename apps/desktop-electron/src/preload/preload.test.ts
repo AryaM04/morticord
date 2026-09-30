@@ -2,7 +2,7 @@
 // functions, sends each call on its own channel, turns a failed result
 // into an Error, and checks the event names.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { DesktopBridge } from "@discord-clone/shared";
+import type { DesktopBridge } from "@morticord/shared";
 
 const exposed = new Map<string, unknown>();
 const invoke = vi.fn();

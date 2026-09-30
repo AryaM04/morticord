@@ -10,7 +10,7 @@ import {
   type OverwriteInput,
   type RoleInput,
   type RoleJson,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import type { RealtimeState } from "./realtime-store.js";
 
 function memberContext(

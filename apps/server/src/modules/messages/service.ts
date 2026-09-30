@@ -14,7 +14,7 @@ import {
   type ChannelMembersResponse,
   type EventCodec,
   type EventRelType,
-} from "@discord-clone/shared";
+} from "@morticord/shared";
 import { isUniqueViolation, type DbClient } from "../../db/client.js";
 import {
   channelRecipients,

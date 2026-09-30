@@ -2,7 +2,7 @@
 // return them there. localStorage can throw (private mode, a full quota),
 // so every call is wrapped.
 
-const KEY = "discord-clone:last-location";
+const KEY = "morticord:last-location";
 
 export function rememberLastLocation(guildId: string, channelId: string): void {
   try {
@@ -35,7 +35,7 @@ export function readLastLocation(): { guildId: string; channelId: string } | nul
   }
 }
 
-const COLLAPSED_KEY_PREFIX = "discord-clone:collapsed-categories:";
+const COLLAPSED_KEY_PREFIX = "morticord:collapsed-categories:";
 
 export function readCollapsedCategories(guildId: string): Set<string> {
   try {
