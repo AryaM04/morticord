@@ -288,9 +288,9 @@ All operations on the sessions of one peer device run in one queue. The
 account has its own queue. A task that needs both takes the peer queue
 first. Thus two tasks never use the same session at the same time.
 
-Only one browser tab of a device runs the crypto layer. It holds the Web
-Lock `crypto:<userId>:<deviceId>`. A different tab waits for the lock and
-shows a banner. See section 13.
+Only one context of a device runs the crypto layer: the crypto
+SharedWorker, or one tab when the browser has no SharedWorker. It holds
+the Web Lock `crypto:<userId>:<deviceId>`. See section 13.
 
 ## 6. To-device messages
 
@@ -331,6 +331,9 @@ The server sends `TO_DEVICE` dispatches:
 - The client drops a message with an id that it already processed. It
   sends one acknowledgement when its local queue is empty, at most one
   time in 2 seconds.
+- Each tab of a device has its own gateway session. The crypto worker
+  drops the copies, and only one tab sends the acknowledgements (see
+  section 13).
 
 ### Envelope
 
@@ -828,56 +831,124 @@ Deviations and why:
 
 ## 13. More than one tab
 
-### Today (M6 pass 4b): the lock and a banner
-
 The Olm and Megolm state of a device must have one owner. Two owners
 would use the same one-time keys and ratchets, and they would break
-sessions. Thus one tab holds the Web Lock `crypto:<userId>:<deviceId>`
+sessions. The owner holds the Web Lock `crypto:<userId>:<deviceId>`.
+
+### The crypto layer in a SharedWorker (M9)
+
+- **Owner.** The browser runs one `SharedWorker` for each device. Its
+  name is `crypto:<userId>:<deviceId>`
+  (`apps/web/src/lib/crypto-worker.ts`). It holds the device lock while
+  it runs `startCrypto`. It loads the WASM file, opens the crypto store,
+  tracks the device lists, keeps the one-time keys, handles the to-device
+  messages, shares and asks for Megolm keys, uploads the key backup, and
+  holds the settings key. It also writes the local search index, so two
+  tabs never write the index at the same time.
+- **Lock.** The worker gets the device lock before it starts the crypto
+  layer. A worker of a different build has a different script URL, thus
+  it is a different worker. It waits for the lock, and its tabs show the
+  banner "Encryption runs in another tab of this app. Use that tab, or
+  close it." A tab of an old build without the worker holds the same
+  lock. Thus two owners never write the state at the same time.
+- **RPC.** Each tab gets a `MessagePort`
+  (`packages/client-core/src/crypto/client.ts`, `host.ts`, `rpc.ts`).
+  The tab sends `{ id, method, args }`, and the worker sends
+  `{ id, value }` or `{ id, error }`. An error keeps its name, message,
+  `code` and `status`, so an `ApiError` stays an `ApiError`. The tab
+  loads only the client (about 2 kB gzip). It never loads the WASM file.
+  - `security.setUpBackup` gives a token. The worker keeps the `create`
+    function, and `security.createBackup` uses the token.
+  - `security.restoreBackup` sends `progress` messages with the id of the
+    call.
+  - The ciphertext of `codec.encode` moves to the tab as a transferred
+    `ArrayBuffer`. Attachments do not cross the port: the tab encrypts
+    each file with its own AES-GCM key (see `attachments.md`).
+- **Events.** The worker sends `keys`, `settingsKey`, `security`,
+  `verification` (with the new list) and `toDevice` events to every tab.
+  The worker does not send the to-device types that it uses itself
+  (`megolm.*`, `settings.*`, `verification.*`), so room keys stay in the
+  worker. Each tab keeps its own listeners.
+- **Network.** The worker has no session tokens and no gateway. It sends
+  each network call of `CryptoTransport` to one tab, the **ack tab**. The
+  tab makes the call with its API client or its gateway, and sends the
+  result back.
+- **Presence.** Each tab sends the list of offline users. The worker uses
+  the last list for the history rule of section 8.
+
+### To-device delivery with more than one tab
+
+Each tab has its own gateway session. The server sends the queue to each
+session of the device, with a window of 100 messages for each session
+(section 6). An ack of one session deletes the rows for the device, but
+it frees only the window of that session.
+
+1. Every tab forwards all of its dispatches to the worker.
+2. The worker drops a `TO_DEVICE` message with a queue id that is lower
+   than or equal to the highest id in its inbox or processed. Each
+   session sends the rows in id order, and each port keeps the order.
+   Thus each id is processed one time.
+3. Only the ack tab sends `TO_DEVICE_ACK`, the live signals
+   (`TO_DEVICE_SEND`) and the network calls. Thus there is one ack
+   stream.
+4. The tab that sent the last `READY` or `RESUMED` becomes the ack tab.
+   The crypto layer then sends the resync ack through its session.
+5. The window of a different session fills and stops. This is not a
+   problem: its messages also come through the ack tab.
+6. When the ack tab closes, the worker selects a different tab and sends
+   `TO_DEVICE_ACK { upToId, resync: true }` through it. The server
+   deletes the processed rows, clears the window of that session, and
+   sends every row after `upToId` again. Thus no message is lost.
+7. Dispatches that arrive while the crypto layer starts stay in a buffer
+   (at most 1000) and go to the layer when it is ready.
+
+### Lifetime
+
+- A tab holds the lock `crypto-tab:<random>` while it lives, and sends
+  its name in `hello`. The worker asks for that lock. When it gets the
+  lock, the tab is gone: the worker drops the port, fails the network
+  calls that wait for that tab (`NETWORK_ERROR`), forgets its backup
+  tokens, and does not send the results of its calls.
+- The worker holds the lock `crypto-worker:<random>` while it lives, and
+  sends its name in `welcome`. A tab asks for that lock. When the tab
+  gets it, the worker stopped (for example, it crashed). The tab fails
+  its open calls with `CryptoWorkerLostError`, starts a new worker and
+  sends `hello` again. The new worker sends all events to the tab again,
+  and the tab keeps its listeners.
+- When no tab is left, or the last tab signs out, the worker stops the
+  crypto layer, closes the store and the index, and releases the device
+  lock.
+
+### Fallback: the lock and a banner in the page
+
+A browser without `SharedWorker` runs the crypto layer in the page
 (`apps/web/src/lib/crypto.ts`):
 
-1. A tab asks for the lock with `ifAvailable`. When it gets the lock, it
-   starts the crypto layer.
-2. When another tab holds the lock, this tab shows the banner "Encryption
-   runs in another tab of this app. Use that tab, or close it." Then it
-   waits for the lock.
-3. When the first tab closes, the browser gives the lock to the waiting
-   tab. The banner goes, and the crypto layer starts there.
+1. A tab asks for the device lock with `ifAvailable`. When it gets the
+   lock, it starts the crypto layer.
+2. When a different context holds the lock, this tab shows the banner.
+   Then it waits for the lock.
+3. When the other context stops, the browser gives the lock to the
+   waiting tab. The banner goes, and the crypto layer starts there.
 
 A waiting tab can read the channel list, but it cannot encrypt or
-decrypt. Its local search index waits too (see `search.md`).
+decrypt.
 
-### Next: the crypto layer in a SharedWorker
+The desktop apps also use this fallback. Their webviews (WebView2,
+WKWebView, Electron) have `SharedWorker`. But the OS key store, which
+keeps the pickle key, is behind the bridge of the page, and a worker
+cannot reach the bridge. Also, a desktop app has one window.
 
-This design is not built yet. It is too large to finish correctly in
-pass 4b, because each part of `CryptoHandle` crosses a thread boundary.
+### Deviations from the first draft, and why
 
-- **Owner.** One `SharedWorker` for each origin runs `startCrypto` for
-  the signed-in user and device. It loads the WASM file and opens the
-  crypto store. It keeps the Web Lock, so a browser without SharedWorker
-  (the fallback above) and a worker never run at the same time.
-- **RPC.** Each tab gets a `MessagePort`. A small typed RPC sends
-  `{ id, method, args }` and gets `{ id, result }` or `{ id, error }`. The
-  methods are the calls of `CryptoHandle`: `codec.encode`,
-  `codec.decode`, `encryptToDevices`, `encryptToUsers`, `settings.open`,
-  `settings.seal`, the `security` and `verification` calls, and
-  `localIndexKeys` (the worker does the index crypto, since a `CryptoKey`
-  can go to a tab only by structured clone). Bytes go as transferable
-  `ArrayBuffer`s.
-- **Events.** The worker sends `toDevice`, `keys`, `security`,
-  `verification` and `masterKeyChanged` events to every port. A tab
-  keeps its own listeners and forwards them.
-- **Gateway.** Every tab keeps its own gateway connection. The server
-  sends `TO_DEVICE` to each session of the device, so each tab forwards
-  its dispatches with `handleDispatch`. The worker handles each to-device
-  id once (the store keeps the handled ids) and sends the ack once,
-  through the port of any live tab. When the tab of that port closes, the
-  next tab sends the ack.
-- **Lifetime.** A tab sends `bye` on `pagehide`. When no port is left,
-  the worker stops the crypto layer and closes the store. Sign-out in
-  one tab stops the worker for all tabs.
-- **Tests.** The RPC gets a unit test with a `MessageChannel` pair. The
-  e2e test opens two tabs of one device and sends from both.
-
+- The tabs do not send `bye` on `pagehide`. A lock for each tab shows
+  that a tab is gone, also after a crash, and a page with a lock does not
+  go into the back-forward cache.
+- The worker writes the search index. It does not give the index keys to
+  the tabs.
+- The worker does not send each ack through "any live tab". It sends
+  them through one ack tab, which changes only after a new gateway
+  session or a closed tab. Each change sends a resync ack.
 
 - WASM wrapper: `packages/crypto-wasm/src/lib.rs`, `backup.rs`, `sas.rs`.
 - Server: `apps/server/src/modules/keys`, `apps/server/src/modules/to-device`,
