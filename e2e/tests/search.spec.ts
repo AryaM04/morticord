@@ -95,3 +95,37 @@ test("search finds a message, the filters work, and a click shows the message", 
   await expect(row).toContainText("Crème brûlée");
   await expect(row).toBeInViewport();
 });
+
+// Regression: the page around the message fits on a tall screen, so the list
+// is at the bottom. The list then loads the next page. It must not follow the
+// new rows to the bottom: the message must stay on the screen.
+test("a jump keeps the message on the screen when the next page loads", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  const user = uniqueUser("B");
+  const a = await api(request, "/auth/register", undefined, user);
+  const guild = await api(request, "/guilds", a.accessToken, { name: "Jump Guild" });
+  const general = guild.channels.find((entry: { type: string }) => entry.type === "text");
+  const random = await api(request, `/guilds/${guild.id}/channels`, a.accessToken, { name: "random", type: "text" });
+
+  await page.goto(`${WEB_ORIGIN}/login`);
+  await page.getByLabel("Email").fill(user.email);
+  await page.getByLabel("Password").fill(user.password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/app(\/|$)/);
+  await waitForCrypto(page);
+  await page.goto(`${WEB_ORIGIN}/app/${guild.id}/${random.id}`);
+  const fillers = Array.from({ length: 55 }, (_, i) => `filler number ${i}`);
+  await seedMessages(page, general.id, ["The pancake recipe is here", ...fillers]);
+
+  const panel = await search(page, "pancake");
+  const result = panel.locator("[data-search-result]");
+  await expect(result).toHaveCount(1);
+  const eventId = await result.getAttribute("data-search-result");
+  await result.click();
+  // The next page makes the list longer than the screen, so the list is not at the bottom.
+  await expect(page.getByRole("button", { name: "Jump to present" })).toBeVisible();
+  const row = page.locator(`[data-message-id="${eventId}"]`);
+  await expect(row).toBeVisible();
+  await expect(row).toBeInViewport();
+});

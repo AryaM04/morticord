@@ -66,6 +66,17 @@ export function MessageList({
   const [firstItemIndex, setFirstItemIndex] = useState(FIRST_ITEM_INDEX_START);
   const oldestEventIdRef = useRef<string | null>(null);
   const rowCountRef = useRef(0);
+  // Whether the window held the newest message before this render. A live
+  // message comes only into a window that holds the newest message. A newer
+  // page of history comes only into a window that does not. Virtuoso reads
+  // this value when new rows come, before the effect below updates it.
+  // After a jump, the page around the message can fit on the screen. Then
+  // the list is "at bottom", and a follow of the next page scrolled the
+  // message out of view, or left the list hidden.
+  const wasAtLatestRef = useRef(true);
+  useEffect(() => {
+    wasAtLatestRef.current = channel?.atLatest ?? true;
+  });
 
   function highlightFor2s(id: string): void {
     setHighlightId(id);
@@ -223,7 +234,8 @@ export function MessageList({
           jumpView && jumpIndex >= 0 ? { index: jumpIndex, align: "center" } : Math.max(0, rows.length - 1)
         }
         firstItemIndex={firstItemIndex}
-        followOutput={atBottom ? "smooth" : false}
+        // Follow only live messages, not a newer page of history (see wasAtLatestRef).
+        followOutput={(isAtBottom) => (isAtBottom && wasAtLatestRef.current ? "smooth" : false)}
         atBottomStateChange={setAtBottom}
         startReached={() => void messagesStore.getState().loadOlder(channelId)}
         endReached={() => {
