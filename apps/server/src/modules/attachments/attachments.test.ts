@@ -3,14 +3,14 @@
 // the download rules. Real Postgres, real files and a real HTTP socket.
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFile, utimes, writeFile, readdir, mkdir } from "node:fs/promises";
+import { readFile, utimes, writeFile, readdir, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { Permission } from "@discord-clone/shared";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { buildApp } from "../../app.js";
 import { attachments, permissionOverwrites } from "../../db/schema.js";
 import { createFakeMailer } from "../../mailer.js";
@@ -176,42 +176,58 @@ describeWithDb("attachments", () => {
     // Warm up the route, so that the measure does not include the first load of code.
     await upload(alice, channelId, randomBytes(1024));
     // Collect garbage before each sample, so that the samples show live memory only.
+    // Take only two samples: a full collection stops the server of this process too.
+    // A sample on a timer during the upload made the upload many times slower.
     setFlagsFromString("--expose-gc");
     const gc = runInNewContext("gc") as () => void;
-    const used = () => {
+    const used = async () => {
+      gc();
+      await new Promise((resolve) => setImmediate(resolve));
       gc();
       const usage = process.memoryUsage();
       return usage.heapUsed + usage.arrayBuffers;
     };
-    const before = used();
-    let peak = before;
-    const timer = setInterval(() => {
-      peak = Math.max(peak, used());
-    }, 25);
+    const before = await used();
     // A different process sends the body, so that only the server side counts here.
+    // It sends the first half, then it stops until it gets a line on its stdin.
     const size = 20 * 1024 * 1024;
+    const half = size / 2;
     const script = `
       const size = ${size};
+      const half = ${half};
       let sent = 0;
       const chunk = new Uint8Array(65536).fill(7);
-      const body = new ReadableStream({ pull(c) { if (sent >= size) { c.close(); return; } sent += chunk.length; c.enqueue(chunk.slice()); } });
+      const resume = new Promise((resolve) => process.stdin.once("data", resolve));
+      const body = new ReadableStream({ async pull(c) {
+        if (sent === half) await resume;
+        if (sent >= size) { c.close(); process.stdin.destroy(); return; }
+        sent += chunk.length; c.enqueue(chunk.slice()); } });
       fetch(process.argv[1], { method: "POST", duplex: "half", body, headers: {
         authorization: "Bearer ${alice.token}", "content-type": "application/octet-stream", "content-length": String(size) } })
         .then(async (r) => { process.stdout.write(r.status + " " + (await r.text())); });
     `;
-    const output = await new Promise<string>((resolve, reject) => {
-      const child = spawn(process.execPath, ["-e", script, `${baseUrl}/api/v1/channels/${channelId}/attachments`]);
+    const child = spawn(process.execPath, ["-e", script, `${baseUrl}/api/v1/channels/${channelId}/attachments`]);
+    const output = new Promise<string>((resolve, reject) => {
       let text = "";
       child.stdout.on("data", (data: Buffer) => (text += data.toString()));
       child.on("error", reject);
       child.on("close", () => resolve(text));
     });
-    clearInterval(timer);
-    expect(output.startsWith("201")).toBe(true);
-    expect(JSON.parse(output.slice(4)).size).toBe(size);
-    // A buffered upload would add at least 20 MiB.
-    expect(peak - before).toBeLessThan(4 * 1024 * 1024);
-  }, 30_000);
+    // The server must write the first half to disk before the client sends the rest.
+    const dir = attachmentDir(dataDir);
+    const tempSize = async () => {
+      const names = (await readdir(dir)).filter((name) => name.endsWith(".tmp"));
+      return names.length === 1 ? (await stat(path.join(dir, names[0]!))).size : 0;
+    };
+    await vi.waitFor(async () => expect(await tempSize()).toBe(half), { timeout: 4_000, interval: 20 });
+    // A buffered upload would hold the first half (10 MiB) in memory now.
+    const during = await used();
+    child.stdin.end("continue\n");
+    const text = await output;
+    expect(text.startsWith("201")).toBe(true);
+    expect(JSON.parse(text.slice(4)).size).toBe(size);
+    expect(during - before).toBeLessThan(4 * 1024 * 1024);
+  });
 
   it("needs ATTACH_FILES and SEND_MESSAGES to upload, and READ_MESSAGE_HISTORY to download", async () => {
     const { owner, member, channelId } = await guildWithMember();
