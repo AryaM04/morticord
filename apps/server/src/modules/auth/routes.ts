@@ -16,6 +16,7 @@ import { generateCodeVerifier, generateState, type GitHub, type Google } from "a
 import type { AppDeps } from "../../app.js";
 import { AppError } from "../../errors.js";
 import { summarizeUserAgent } from "./device-name.js";
+import { createLoginFailureGuard } from "./login-guard.js";
 import { consumeOAuthCode, storeOAuthCode } from "./oauth-codes.js";
 import { createOAuthClients, completeOAuthLogin, fetchGitHubProfile, fetchGoogleProfile } from "./oauth.js";
 import {
@@ -33,6 +34,7 @@ import {
 
 const OAUTH_COOKIE_NAME = "oauth_flow";
 const OAUTH_COOKIE_TTL_SECONDS = 10 * 60;
+const LOGIN_FAILURE_WINDOW_MS = 15 * 60_000;
 
 /** The app that started the sign-in. It decides where the callback sends the browser. */
 type OAuthClientApp = "web" | "desktop";
@@ -59,6 +61,11 @@ export function oauthReturnUrl(
 export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): Promise<void> {
   const authDeps = { db: deps.db, config: deps.config, mailer: deps.mailer, gateway: deps.gateway };
   const oauthClients = createOAuthClients(deps.config);
+  const limits = deps.config.authRateLimit;
+  const loginGuard =
+    deps.rateLimit === false ? null : createLoginFailureGuard(limits.loginFailuresPerAccount, LOGIN_FAILURE_WINDOW_MS);
+  const emailLinkLimit = { rateLimit: { max: limits.emailLink, timeWindow: "1 minute" } };
+  const oauthLimit = { rateLimit: { max: limits.oauth, timeWindow: "1 minute" } };
 
   app.post(
     "/register",
@@ -75,8 +82,18 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
     { config: { rateLimit: { max: deps.config.authRateLimit.login, timeWindow: "1 minute" } } },
     async (request, reply) => {
       const input = loginRequestSchema.parse(request.body);
-      const result = await loginUser(authDeps, input, summarizeUserAgent(request.headers["user-agent"]));
-      return reply.status(200).send(result);
+      if (loginGuard?.isLocked(input.email)) {
+        throw new AppError(429, "RATE_LIMITED", "This account had too many failed sign-in attempts. Try again later.");
+      }
+      try {
+        const result = await loginUser(authDeps, input, summarizeUserAgent(request.headers["user-agent"]));
+        return reply.status(200).send(result);
+      } catch (error) {
+        if (error instanceof AppError && error.code === "INVALID_CREDENTIALS") {
+          loginGuard?.recordFailure(input.email);
+        }
+        throw error;
+      }
     },
   );
 
@@ -95,7 +112,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
     return reply.status(204).send();
   });
 
-  app.post("/verify-email", async (request, reply) => {
+  app.post("/verify-email", { config: emailLinkLimit }, async (request, reply) => {
     const input = verifyEmailRequestSchema.parse(request.body);
     await verifyEmail(authDeps, input.token);
     return reply.status(204).send();
@@ -123,7 +140,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
     },
   );
 
-  app.post("/reset-password", async (request, reply) => {
+  app.post("/reset-password", { config: emailLinkLimit }, async (request, reply) => {
     const input = resetPasswordRequestSchema.parse(request.body);
     await resetPassword(authDeps, input.token, input.password);
     return reply.status(204).send();
@@ -133,7 +150,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
     return reply.send({ providers: Object.keys(oauthClients) as OAuthProvider[] });
   });
 
-  app.get("/oauth/:provider/start", async (request, reply) => {
+  app.get("/oauth/:provider/start", { config: oauthLimit }, async (request, reply) => {
     const provider = oauthProviderSchema.parse((request.params as { provider: string }).provider);
     const client = oauthClients[provider];
     if (!client) {
@@ -166,7 +183,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
     return reply.redirect(url.toString(), 302);
   });
 
-  app.get("/oauth/:provider/callback", async (request, reply) => {
+  app.get("/oauth/:provider/callback", { config: oauthLimit }, async (request, reply) => {
     const provider = oauthProviderSchema.parse((request.params as { provider: string }).provider);
 
     // Read the signed cookie first: it tells which app started the sign-in.
@@ -232,7 +249,7 @@ export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): P
     }
   });
 
-  app.post("/oauth/exchange", async (request, reply) => {
+  app.post("/oauth/exchange", { config: oauthLimit }, async (request, reply) => {
     const input = oauthExchangeRequestSchema.parse(request.body);
     const result = consumeOAuthCode(input.code);
     if (!result) {

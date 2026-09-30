@@ -24,7 +24,8 @@ RUN apk add --no-cache libstdc++
 COPY --from=node:24-alpine /usr/local/bin/node /usr/local/bin/node
 ENV NODE_ENV=production
 ENV DATA_DIR=/data
-RUN addgroup -S app && adduser -S app -G app && mkdir /data && chown app:app /data
+# The IDs are fixed, because the backup service uses the same user to read and write /data.
+RUN addgroup -S -g 101 app && adduser -S -u 100 -G app app && mkdir /data && chown app:app /data
 WORKDIR /app
 COPY --from=build /out/server/node_modules ./node_modules
 COPY --from=build /repo/apps/server/dist ./dist

@@ -3,7 +3,7 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import { hash, verify } from "@node-rs/argon2";
 import type { AuthResult, RefreshResult } from "@discord-clone/shared";
 import type { AppConfig } from "../../config.js";
-import type { DbClient } from "../../db/client.js";
+import { isUniqueViolation, type DbClient } from "../../db/client.js";
 import { devices, emailTokens, refreshTokens, users } from "../../db/schema.js";
 import { GatewayCloseCode } from "@discord-clone/shared";
 import { AppError } from "../../errors.js";
@@ -50,11 +50,6 @@ async function retireDeviceKeys(deps: AuthDeps, deviceIds: string[]): Promise<vo
   for (const userId of userIds) {
     await announceDeviceListChange(deps, userId);
   }
-}
-
-function isUniqueViolation(error: unknown, constraintPart: string): boolean {
-  const pgError = error as { code?: string; constraint_name?: string };
-  return pgError?.code === "23505" && (pgError.constraint_name?.includes(constraintPart) ?? false);
 }
 
 async function findUserById(db: DbClient, id: bigint): Promise<UserRow | undefined> {
@@ -462,6 +457,14 @@ export async function resetPassword(deps: AuthDeps, token: string, newPassword: 
   const userId = row.userId;
   const passwordHash = await hash(newPassword);
   await db.update(users).set({ passwordHash }).where(eq(users.id, userId));
+  // Other reset links of this user stop working too. An old link in the
+  // mailbox must not change the new password.
+  await db
+    .update(emailTokens)
+    .set({ usedAt: now })
+    .where(
+      and(eq(emailTokens.userId, userId), eq(emailTokens.purpose, "reset_password"), isNull(emailTokens.usedAt)),
+    );
 
   // A password reset ends every existing session, in case the old
   // password, and any refresh token taken with it, is compromised.

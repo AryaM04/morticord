@@ -8,22 +8,45 @@
 #                      Replace the database (and the data) with a backup.
 #
 # Variables: PGHOST, PGUSER, PGPASSWORD, PGDATABASE, BACKUP_KEEP_DAYS,
-# BACKUP_HOUR (the hour of the day in UTC, 0 to 23).
+# BACKUP_HOUR (the hour of the day in UTC, 0 to 23), BACKUP_AGE_RECIPIENT
+# (optional: an age public key; the files are then encrypted to this key).
 
 set -eu
+set -o pipefail
 
 BACKUP_DIR=/backup
 DATA_DIR=/data
 
+# Encrypt standard input to BACKUP_AGE_RECIPIENT, or copy it without change.
+encrypt() {
+  if [ -n "${BACKUP_AGE_RECIPIENT:-}" ]; then
+    age --encrypt --recipient "$BACKUP_AGE_RECIPIENT"
+  else
+    cat
+  fi
+}
+
 backup_once() {
+  if [ ! -w "$BACKUP_DIR" ]; then
+    echo "The backup folder is not writable for user $(id -u). On the host, run: sudo chown $(id -u):$(id -g) <BACKUP_DIR>" >&2
+    return 1
+  fi
   stamp=$(date -u +%Y%m%d-%H%M%S)
+  suffix=""
+  if [ -n "${BACKUP_AGE_RECIPIENT:-}" ]; then
+    suffix=".age"
+  fi
   echo "Backup $stamp starts."
   # Write to a name that the prune step ignores, then rename. A failed run leaves no half file.
-  pg_dump --format=custom --compress=6 --file="$BACKUP_DIR/.db-$stamp.tmp"
-  tar -czf "$BACKUP_DIR/.data-$stamp.tmp" -C "$DATA_DIR" .
-  mv "$BACKUP_DIR/.db-$stamp.tmp" "$BACKUP_DIR/db-$stamp.dump"
-  mv "$BACKUP_DIR/.data-$stamp.tmp" "$BACKUP_DIR/data-$stamp.tar.gz"
-  find "$BACKUP_DIR" -maxdepth 1 -type f \( -name 'db-*.dump' -o -name 'data-*.tar.gz' \) \
+  # "set -e" does not apply in "backup_once || ...", so each step checks its own result.
+  if ! pg_dump --format=custom --compress=6 | encrypt > "$BACKUP_DIR/.db-$stamp.tmp" \
+    || ! tar -czf - -C "$DATA_DIR" . | encrypt > "$BACKUP_DIR/.data-$stamp.tmp"; then
+    rm -f "$BACKUP_DIR/.db-$stamp.tmp" "$BACKUP_DIR/.data-$stamp.tmp"
+    return 1
+  fi
+  mv "$BACKUP_DIR/.db-$stamp.tmp" "$BACKUP_DIR/db-$stamp.dump$suffix" || return 1
+  mv "$BACKUP_DIR/.data-$stamp.tmp" "$BACKUP_DIR/data-$stamp.tar.gz$suffix" || return 1
+  find "$BACKUP_DIR" -maxdepth 1 -type f \( -name 'db-*.dump*' -o -name 'data-*.tar.gz*' \) \
     -mtime "+${BACKUP_KEEP_DAYS:-14}" -delete
   echo "Backup $stamp is done."
 }
@@ -31,6 +54,9 @@ backup_once() {
 restore() {
   db_file="$BACKUP_DIR/$1"
   [ -f "$db_file" ] || { echo "The file does not exist: $db_file" >&2; exit 1; }
+  case "$1${2:-}" in
+    *.age*) echo "Decrypt the .age files first (see docs/deploy.md)." >&2; exit 1 ;;
+  esac
   echo "Restore of the database from $1 starts."
   pg_restore --clean --if-exists --no-owner --no-acl --dbname="$PGDATABASE" "$db_file"
   if [ -n "${2:-}" ]; then

@@ -36,11 +36,15 @@ server (coturn), and a nightly backup. One command starts all of it.
    - `DOMAIN`: your domain name, for example `chat.example.com`.
    - `ACME_EMAIL`: your email address for the certificate.
    - `TURN_EXTERNAL_IP`: your public IP address and the LAN address of the
-     server, in this form: `203.0.113.7/192.168.1.20`.
+     server, in this form: `203.0.113.7/192.168.1.20`. The TURN server
+     relays only on the LAN address.
    - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`.
-   - `BACKUP_DIR`: a folder on the backup disk.
+   - `BACKUP_DIR`: a folder on the backup disk (see step 9).
+   - `BACKUP_AGE_RECIPIENT` (optional): a public key to encrypt the backups (see step 9).
    - `CORS_ALLOWED_ORIGINS`: see step 8.
-5. Keep the `.env` file secret. Do not commit it.
+5. Keep the `.env` file secret. Do not commit it. Only your user must
+   read it: `chmod 600 .env`. The script above makes the file with these
+   rights.
 
 The stack sets the other values itself. The end of `.env.example` lists them.
 
@@ -106,7 +110,8 @@ sudo ufw allow 40000:40099/udp
    verification email. Open the link in the email.
 5. Turn on TURN over TLS. The certificate file now exists. Set
    `TURN_TLS_ENABLED=true` in `.env`. Then run `docker compose up -d` and
-   `docker compose restart coturn`.
+   `docker compose restart coturn`. coturn finds the new certificate itself
+   in one hour, but the restart makes it use the certificate now.
 
 The first account has no special rights. Use it to make a server (guild)
 and to invite your friends.
@@ -121,13 +126,10 @@ and to invite your friends.
 The API runs the database migrations when it starts. Make a backup before
 a large update (see step 9).
 
-Caddy renews the certificate about every 60 days. coturn reads the
-certificate only at start. Run `docker compose restart coturn` each month.
-This cron line does it:
-
-```
-0 4 1 * * cd /path/to/discord-clone && docker compose restart coturn
-```
+Caddy renews the certificate about every 60 days. coturn needs no manual
+step: each hour, `infra/coturn/start.sh` compares the certificate files.
+When they changed, it sends the signal SIGUSR2 to coturn, and coturn reads
+the new files. No service has access to the Docker socket.
 
 ## 8. Desktop apps
 
@@ -147,8 +149,18 @@ Run `docker compose up -d` to apply the change. In the desktop app, enter
 
 ## 9. Backups and restore
 
-The `backup` service starts a backup each day at `BACKUP_HOUR` (UTC). Each
-backup makes two files in `BACKUP_DIR`:
+The `backup` service starts a backup each day at `BACKUP_HOUR` (UTC). It
+runs as the user with the ID 100 (the user of the API). On Linux, this user
+must be able to write to `BACKUP_DIR`. Do these steps one time:
+
+```
+mkdir -p /path/to/backups
+sudo chown 100:101 /path/to/backups
+```
+
+If the folder is not writable, the backup log tells you the command.
+
+Each backup makes two files in `BACKUP_DIR`:
 
 - `db-<date>-<time>.dump`: the database (PostgreSQL custom format, compressed).
 - `data-<date>-<time>.tar.gz`: the data files (avatars, icons and attachments).
@@ -158,6 +170,28 @@ To make a backup now: `docker compose run --rm backup once`.
 
 Copy the files in `BACKUP_DIR` to a second place, for example a cloud
 drive. A backup on the same disk does not help when the disk fails.
+
+### Encrypt the backups (optional)
+
+The messages and the attachments are encrypted end to end. But the backup
+also has the email addresses, the password hashes and the user names in
+plain form. Encrypt the backups before you copy them to a cloud drive:
+
+1. On a different computer, install `age` (`https://age-encryption.org`).
+2. Make a key pair: `age-keygen -o backup-key.txt`. The command shows the
+   public key. It starts with `age1`.
+3. Keep `backup-key.txt` safe, and not on the server. Without this file,
+   you cannot restore the backups.
+4. Put the public key in `.env`: `BACKUP_AGE_RECIPIENT=age1...`.
+5. Run `docker compose up -d`.
+
+The backup files then have the extension `.age`. To restore one, decrypt
+it first. Then copy the result into `BACKUP_DIR`:
+
+```
+age --decrypt -i backup-key.txt -o db-20260930-030000.dump db-20260930-030000.dump.age
+age --decrypt -i backup-key.txt -o data-20260930-030000.tar.gz data-20260930-030000.tar.gz.age
+```
 
 WARNING: A restore replaces the current database and data files.
 
@@ -197,18 +231,82 @@ because the peers connect directly.
 
 ## 11. Security notes
 
+See `docs/security-review.md` for the full review.
+
 - The TURN server refuses peer addresses in private ranges. This means that
-  nobody can use it to reach your home network. A call between two devices
-  on the same LAN uses a direct connection.
-- PostgreSQL has no published port. Only the API and the backup service can
-  reach it.
-- Keep the host system updated. Turn on automatic security updates.
+  nobody can use it to reach your home network. The one exception is the
+  LAN address of the server itself: two peers that both use the relay need
+  it. A call between two devices on the same LAN uses a direct connection.
+- PostgreSQL and the API have no published port. Only Caddy is open to the
+  internet for HTTP.
+- The services run without root rights (the DuckDNS service is the one
+  exception), with no Linux capabilities, and with a read-only file system
+  where possible.
 - Do not forward any other port.
+
+### Harden the host
+
+Do these steps on the Linux host.
+
+1. Turn on automatic security updates. On Ubuntu and Debian:
+   `sudo apt install unattended-upgrades`, then
+   `sudo dpkg-reconfigure -plow unattended-upgrades`.
+2. Use SSH keys only. In `/etc/ssh/sshd_config`, set
+   `PasswordAuthentication no` and `PermitRootLogin no`. Then run
+   `sudo systemctl restart ssh`. Do not forward the SSH port on the router.
+3. Turn on the firewall. Allow SSH from the LAN only, and the ports of step 5:
+
+   ```
+   sudo ufw default deny incoming
+   sudo ufw default allow outgoing
+   sudo ufw allow from 192.168.1.0/24 to any port 22 proto tcp
+   sudo ufw allow 80,443,3478,5349/tcp
+   sudo ufw allow 443,3478/udp
+   sudo ufw allow 40000:40099/udp
+   sudo ufw enable
+   ```
+
+   Use the address range of your LAN in the SSH rule. Docker writes its own
+   firewall rules for the published ports (80 and 443), and ufw does not
+   control them. coturn uses the host network, so the ufw rules apply to it.
+4. Optional: install fail2ban for SSH: `sudo apt install fail2ban`. The
+   default settings protect SSH.
+5. Limit the Docker logs. The stack limits the log of each service to
+   3 files of 10 MB. To set the same limit for all containers, put this
+   text in `/etc/docker/daemon.json`, then run `sudo systemctl restart docker`:
+
+   ```
+   { "log-driver": "json-file", "log-opts": { "max-size": "10m", "max-file": "3" } }
+   ```
+
+### Change a secret
+
+- `TURN_SECRET`: put a new random value in `.env` (`openssl rand -hex 32`).
+  Then run `docker compose up -d`. The API and coturn restart with the new
+  value. The TURN credentials of the clients are valid for a short time
+  only, so a call in progress can lose the relay. The clients get new
+  credentials when they join a call again.
+- `JWT_SECRET`: change it the same way. All users must then sign in again.
+- `POSTGRES_PASSWORD`: first change the password in the database:
+  `docker compose exec postgres psql -U <POSTGRES_USER> -d <POSTGRES_DB> -c "ALTER USER <POSTGRES_USER> PASSWORD '<new password>'"`.
+  Then put the same value in `.env` and run `docker compose up -d`.
+
+### Update from an older version of the stack
+
+Older versions ran Caddy as root. Caddy now runs as the user with the ID
+10001. If the stack already ran before, give the Caddy volumes to this user
+one time. Then start the stack:
+
+```
+docker compose run --rm --no-deps --user 0 --cap-add CHOWN --cap-add FOWNER --entrypoint chown caddy -R 10001:10001 /data /config
+docker compose up -d --build
+```
 
 ## 12. Troubleshooting
 
 Show the logs of a service: `docker compose logs --tail 100 <service>`.
 The service names are `caddy`, `api`, `postgres`, `coturn` and `backup`.
+To see the user of a service, run `docker compose exec <service> id`.
 
 - **No certificate.** Check that ports 80 and 443 reach the server from the
   internet, and that the DNS record points to your public IP address. Read

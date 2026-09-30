@@ -46,6 +46,10 @@ test("two peers connect over WebRTC through the TURN relay only", async ({ brows
   );
 
   const coturnUp = await isPortOpen(TURN_HOST, TURN_PORT, 1500);
+  // A CI job that starts coturn sets TURN_TEST_REQUIRED, so that the test fails instead of a skip.
+  if (process.env.TURN_TEST_REQUIRED === "true") {
+    expect(coturnUp, `coturn is not reachable at ${TURN_HOST}:${TURN_PORT}.`).toBe(true);
+  }
   test.skip(
     !coturnUp,
     `coturn is not reachable at ${TURN_HOST}:${TURN_PORT}. Start it first: ` +

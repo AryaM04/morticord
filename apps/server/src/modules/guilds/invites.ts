@@ -2,7 +2,7 @@
 import { randomInt } from "node:crypto";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { DispatchEvent, Permission } from "@discord-clone/shared";
-import type { DbClient } from "../../db/client.js";
+import { isUniqueViolation, type DbClient } from "../../db/client.js";
 import { bans, channels, guildMembers, guilds, invites, users } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
 import type { GatewayService } from "../gateway/service.js";
@@ -71,10 +71,6 @@ export async function createInvite(
     }
   }
   throw new AppError(500, "INTERNAL_ERROR", "Could not generate a unique invite code.");
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return (error as { code?: string })?.code === "23505";
 }
 
 async function channelsInGuildOfChannel(db: DbClient, channelId: bigint) {

@@ -24,6 +24,8 @@ import {
 import type { AppDeps } from "../../app.js";
 import { guilds } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
+import { checkRate } from "../keys/routes.js";
+import { createEventRateLimiter } from "../messages/service.js";
 import { detectImageContentType } from "../users/avatar.js";
 import {
   createChannel,
@@ -73,6 +75,9 @@ import {
 import { toChannelJson, toInviteJson, toInvitePreviewJson, toMemberJson, toRoleJson } from "./serialize.js";
 
 const ICON_BODY_LIMIT_BYTES = 1024 * 1024; // 1 MiB
+/** Invite lookups and joins for one user. The limit also stops a search for valid codes. */
+const INVITE_LOOKUPS_PER_MINUTE = 30;
+const INVITES_CREATED_PER_MINUTE = 30;
 
 function parseId(text: string): bigint {
   if (!/^[0-9]+$/.test(text)) {
@@ -83,6 +88,8 @@ function parseId(text: string): bigint {
 
 export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): Promise<void> {
   const guildsDeps = { db: deps.db, config: deps.config, gateway: deps.gateway, voice: deps.voice };
+  const inviteLookupLimiter = createEventRateLimiter(INVITE_LOOKUPS_PER_MINUTE, 60_000);
+  const inviteCreateLimiter = createEventRateLimiter(INVITES_CREATED_PER_MINUTE, 60_000);
 
   app.post("/guilds", { preHandler: app.authenticate }, async (request, reply) => {
     const input = createGuildRequestSchema.parse(request.body);
@@ -240,6 +247,7 @@ export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): 
 
   app.post("/channels/:id/invites", { preHandler: app.authenticate }, async (request, reply) => {
     const channelId = parseId((request.params as { id: string }).id);
+    checkRate(inviteCreateLimiter, request.auth!.userId);
     const input = createInviteRequestSchema.parse(request.body ?? {});
     const invite = await createInvite(deps.db, channelId, request.auth!.userId, input);
     return reply.status(201).send(toInviteJson(invite));
@@ -253,12 +261,14 @@ export async function registerGuildRoutes(app: FastifyInstance, deps: AppDeps): 
 
   app.get("/invites/:code", { preHandler: app.authenticate }, async (request, reply) => {
     const { code } = request.params as { code: string };
+    checkRate(inviteLookupLimiter, request.auth!.userId);
     const preview = await getInvitePreview(deps.db, code);
     return reply.send(toInvitePreviewJson(preview));
   });
 
   app.post("/invites/:code", { preHandler: app.authenticate }, async (request, reply) => {
     const { code } = request.params as { code: string };
+    checkRate(inviteLookupLimiter, request.auth!.userId);
     const guild = await acceptInvite(deps.db, code, request.auth!.userId, deps.gateway);
     return reply.status(200).send({ guild });
   });

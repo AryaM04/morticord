@@ -24,5 +24,15 @@ RUN pnpm --filter @discord-clone/web exec tsc --noEmit \
   && pnpm --filter @discord-clone/web exec vite build
 
 FROM caddy:2-alpine
+# Caddy runs as a user without rights. Docker lets a process in a container
+# open ports below 1024 (docker-compose.yml also sets the sysctl), so the
+# file capability of the binary is not necessary. Remove it: with
+# "cap_drop: [ALL]", the kernel does not start a binary with that capability.
+# coturn uses the same user ID, so that it can read the TLS key that Caddy writes.
+RUN setcap -r /usr/bin/caddy \
+  && addgroup -S -g 10001 caddy \
+  && adduser -S -D -H -u 10001 -G caddy caddy \
+  && chown -R caddy:caddy /data /config
 COPY infra/caddy/Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /repo/apps/web/dist /srv
+USER caddy

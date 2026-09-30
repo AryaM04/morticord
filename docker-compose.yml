@@ -9,6 +9,14 @@ x-logging: &logging
     max-size: "10m"
     max-file: "3"
 
+# Each service runs as a user without root rights where the image allows it,
+# with no Linux capabilities, and it cannot get new rights. See
+# docs/security-review.md.
+x-hardening: &hardening
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+
 services:
   # Reverse proxy. It gets the TLS certificate, serves the web app and
   # sends /api and /gateway to the api service.
@@ -33,6 +41,15 @@ services:
     volumes:
       - caddy-data:/data
       - caddy-config:/config
+    # Caddy runs as user 10001 (see apps/web/Dockerfile). This lets it open
+    # ports 80 and 443 without a capability. Docker 20.10 and later set this
+    # value by default.
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0
+    read_only: true
+    tmpfs:
+      - /tmp
+    <<: *hardening
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
       interval: 30s
@@ -91,9 +108,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
+    <<: *hardening
     networks: [internal]
     mem_limit: 512m
     cpus: 1.0
@@ -103,6 +118,13 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # The "postgres" user of the image (ID 70). It owns the data folder.
+    user: "70:70"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    <<: *hardening
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -123,40 +145,57 @@ services:
   # needs no port mapping. This works on Linux only. Docker Desktop (Windows
   # and macOS) does not give a container the real host network, so use
   # Docker Desktop for development only.
-  # The TLS certificate comes from the Caddy volume. After Caddy renews the
-  # certificate (about every 60 days), run: docker compose restart coturn
+  # The TLS certificate comes from the Caddy volume. infra/coturn/start.sh
+  # finds it, and it makes coturn read the certificate again after Caddy
+  # renews it (about every 60 days).
   coturn:
     image: coturn/coturn:4.7-alpine
     restart: unless-stopped
     network_mode: host
-    # coturn reads the private key as root, then it drops its rights.
-    user: "0:0"
+    init: true
+    # The same user ID as Caddy, so that coturn can read the private key
+    # that Caddy writes. The key file can be read only by its owner.
+    user: "10001:10001"
+    entrypoint: ["/bin/sh", "/usr/local/bin/start-coturn.sh"]
     command:
-      - "-c"
-      - "/etc/coturn/turnserver.conf"
-      - "--static-auth-secret=${TURN_SECRET}"
       - "--realm=${DOMAIN}"
-      - "--external-ip=${TURN_EXTERNAL_IP:?Set TURN_EXTERNAL_IP in .env}"
       - "--min-port=${TURN_RELAY_MIN_PORT:-40000}"
       - "--max-port=${TURN_RELAY_MAX_PORT:-40099}"
-      - "--cert=/caddy-data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN}/${DOMAIN}.crt"
-      - "--pkey=/caddy-data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN}/${DOMAIN}.key"
+    # start.sh writes the secret into a file. It is then not on the command line.
+    environment:
+      DOMAIN: ${DOMAIN}
+      TURN_SECRET: ${TURN_SECRET:?Set TURN_SECRET in .env}
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:?Set TURN_EXTERNAL_IP in .env}
     volumes:
       - ./infra/coturn/turnserver.prod.conf:/etc/coturn/turnserver.conf:ro
+      - ./infra/coturn/start.sh:/usr/local/bin/start-coturn.sh:ro
       - caddy-data:/caddy-data:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    <<: *hardening
+    # The turnserver file has this capability. Without it in the bounding
+    # set, the kernel does not start the file. coturn does not use it: the
+    # ports are above 1024, and the process has no active capabilities.
+    cap_add: [NET_BIND_SERVICE]
     mem_limit: 256m
     cpus: 1.0
     logging: *logging
 
   # Nightly backup of the database and the data files. See docs/deploy.md.
   backup:
-    image: postgres:16-alpine
+    build:
+      context: .
+      dockerfile: infra/backup/Dockerfile
+    image: discord-clone-backup
     restart: unless-stopped
-    entrypoint: ["/scripts/backup.sh"]
     command: ["loop"]
     depends_on:
       postgres:
         condition: service_healthy
+    # The same user as the api service, so that it can read and restore /data.
+    # This user must be able to write to BACKUP_DIR (see docs/deploy.md).
+    user: "100:101"
     environment:
       PGHOST: postgres
       PGUSER: ${POSTGRES_USER}
@@ -164,10 +203,14 @@ services:
       PGDATABASE: ${POSTGRES_DB}
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
       BACKUP_HOUR: ${BACKUP_HOUR:-3}
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
     volumes:
-      - ./infra/scripts/backup.sh:/scripts/backup.sh:ro
       - api-data:/data
       - ${BACKUP_DIR:-./backups}:/backup
+    read_only: true
+    tmpfs:
+      - /tmp
+    <<: *hardening
     networks: [internal]
     mem_limit: 128m
     cpus: 0.5
@@ -180,9 +223,7 @@ services:
     restart: unless-stopped
     user: "1000:1000"
     read_only: true
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
+    <<: *hardening
     environment:
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
       DOMAINS: ${DOMAIN}
@@ -198,6 +239,10 @@ services:
     profiles: [ddns-duckdns]
     image: lscr.io/linuxserver/duckdns:latest
     restart: unless-stopped
+    # This image starts as root and then changes to its own user. It needs
+    # the default capabilities for that, so only "no-new-privileges" is set.
+    security_opt:
+      - no-new-privileges:true
     environment:
       SUBDOMAINS: ${DUCKDNS_SUBDOMAIN:-}
       TOKEN: ${DUCKDNS_TOKEN:-}

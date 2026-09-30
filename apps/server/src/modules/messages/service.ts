@@ -15,7 +15,7 @@ import {
   type EventCodec,
   type EventRelType,
 } from "@discord-clone/shared";
-import type { DbClient } from "../../db/client.js";
+import { isUniqueViolation, type DbClient } from "../../db/client.js";
 import {
   channelRecipients,
   channels,
@@ -190,7 +190,7 @@ export async function createEvent(
     // Two concurrent requests can both pass the earlier existence check with
     // the same (device, nonce) pair; the unique index lets only one insert
     // through, and the loser looks up the winner's row instead of failing.
-    if ((error as { code?: string }).code === "23505") {
+    if (isUniqueViolation(error)) {
       const winner = await db
         .select()
         .from(events)

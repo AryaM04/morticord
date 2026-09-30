@@ -88,9 +88,10 @@ const envSchema = z.object({
     .optional()
     .transform((value) => value === "true"),
 
-  // Set to "true" when a reverse proxy runs in front of the server. The
-  // server then reads the client address from the X-Forwarded-For header.
-  // Never set it when clients can reach the server directly.
+  // Set to "true" when one reverse proxy runs in front of the server. The
+  // server then reads the client address from the last entry of the
+  // X-Forwarded-For header, which the proxy adds. A client cannot change
+  // that entry. Never set it when clients can reach the server directly.
   TRUST_PROXY: z
     .string()
     .optional()
@@ -137,6 +138,12 @@ export interface AppConfig {
     refresh: number;
     resendVerification: number;
     forgotPassword: number;
+    /** The email link routes: verify-email and reset-password. */
+    emailLink: number;
+    /** The OAuth routes: start, callback and exchange. */
+    oauth: number;
+    /** Failed sign-in attempts for one account in 15 minutes, from all IP addresses. */
+    loginFailuresPerAccount: number;
   };
   /** Accept new events with the plaintext codec. Off by default. */
   allowPlaintextEvents: boolean;
@@ -146,7 +153,7 @@ export interface AppConfig {
   attachmentQuotaBytes: number;
   /** For tests only: the link preview route can fetch from loopback addresses. */
   linkPreviewTestAllowLoopback: boolean;
-  /** A reverse proxy runs in front of the server. The client address comes from X-Forwarded-For. */
+  /** One reverse proxy runs in front of the server. The client address is the last X-Forwarded-For entry. */
   trustProxy?: boolean;
   /** The server log goes to this file, or to standard output when it is undefined. */
   logFile?: string;
@@ -229,6 +236,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       refresh: data.AUTH_RATE_LIMIT_PER_MINUTE * 3,
       resendVerification: Math.max(1, Math.round(data.AUTH_RATE_LIMIT_PER_MINUTE / 2)),
       forgotPassword: data.AUTH_RATE_LIMIT_PER_MINUTE,
+      emailLink: data.AUTH_RATE_LIMIT_PER_MINUTE,
+      oauth: data.AUTH_RATE_LIMIT_PER_MINUTE * 3,
+      loginFailuresPerAccount: data.AUTH_RATE_LIMIT_PER_MINUTE,
     },
     allowPlaintextEvents: data.ALLOW_PLAINTEXT_EVENTS,
     maxAttachmentBytes: data.MAX_ATTACHMENT_BYTES,

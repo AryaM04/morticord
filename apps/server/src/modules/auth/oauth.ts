@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { GitHub, Google } from "arctic";
 import type { OAuthProvider } from "@discord-clone/shared";
 import type { AppConfig } from "../../config.js";
-import type { DbClient } from "../../db/client.js";
+import { isUniqueViolation, type DbClient } from "../../db/client.js";
 import { oauthAccounts, users } from "../../db/schema.js";
 import { AppError } from "../../errors.js";
 import { nextId } from "../../id.js";
@@ -199,8 +199,7 @@ export async function completeOAuthLogin(
       passwordHash: null,
     });
   } catch (error) {
-    const pgError = error as { code?: string; constraint_name?: string };
-    if (pgError.code === "23505" && pgError.constraint_name?.includes("email")) {
+    if (isUniqueViolation(error, "email")) {
       // This email already belongs to another account, and the provider did
       // not vouch for it here, so linking would be a guess. Refuse instead.
       throw new AppError(

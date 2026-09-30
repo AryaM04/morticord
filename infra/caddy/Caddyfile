@@ -7,6 +7,15 @@
 
 {
 	email {$ACME_EMAIL}
+	# Limits against slow clients (slowloris). The body time is not limited:
+	# a large attachment upload on a slow line can take many minutes. The
+	# API server limits the time of one request to 5 minutes.
+	servers {
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
+	}
 }
 
 {$DOMAIN} {
@@ -18,6 +27,8 @@
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "no-referrer"
+		# A page of another site that opens this site in a window cannot control that window.
+		Cross-Origin-Opener-Policy "same-origin"
 		# Voice and video calls need the microphone, the camera and screen share.
 		Permissions-Policy "microphone=(self), camera=(self), display-capture=(self), geolocation=(), payment=(), usb=()"
 		# The crypto WASM needs 'wasm-unsafe-eval'. This policy is the same as the one of the desktop apps.
@@ -34,6 +45,8 @@
 	}
 
 	# Caddy proxies the WebSocket upgrade without extra settings.
+	# Caddy replaces an X-Forwarded-For header from the client with the real
+	# client address, so the API can trust the last entry (TRUST_PROXY).
 	handle /gateway {
 		reverse_proxy api:3000
 	}

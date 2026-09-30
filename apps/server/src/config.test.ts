@@ -127,6 +127,9 @@ describe("loadConfig", () => {
       refresh: 30,
       resendVerification: 5,
       forgotPassword: 10,
+      emailLink: 10,
+      oauth: 30,
+      loginFailuresPerAccount: 10,
     });
   });
 
@@ -138,6 +141,9 @@ describe("loadConfig", () => {
       refresh: 3000,
       resendVerification: 500,
       forgotPassword: 1000,
+      emailLink: 1000,
+      oauth: 3000,
+      loginFailuresPerAccount: 1000,
     });
   });
 });

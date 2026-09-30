@@ -299,6 +299,31 @@ describeWithDb("auth routes", () => {
     expect(loginOld.statusCode).toBe(401);
   });
 
+  it("makes the other reset links of the user stop working after a reset", async () => {
+    await register("olga@example.com", "olga", "old-password-123");
+    const requestReset = () =>
+      app.inject({ method: "POST", url: "/api/v1/auth/forgot-password", payload: { email: "olga@example.com" } });
+    await requestReset();
+    const firstToken = extractToken(mailer.sent.at(-1)!.text);
+    await requestReset();
+    const secondToken = extractToken(mailer.sent.at(-1)!.text);
+
+    const reset = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/reset-password",
+      payload: { token: secondToken, password: "new-password-456" },
+    });
+    expect(reset.statusCode).toBe(204);
+
+    const oldLink = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/reset-password",
+      payload: { token: firstToken, password: "attacker-password-789" },
+    });
+    expect(oldLink.statusCode).toBe(400);
+    expect(oldLink.json().error.code).toBe("INVALID_RESET_TOKEN");
+  });
+
   it("rejects reusing a reset-password token", async () => {
     await register("nate@example.com", "nate", "old-password-123");
     await app.inject({

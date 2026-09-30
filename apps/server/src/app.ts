@@ -1,6 +1,6 @@
 // Builds the Fastify app. It does not listen; index.ts does that.
 // Tests call buildApp with test dependencies (a test database, a fake mailer).
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyServerOptions } from "fastify";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
@@ -58,10 +58,34 @@ export interface AppDeps {
 
 const IMAGE_CONTENT_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
+/**
+ * The request fields in the log. The query string is not logged: the OAuth
+ * callback has the one-time authorization code in it.
+ */
+export function serializeRequestForLog(request: FastifyRequest) {
+  return {
+    method: request.method,
+    url: request.url.split("?")[0],
+    remoteAddress: request.ip,
+  };
+}
+
 export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
+  const logger: FastifyServerOptions["logger"] = {
+    ...(rawDeps.config.logFile ? { file: rawDeps.config.logFile } : {}),
+    serializers: { req: serializeRequestForLog },
+  };
   const app = Fastify({
-    logger: rawDeps.config.logFile ? { file: rawDeps.config.logFile } : true,
-    trustProxy: rawDeps.config.trustProxy ?? false,
+    logger,
+    // A client must send the full request in 5 minutes. Fastify has no limit by
+    // default. This time is enough for the largest attachment on a slow line.
+    requestTimeout: 5 * 60_000,
+    // Trust only the one proxy in front of the server (Caddy): hop 0 is the
+    // direct peer. The client address is then the last X-Forwarded-For
+    // entry, which Caddy adds. A client can put false entries in front of
+    // it, but the server ignores them. (A hop count such as 1 does not do
+    // this: Fastify then trusts no hop.)
+    trustProxy: rawDeps.config.trustProxy ? (_address: string, hop: number) => hop === 0 : false,
   });
   const gateway = rawDeps.gateway ?? new GatewayService();
   await gateway.primeFromDatabase(rawDeps.db);

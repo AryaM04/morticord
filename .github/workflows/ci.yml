@@ -189,6 +189,63 @@ jobs:
         if: always()
         run: docker compose --env-file .env -f infra/docker-compose.dev.yml -f infra/docker-compose.ci.yml down
 
+  # Separate job: the production coturn service of docker-compose.yml, with
+  # the production config, on the Linux host network. Two browser peers must
+  # connect through the relay only, and the relay must refuse private peer
+  # addresses.
+  turn-prod:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v5
+
+      - name: Read the Node version from .nvmrc
+        id: node-version
+        run: echo "version=$(cat .nvmrc)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ steps.node-version.outputs.version }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install the Playwright browser
+        run: pnpm --filter @discord-clone/e2e exec playwright install --with-deps chromium
+
+      - name: Make the environment file
+        # The relay uses the host IP address. The runner has no router, so the
+        # host IP is also the external IP.
+        run: |
+          HOST_IP=$(hostname -I | awk '{print $1}')
+          node scripts/generate-secrets.mjs
+          sed -i \
+            -e "s/^DOMAIN=.*/DOMAIN=turn.example.com/" \
+            -e "s/^ACME_EMAIL=.*/ACME_EMAIL=admin@example.com/" \
+            -e "s/^TURN_EXTERNAL_IP=.*/TURN_EXTERNAL_IP=$HOST_IP/" .env
+          echo "TURN_TEST_HOST=$HOST_IP" >> "$GITHUB_ENV"
+
+      - name: Start the production coturn
+        run: docker compose up -d coturn
+
+      - name: Run the TURN tests
+        env:
+          TURN_EXPECT_PROD_RULES: "true"
+          TURN_TEST_REQUIRED: "true"
+        run: pnpm --filter @discord-clone/e2e exec playwright test webrtc-turn turn-peer-rules
+
+      - name: Show the coturn log
+        if: failure()
+        run: docker compose logs coturn | tail -n 80
+
+      - name: Stop coturn
+        if: always()
+        run: docker compose down -v
+
   # Separate job: build the Linux desktop app (Electron), install its deb
   # package and run a smoke test under xvfb against a test API server. See
   # "Build, test and release the Linux app" in docs/concepts/desktop-shells.md.
