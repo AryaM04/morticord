@@ -57,11 +57,13 @@ describe("loadConfig", () => {
   it("reads a comma list of origins, with a custom scheme", () => {
     const config = loadConfig({
       ...validEnv,
-      CORS_ALLOWED_ORIGINS: " http://tauri.localhost, tauri://localhost ,https://chat.example.com:443/,",
+      CORS_ALLOWED_ORIGINS:
+        " http://tauri.localhost, tauri://localhost ,app://discord-clone, https://chat.example.com:443/,",
     });
     expect(config.corsAllowedOrigins).toEqual([
       "http://tauri.localhost",
       "tauri://localhost",
+      "app://discord-clone",
       "https://chat.example.com",
     ]);
   });

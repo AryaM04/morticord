@@ -1,6 +1,6 @@
 // The link preview fetch of the desktop app. The app fetches the page (and
 // then its image) of a link that the user sends. The rules are the same as
-// the server route (apps/server/src/modules/link-preview/fetcher.ts), so a
+// the server route (packages/link-preview-fetch/src/address-check.ts), so a
 // link cannot reach the private network of the user:
 //
 // - Only http and https, only ports 80 and 443, no user name or password.

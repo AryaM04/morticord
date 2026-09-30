@@ -1,0 +1,64 @@
+:root {
+  color-scheme: dark light;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+}
+body {
+  margin: 0;
+  padding: 16px;
+  background: #313338;
+  color: #f2f3f5;
+}
+h1 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+#sources {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+}
+#sources button {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: #2b2d31;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+#sources button:hover,
+#sources button:focus-visible {
+  border-color: #5865f2;
+  outline: none;
+}
+#sources img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: #1e1f22;
+}
+#sources span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}
+#cancel {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 4px;
+  background: #4e5058;
+  color: inherit;
+  cursor: pointer;
+}

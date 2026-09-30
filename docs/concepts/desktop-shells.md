@@ -36,8 +36,15 @@ The Tauri app in `apps/desktop-tauri` loads the web build (`apps/web/dist`)
 from its own origin: `http://tauri.localhost` on Windows and
 `tauri://localhost` on macOS. In development, it opens the Vite dev server
 URL. The web build finds the app through `window.__TAURI_INTERNALS__` and
-loads `apps/web/src/desktop/tauri-platform.ts` with a dynamic import, so
-the web bundle does not grow.
+loads `apps/web/src/desktop/desktop-platform.ts` and
+`apps/web/src/desktop/tauri-bridge.ts` with a dynamic import, so the web
+bundle does not grow.
+
+Both desktop apps use one contract, `DesktopBridge` in
+`packages/shared/src/desktop.ts`. The files in `apps/web/src/desktop` use
+only this contract. The Tauri app supplies it with Tauri commands. The
+Electron app supplies it with its preload script (see "What the Linux app
+does" below).
 
 ### Server address
 
@@ -48,8 +55,10 @@ address with `GET /api/v1/health` and sends its own origin in the
 origin. Thus, the server must list the app origins:
 
 ```
-CORS_ALLOWED_ORIGINS=http://tauri.localhost,tauri://localhost
+CORS_ALLOWED_ORIGINS=http://tauri.localhost,tauri://localhost,app://discord-clone
 ```
+
+The last value is the origin of the Linux app.
 
 The app keeps the address in the OS key store. Every REST, gateway,
 avatar and attachment URL goes through `apps/web/src/lib/server-url.ts`.
@@ -165,6 +174,146 @@ on a Mac before a release.
 WebView2 shows its own permission prompt for `getUserMedia` and
 `getDisplayMedia`, the same way the Edge browser does. No extra Rust code
 was needed for this on Windows.
+
+## What the Linux app does
+
+The Linux app in `apps/desktop-electron` is an Electron app. It loads the
+same web build. The web build finds the app through `window.desktopBridge`
+and loads `apps/web/src/desktop/desktop-platform.ts` with a dynamic import.
+
+### Window and security
+
+- The window loads the web build from the `app://discord-clone` protocol,
+  not from `file://`. Thus the page has a stable origin, which the server
+  can allow in `CORS_ALLOWED_ORIGINS`. The protocol serves only files of
+  the web build. A path without a file extension gets `index.html`.
+- The window has `contextIsolation`, `sandbox` and no Node.js
+  (`nodeIntegration: false`). The preload script
+  (`src/preload/index.ts`) gives the page only the functions of
+  `DesktopBridge`. It gives no general IPC access.
+- The main process accepts a call only from the main frame of the app
+  window on the app origin. It checks each argument before it uses it
+  (`src/main/ipc.ts` and `src/main/validate.ts`).
+- Each response of the protocol has the same content security policy as
+  the Tauri app. The main process adds the chosen server to `connect-src`
+  (with `ws:` or `wss:`) and to `img-src`. A new server address loads the
+  page again, so the new policy applies at once.
+- The app opens http and https links in the system browser. It refuses
+  new windows, other protocols and navigation away from the app origin.
+- The app gives the page only these permissions: microphone and camera,
+  screen capture, clipboard write and full screen.
+- The Electron fuses turn off `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and
+  the Node.js inspector arguments.
+
+### Server address
+
+The first start shows the same server address page as the Tauri app. The
+window is a secure page, and Chromium blocks http requests from a secure
+page. Thus the Linux app needs an https address. It accepts http only for
+this computer (`localhost`). The app keeps the address in `settings.json`
+in the user data folder (`~/.config/Discord Clone`). The address is not a
+secret.
+
+### Services of the Linux app
+
+| Service | How it works |
+|---|---|
+| Secure store | Electron `safeStorage`: each value is encrypted with a key from the system key ring (GNOME Keyring or KWallet, through the Secret Service API). The file `secure-store.json` holds only ciphertext. Without a key ring, Electron uses the `basic_text` backend, which is plain text in practice. The app then refuses to keep secrets, and shows a page with the fix (see below). |
+| Notifications | An Electron notification (libnotify). A click shows the window and opens the channel. |
+| Push to talk | On X11, `uiohook-napi` reads the key down and key up events of the whole desktop session, also while the window has no focus. Other apps also get the key, so use a key that they do not use, such as a function key. The hook runs only during a call in push-to-talk mode. On Wayland, see "Push to talk on Wayland" below. |
+| Deep links | Scheme `discordclone`. The deb package registers it in its desktop file. At start, the app also calls `setAsDefaultProtocolClient`. A second start of the app gives its link to the running app (single instance lock), and then stops. |
+| OAuth | The same flow as the Tauri app: the system browser, then `discordclone://auth/callback`. |
+| Link previews | The main process uses the fetch of the server (`packages/link-preview-fetch`), with the same address rules. Thus a link cannot reach the private network of the user. |
+| Tray | Show, Mute, Deafen and Quit. By default, the close button keeps the app in the tray. The tray uses the StatusNotifierItem protocol. GNOME shows it only with the AppIndicator extension. Without a tray icon, start the app again to show the window, or turn off "Keep the app in the tray" in the account settings. |
+| Window state | The app keeps the size, the position and the maximized state in `window-state.json`. It does not use a position that is not on a screen. |
+| Unread badge | `app.setBadgeCount`. Linux shows the number only on a Unity launcher, such as the Ubuntu dock. |
+| Updates | See "Linux updates" below. |
+
+### Push to talk on Wayland
+
+Wayland does not let an app read the keys of other apps. The
+GlobalShortcuts portal (Electron `globalShortcut` with
+`--enable-features=GlobalShortcutsPortal`) reports only the key press, not
+the key release. A hold-to-talk key needs the release, so the app does not
+use the portal. On a Wayland session, the voice settings show "Global push
+to talk is not available on this desktop session.", and push to talk works
+only while the app window has focus. An X11 session (for example "GNOME on
+Xorg") gives the global key.
+
+### Without a key ring
+
+When the app finds no key ring, it shows "The app cannot keep your sign-in
+safely" with these steps:
+
+1. Install GNOME Keyring (package `gnome-keyring`) or KWallet.
+2. Make sure that the key ring starts with the desktop session and is
+   unlocked.
+3. On a desktop other than GNOME or KDE, start the app with
+   `--password-store=gnome-libsecret` (or `--password-store=kwallet5`).
+   Chromium selects the key ring from the desktop name, and it does not
+   know other desktops.
+4. Quit the app from the tray menu, then start it again.
+
+### Screen share on Linux
+
+A call to `getDisplayMedia` comes to `setDisplayMediaRequestHandler` in the
+main process. The app gets the screens and the windows from
+`desktopCapturer` and shows a small picker window with a thumbnail of each.
+
+- X11: the picker shows each screen and each window. With only one
+  source, the app shares it at once.
+- Wayland: Chromium uses the PipeWire screen cast portal. The system shows
+  its own picker, and the app then shares the one source that the system
+  gives.
+- System audio: Electron gives system audio ("loopback") only on Windows.
+  On Linux, a screen share has no system audio. A later milestone can add
+  a PipeWire audio capture.
+
+### Linux updates
+
+- The AppImage updates itself with `electron-updater`. The app asks for
+  `latest-linux.yml` of the latest GitHub release, 30 s after start and
+  then every 6 hours. It shows the same prompt as the Tauri app. The
+  updater checks the SHA-512 hash of the download against
+  `latest-linux.yml`. The Linux files have no code signature.
+- The deb package does not update itself. To update, install the new deb
+  package with the package manager, for example
+  `sudo apt install ./discord-clone-<version>-amd64.deb`.
+- The updater URL must be public, the same as for the Tauri app.
+
+### Build, test and release the Linux app
+
+- Run `pnpm --filter @discord-clone/desktop-electron package` on Linux.
+  This makes the web build, bundles the Electron code with esbuild, and
+  runs electron-builder. The output is in `apps/desktop-electron/release`:
+  `discord-clone-<version>-x86_64.AppImage` (about 120 MiB),
+  `discord-clone-<version>-amd64.deb` (about 95 MiB, 285 MiB after the
+  install) and `latest-linux.yml`. Most of the size is Electron
+  (Chromium). The code of the app is less than 1 MiB, and the web build
+  is 1.4 MiB. Add `--arm64` for an arm64 build.
+- The deb package installs to `/opt/discord-clone`. The product name of
+  the package has no space: the SUID sandbox helper of Chromium cannot
+  start an app from a path with a space.
+- To start the app from the repository, run
+  `node apps/desktop-electron/node_modules/electron/install.js` one time
+  (pnpm does not run the install script of Electron). Then run
+  `pnpm --filter @discord-clone/desktop-electron start`.
+- The "electron" job of `.github/workflows/ci.yml` installs the deb package
+  on Ubuntu, starts Postgres and the API, and runs
+  `apps/desktop-electron/scripts/smoke.mjs` under `xvfb-run` with an
+  unlocked GNOME Keyring. The script connects to the app through the
+  Chrome DevTools Protocol. It checks the server address page, the sign-in
+  page, CSP and CORS, the crypto WASM, the secure store, a link preview of
+  a private address, screen share and the global push-to-talk key (with
+  `xdotool`). A second run without a key ring checks the key ring page.
+- The "linux" job of `.github/workflows/release.yml` builds the AppImage
+  and the deb package, and attaches them with `latest-linux.yml` to the
+  draft release of the tag. The tag must match `version` in
+  `apps/desktop-electron/package.json`.
+- Ubuntu 23.10 and later limit user namespaces with AppArmor. The deb
+  package installs an AppArmor profile for the app. An AppImage has no
+  profile, so the Chromium sandbox can refuse to start on these systems.
+  Use the deb package there. Do not start the app with `--no-sandbox`.
 
 ## How to run the media diagnostics check by hand
 

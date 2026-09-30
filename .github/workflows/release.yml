@@ -1,8 +1,10 @@
 name: Release
 
-# Build the desktop app for Windows and macOS, and put the installers in a
-# draft GitHub release. Push a tag such as "v0.1.0" to start it. The tag
-# must match "version" in apps/desktop-tauri/src-tauri/tauri.conf.json.
+# Build the desktop app for Windows and macOS (Tauri) and for Linux
+# (Electron), and put the installers in a draft GitHub release. Push a tag
+# such as "v0.1.0" to start it. The tag must match "version" in
+# apps/desktop-tauri/src-tauri/tauri.conf.json and in
+# apps/desktop-electron/package.json.
 #
 # Updater signatures need the secret TAURI_SIGNING_PRIVATE_KEY (and
 # TAURI_SIGNING_PRIVATE_KEY_PASSWORD when the key has a password). Without
@@ -101,3 +103,60 @@ jobs:
           includeUpdaterJson: ${{ steps.signing.outputs.updater == 'true' }}
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }} ${{ steps.signing.outputs.args }}
+
+  # The Linux app: an AppImage and a deb package for x64, and
+  # latest-linux.yml for the AppImage updater. It runs after the Tauri
+  # jobs, so that the draft release exists. It makes the draft when those
+  # jobs did not make it.
+  linux:
+    needs: desktop
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v5
+
+      - name: Read the Node version from .nvmrc
+        id: node-version
+        run: echo "version=$(cat .nvmrc)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ steps.node-version.outputs.version }}
+          cache: pnpm
+
+      - name: Check that the tag matches the app version
+        # The updater compares the version in latest-linux.yml with the installed app.
+        if: github.event_name == 'push'
+        run: |
+          VERSION=$(node -p "require('./apps/desktop-electron/package.json').version")
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::The tag $TAG does not match version $VERSION in apps/desktop-electron/package.json."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the AppImage and the deb package
+        working-directory: apps/desktop-electron
+        run: |
+          pnpm --filter @discord-clone/web build
+          node build.mjs
+          pnpm exec electron-builder --linux AppImage deb --publish never
+
+      - name: Upload the files to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "Discord Clone $TAG" --notes "See the assets below for the Windows, macOS and Linux installers."
+          fi
+          cd apps/desktop-electron/release
+          gh release upload "$TAG" ./*.AppImage ./*.deb latest-linux.yml --clobber

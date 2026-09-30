@@ -1,0 +1,38 @@
+{
+  "name": "@discord-clone/desktop-electron",
+  "productName": "Discord Clone",
+  "desktopName": "discord-clone.desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The Linux desktop app of Discord Clone.",
+  "author": {
+    "name": "Arya Mortazavi",
+    "email": "arya.mortazavi2004@gmail.com"
+  },
+  "homepage": "https://github.com/AryaM04/discord-clone",
+  "license": "UNLICENSED",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "pnpm --filter @discord-clone/web build && node build.mjs && electron .",
+    "package": "pnpm --filter @discord-clone/web build && node build.mjs && electron-builder --linux",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
+    "@discord-clone/link-preview-fetch": "workspace:*",
+    "@discord-clone/shared": "workspace:*",
+    "@types/node": "^22.10.1",
+    "electron": "^44.5.0",
+    "electron-builder": "^26.15.3",
+    "electron-updater": "^6.8.9",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.5"
+  }
+}

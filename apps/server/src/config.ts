@@ -30,8 +30,9 @@ const envSchema = z.object({
   WEB_ORIGIN: z.string().min(1).default("http://localhost:5173"),
 
   // Other origins that can call the API and open the gateway, as a comma
-  // list. The desktop app uses "http://tauri.localhost" on Windows and
-  // "tauri://localhost" on macOS. Empty: only the web app origin.
+  // list. The desktop app uses "http://tauri.localhost" on Windows,
+  // "tauri://localhost" on macOS and "app://discord-clone" on Linux.
+  // Empty: only the web app origin.
   CORS_ALLOWED_ORIGINS: z.string().optional(),
 
   // The URL scheme of the desktop app. After an OAuth sign-in from the

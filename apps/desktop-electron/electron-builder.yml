@@ -1,0 +1,67 @@
+# electron-builder config of the Linux app: an AppImage and a deb package
+# for x64 (arm64 with --arm64). Run "pnpm --filter @discord-clone/desktop-electron package".
+appId: com.discordclone.desktop
+# No space in the product name: the deb installs to /opt/<product name>, and the
+# SUID sandbox helper of Chromium cannot start an app from a path with a space.
+# The desktop file keeps the name with a space (linux.desktop below).
+productName: discord-clone
+executableName: discord-clone
+artifactName: discord-clone-${version}-${arch}.${ext}
+copyright: Copyright © 2026 Arya Mortazavi
+directories:
+  output: release
+  buildResources: assets
+files:
+  - dist/**
+  - assets/**
+  - package.json
+  # Keep only the Linux builds of the push-to-talk key hook.
+  - "!**/node_modules/uiohook-napi/prebuilds/{darwin-*,win32-*,linux-loong64}/**"
+  - "!**/node_modules/uiohook-napi/{libuiohook,src}/**"
+  - "!**/node_modules/uiohook-napi/binding.gyp"
+  - "!**/*.map"
+extraResources:
+  - from: ../web/dist
+    to: web
+# uiohook-napi has prebuilt N-API binaries, which work in every Electron version.
+npmRebuild: false
+protocols:
+  - name: Discord Clone
+    schemes: [discordclone]
+linux:
+  target: [AppImage, deb]
+  category: Network
+  icon: assets/icon.png
+  synopsis: Voice and end-to-end encrypted chat
+  # The window class matches the desktop file, so the dock groups the window with its launcher.
+  syncDesktopName: true
+  desktop:
+    entry:
+      Name: Discord Clone
+deb:
+  # The default list of electron-builder, and: libasound2 (audio of Chromium), libxt6 and
+  # libxrandr2 (the push-to-talk key hook). libsecret gives safeStorage the key ring.
+  depends:
+    - libasound2
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - libxt6
+    - libxrandr2
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+publish:
+  provider: github
+  owner: AryaM04
+  repo: discord-clone
+  releaseType: draft
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false

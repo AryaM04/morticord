@@ -36,7 +36,8 @@ The user setting "Show link previews for my messages" (a synced setting,
 | Client  | Fetch                                                     |
 | ------- | --------------------------------------------------------- |
 | Web     | `POST /api/v1/link-preview` on our own server             |
-| Desktop | The Rust command `link_preview_fetch` of the desktop app, with the same address rules, through the same `Platform` hook |
+| Desktop (Windows, macOS) | The Rust command `link_preview_fetch` of the Tauri app, with the same address rules, through the same `Platform` hook |
+| Desktop (Linux) | The main process of the Electron app, with the same fetch code as the server (`packages/link-preview-fetch`) |
 
 A browser page cannot read another site (CORS). Thus the web client asks
 its own home server. **Trade-off:** the server sees the URL of each
@@ -47,7 +48,8 @@ for 10 minutes. A user who does not want this can turn the setting off.
 
 `POST /api/v1/link-preview` with `{ "url": "https://..." }` returns
 `{ url, title?, description?, siteName?, image?: { mime, data } }`. `data`
-is base64url. The code is in `apps/server/src/modules/link-preview/`.
+is base64url. The route is in `apps/server/src/modules/link-preview/`. The
+fetch and its address rules are in `packages/link-preview-fetch`.
 
 The server fetches a URL that a user names, so the route must not open
 the private network of the server to a user (server-side request

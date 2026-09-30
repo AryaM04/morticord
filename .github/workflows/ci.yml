@@ -188,3 +188,102 @@ jobs:
       - name: Stop coturn
         if: always()
         run: docker compose --env-file .env -f infra/docker-compose.dev.yml -f infra/docker-compose.ci.yml down
+
+  # Separate job: build the Linux desktop app (Electron), install its deb
+  # package and run a smoke test under xvfb against a test API server. See
+  # "Build, test and release the Linux app" in docs/concepts/desktop-shells.md.
+  electron:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: discord_clone
+          POSTGRES_PASSWORD: change-me
+          POSTGRES_DB: discord_clone
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U discord_clone"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v5
+
+      - name: Read the Node version from .nvmrc
+        id: node-version
+        run: echo "version=$(cat .nvmrc)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ steps.node-version.outputs.version }}
+          cache: pnpm
+
+      - name: Cache the Electron and electron-builder downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install the test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth xdotool gnome-keyring dbus-x11
+
+      - name: Build the deb package
+        working-directory: apps/desktop-electron
+        run: |
+          pnpm --filter @discord-clone/web build
+          node build.mjs
+          pnpm exec electron-builder --linux deb --publish never
+
+      - name: Install the deb package
+        run: sudo apt-get install -y ./apps/desktop-electron/release/*.deb
+
+      - name: Start the API server
+        # The server must allow the origin of the Linux app.
+        run: |
+          cp .env.example .env
+          echo "CORS_ALLOWED_ORIGINS=app://discord-clone" >> .env
+          cd apps/server
+          nohup pnpm exec tsx --env-file=../../.env src/index.ts > ../../server.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -fs http://localhost:3000/api/v1/health > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat ../../server.log
+          exit 1
+
+      - name: Run the smoke test with a key ring
+        # GNOME Keyring gives safeStorage a real key ring. XDG_CURRENT_DESKTOP
+        # tells Chromium to use it.
+        env:
+          XDG_CURRENT_DESKTOP: GNOME
+          XDG_CONFIG_HOME: ${{ runner.temp }}/config-key-ring
+        run: |
+          dbus-run-session -- bash -c '
+            echo -n "ci-password" | gnome-keyring-daemon --unlock --components=secrets > /dev/null
+            xvfb-run -a -s "-screen 0 1280x800x24" node apps/desktop-electron/scripts/smoke.mjs /opt/discord-clone/discord-clone http://localhost:3000
+          '
+
+      - name: Run the smoke test without a key ring
+        env:
+          SMOKE_EXPECT_NO_KEY_RING: "1"
+          XDG_CONFIG_HOME: ${{ runner.temp }}/config-no-key-ring
+        run: xvfb-run -a node apps/desktop-electron/scripts/smoke.mjs /opt/discord-clone/discord-clone http://localhost:3000
+
+      - name: Show the API server log
+        if: failure()
+        run: tail -n 80 server.log
