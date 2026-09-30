@@ -171,12 +171,19 @@ jobs:
       - name: Run the end-to-end tests
         run: pnpm e2e
 
+      - name: Repeat search and voice settings
+        if: always()
+        working-directory: e2e
+        run: pnpm exec playwright test tests/search.spec.ts tests/voice-settings.spec.ts --repeat-each 4
+
       - name: Keep the test results of a failed run
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-test-results
-          path: e2e/test-results
+          path: |
+            e2e/test-results
+            e2e/.server-data/server.log
           retention-days: 7
 
       - name: Show the coturn log

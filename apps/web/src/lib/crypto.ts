@@ -84,6 +84,7 @@ function watchSecurity(started: CryptoHandle): () => void {
   };
 }
 
+const __t=(m:string)=>console.warn(`[timing] ${Math.round(performance.now())} ${m}`);
 const MAX_RECEIVED = 100;
 
 /** True while another tab of this device runs the crypto layer, and this tab waits for it. */
@@ -96,15 +97,19 @@ const received: Array<{ fromUserId: string; fromDeviceId: string; text: string }
 
 function start(userId: string, deviceId: string): void {
   const current = ++run;
+  __t(`crypto start run=${current}`);
   if (typeof navigator === "undefined" || !navigator.locks) {
     return;
   }
   const lockName = `crypto:${userId}:${deviceId}`;
   const body = async () => {
+    __t("crypto lock body");
     if (current !== run) {
+      __t("crypto body stale run");
       return;
     }
     const crypto = await import("@discord-clone/client-core/crypto");
+    __t("crypto module imported");
     const started = await crypto.startCrypto({
       userId,
       deviceId,
@@ -113,7 +118,9 @@ function start(userId: string, deviceId: string): void {
       log: (message) => console.warn(`[crypto] ${message}`),
       isOnline: (userId) => realtimeStore.getState().presences[userId] !== "offline",
     });
+    __t("startCrypto resolved");
     if (current !== run) {
+      __t("startCrypto stale run");
       started.stop();
       return;
     }
@@ -141,6 +148,7 @@ function start(userId: string, deviceId: string): void {
   // docs/concepts/olm-megolm.md, "More than one tab".
   void navigator.locks
     .request(lockName, { ifAvailable: true }, async (lock) => {
+      __t(`crypto lock ifAvailable got=${lock !== null}`);
       if (lock) {
         return body();
       }
@@ -160,6 +168,7 @@ function start(userId: string, deviceId: string): void {
 }
 
 function stop(): void {
+  __t("crypto stop");
   run += 1;
   cryptoTabStore.setState({ otherTab: false });
   handle = null;

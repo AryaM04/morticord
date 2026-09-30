@@ -19,6 +19,7 @@ import { gatewaySend, realtimeStore, subscribeDispatch } from "./realtime.js";
 import { effectiveVolumeFor, updateVoiceDeviceSettings, voiceDeviceSettingsStore } from "./voice-settings.js";
 import { startPushToTalkRuntime, stopPushToTalkRuntime } from "./voice-ptt-runtime.js";
 
+const __t=(m:string)=>console.warn(`[timing] ${Math.round(performance.now())} ${m}`);
 export type VoiceConnectionState = "idle" | "connecting" | "connected";
 
 /** The worst of every peer's connection state, in plain words, for the status panel. */
@@ -290,9 +291,12 @@ async function loadEngine(): Promise<VoiceEngine> {
 /** Join a voice channel, or a DM call when `guildId` is null. Leave the current call first if there is one. */
 export async function joinVoiceChannel(guildId: string | null, channelId: string): Promise<void> {
   voiceStore.setState({ status: "connecting", guildId, channelId, errorMessage: null });
+  __t("join start");
   // Voice signals are Olm messages, so the call needs the crypto layer.
   callCrypto = await cryptoReady();
+  __t("cryptoReady resolved");
   const voiceEngine = await loadEngine();
+  __t("engine loaded");
   const saved = voiceDeviceSettingsStore.getState();
   if (saved.inputDeviceId) {
     voiceEngine.setInputDevice(saved.inputDeviceId);
@@ -309,6 +313,7 @@ export async function joinVoiceChannel(guildId: string | null, channelId: string
   voiceStore.setState({ muted: saved.inputMode === "push-to-talk", deafened: false, pttActive: false });
   setUpPushToTalkIfNeeded();
   await voiceEngine.join(guildId, channelId);
+  __t("engine.join resolved");
   if (voiceEngine.channelId === channelId) {
     voiceStore.setState({ status: "connected" });
   } else {

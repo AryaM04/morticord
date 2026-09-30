@@ -65,6 +65,16 @@ test.describe("voice settings: push to talk", () => {
   test("the mic track stays disabled until the push-to-talk key is held", async ({ page }) => {
     test.setTimeout(60_000);
 
+    const t0 = Date.now();
+    page.on("console", (m) => console.log(`[page +${Date.now() - t0}] ${m.type()} ${m.text()}`));
+    page.on("requestfinished", async (r) => {
+      if (r.url().includes("/api/")) {
+        const t = r.timing();
+        const resp = await r.response();
+        console.log(`[net +${Date.now() - t0}] ${r.method()} ${r.url().replace(/^.*\/api/, "")} ${resp?.status()} ${Math.round(t.responseEnd)}ms`);
+      }
+    });
+    page.on("requestfailed", (r) => console.log(`[netfail +${Date.now() - t0}] ${r.url()} ${r.failure()?.errorText}`));
     const user = uniqueUser("A");
     await registerThroughUi(page, user);
     await createGuild(page, "E2E PTT Server");
@@ -79,6 +89,7 @@ test.describe("voice settings: push to talk", () => {
     await page.getByRole("button", { name: "Done" }).click();
 
     // Join voice. Push to talk starts closed: the mic track is disabled.
+    console.log(`[spec +${Date.now() - t0}] click General`);
     await page.getByRole("button", { name: /General/ }).click();
     await expect(page.locator('[data-voice-status="connected"]')).toBeVisible({ timeout: 15_000 });
     await expect

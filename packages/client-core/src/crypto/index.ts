@@ -214,14 +214,18 @@ async function loadPickleKey(secureStore: SecureStore, userId: string, deviceId:
  * the keys on the server and start to handle to-device messages. The
  * caller must make sure that only one tab of a device runs it (a Web Lock).
  */
+const __t=(m:string)=>console.warn(`[timing] ${Math.round(performance.now())} ${m}`);
 export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHandle> {
   const { userId, deviceId, transport } = options;
   const log = options.log ?? (() => {});
+  __t("sc begin");
   const wasm = await loadWasm();
+  __t("sc wasm");
   const pickleKey = await loadPickleKey(options.secureStore, userId, deviceId);
   const store: CryptoStore = await openCryptoStore(cryptoStoreName(userId, deviceId), options.indexedDb);
   const queue = new KeyedQueue();
   const account = await AccountHolder.load(wasm, store, pickleKey, queue);
+  __t("sc account");
 
   const masterKeyListeners = new Set<(userId: string) => void>();
   const securityListeners = new Set<() => void>();
@@ -251,6 +255,7 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
     },
   });
   await devices.trackUsers([userId]);
+  __t("sc trackUsers");
 
   const manager = new DeviceManager({ wasm, store, transport, account, deviceList: devices, pickleKey, userId, deviceId });
   const olm = new OlmMachine({
@@ -268,6 +273,7 @@ export async function startCrypto(options: StartCryptoOptions): Promise<CryptoHa
     onOneTimeKeyUsed: () => manager.noteOneTimeKeyUsed(),
   });
   await manager.setup();
+  __t("sc manager.setup");
 
   const megolm = new MegolmMachine({
     wasm,

@@ -30,6 +30,7 @@ export const MAX_ICE_RESTARTS = ICE_RESTART_BACKOFFS_MS.length;
 export const TURN_REFRESH_SKEW_MS = 10 * 60 * 1_000;
 
 /** How long `join()` waits for the server's own join echo before signaling anyway. */
+const __t=(m:string)=>console.warn(`[timing] ${Math.round(performance.now())} ${m}`);
 export const JOIN_CONFIRM_TIMEOUT_MS = 5_000;
 
 /** Pause between offering to each already-present peer at join. See the comment at its one call site. */
@@ -1334,6 +1335,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
       // the engine already back in a clean, not-in-call state.
       return;
     }
+    __t("gum resolved");
     if (generation !== micGeneration) {
       // A leave (or a newer join) started while the browser opened the
       // mic. This join is void: stop its track and send nothing.
@@ -1359,6 +1361,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
     });
 
     deps.sendVoiceJoin(channelId, muted, deafened);
+    __t("VOICE_JOIN sent");
 
     // Wait for the server's own echo of our join (its VOICE_STATE_UPDATE
     // for our own peer) before sending any signal. Sending an offer
@@ -1375,6 +1378,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
       }, JOIN_CONFIRM_TIMEOUT_MS);
     });
 
+    __t("join confirm done");
     const initialPeers = deps.getInitialPeers(channelId);
     for (const peerKey of initialPeers) {
       const runtime = await ensurePeer(peerKey);

@@ -111,6 +111,7 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: `http://localhost:${FIXTURE_PORT}`,
+    trace: "retain-on-failure",
   },
   webServer: webServers,
   projects: [
