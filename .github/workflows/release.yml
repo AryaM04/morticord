@@ -1,10 +1,17 @@
 name: Release
 
 # Build the desktop app for Windows and macOS (Tauri) and for Linux
-# (Electron), and put the installers in a draft GitHub release. Push a tag
-# such as "v0.1.0" to start it. The tag must match "version" in
-# apps/desktop-tauri/src-tauri/tauri.conf.json and in
-# apps/desktop-electron/package.json.
+# (Electron), and publish the installers in a GitHub release. The installed
+# apps then update themselves.
+#
+# The workflow starts when CI passes on a push to main. It makes a release
+# only when the app code changed since the last release tag: apps/web,
+# apps/desktop-tauri, apps/desktop-electron or packages. Start it by hand
+# (workflow_dispatch) to release the head of main without an app change.
+#
+# The version is the last tag with the patch number plus one (v0.1.4 gives
+# 0.1.5). To start a new minor or major version, set a higher "version" in
+# apps/desktop-tauri/src-tauri/tauri.conf.json. The workflow then uses that.
 #
 # Updater signatures need the secret TAURI_SIGNING_PRIVATE_KEY (and
 # TAURI_SIGNING_PRIVATE_KEY_PASSWORD when the key has a password). Without
@@ -12,19 +19,71 @@ name: Release
 # latest.json. See docs/concepts/desktop-shells.md.
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "The tag of the draft release, such as v0.1.0-test.1"
-        required: true
 
 permissions:
   contents: write
 
+# Run one release at a time, so that two releases cannot get the same version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  # Find the commit, decide if it needs a release, and choose the version.
+  plan:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      version: ${{ steps.plan.outputs.version }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - name: Check out the code with all tags
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Choose the version
+        id: plan
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          LAST=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)
+          if [ -n "$LAST" ] && [ "$FORCE" != "true" ] &&
+            git diff --quiet "$LAST" "$SHA" -- apps/web apps/desktop-tauri apps/desktop-electron packages; then
+            echo "The app code did not change since $LAST. No release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          VERSION=$(node -e '
+            const parse = (v) => v.replace(/^v/, "").split(".").map(Number);
+            const compare = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+            const configured = parse(require("./apps/desktop-tauri/src-tauri/tauri.conf.json").version);
+            const last = process.argv[1] ? parse(process.argv[1]) : null;
+            const next = last ? [last[0], last[1], last[2] + 1] : configured;
+            console.log((compare(configured, next) > 0 ? configured : next).join("."));
+          ' "$LAST")
+          echo "Last release: ${LAST:-none}. New version: $VERSION."
+          # A failed run can leave a draft with this tag. Remove it, so that the
+          # new run does not mix old and new files.
+          if gh release view "v$VERSION" --json isDraft --jq .isDraft 2> /dev/null | grep -q true; then
+            gh release delete "v$VERSION" --yes
+          fi
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
   desktop:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -38,6 +97,8 @@ jobs:
     steps:
       - name: Check out the code
         uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
 
       - name: Read the Node version from .nvmrc
         id: node-version
@@ -71,6 +132,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Set the app version
+        shell: bash
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            for (const file of ["apps/desktop-tauri/src-tauri/tauri.conf.json", "apps/desktop-electron/package.json"]) {
+              const json = JSON.parse(fs.readFileSync(file, "utf8"));
+              json.version = process.env.VERSION;
+              fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
+            }
+          '
+
       - name: Choose the updater signing
         id: signing
         shell: bash
@@ -95,8 +170,9 @@ jobs:
         with:
           projectPath: apps/desktop-tauri
           tauriScript: pnpm exec tauri
-          tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: Morticord ${{ github.event.inputs.tag || github.ref_name }}
+          tagName: v${{ needs.plan.outputs.version }}
+          releaseName: Morticord v${{ needs.plan.outputs.version }}
+          commitish: ${{ needs.plan.outputs.sha }}
           releaseBody: See the assets below for the Windows and macOS installers.
           releaseDraft: true
           prerelease: false
@@ -109,14 +185,16 @@ jobs:
   # jobs, so that the draft release exists. It makes the draft when those
   # jobs did not make it.
   linux:
-    needs: desktop
-    if: ${{ !cancelled() }}
+    needs: [plan, desktop]
+    if: ${{ !cancelled() && needs.plan.outputs.release == 'true' }}
     runs-on: ubuntu-latest
     env:
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      TAG: v${{ needs.plan.outputs.version }}
     steps:
       - name: Check out the code
         uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
 
       - name: Read the Node version from .nvmrc
         id: node-version
@@ -131,18 +209,22 @@ jobs:
           node-version: ${{ steps.node-version.outputs.version }}
           cache: pnpm
 
-      - name: Check that the tag matches the app version
-        # The updater compares the version in latest-linux.yml with the installed app.
-        if: github.event_name == 'push'
-        run: |
-          VERSION=$(node -p "require('./apps/desktop-electron/package.json').version")
-          if [ "$TAG" != "v$VERSION" ]; then
-            echo "::error::The tag $TAG does not match version $VERSION in apps/desktop-electron/package.json."
-            exit 1
-          fi
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Set the app version
+        shell: bash
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            for (const file of ["apps/desktop-tauri/src-tauri/tauri.conf.json", "apps/desktop-electron/package.json"]) {
+              const json = JSON.parse(fs.readFileSync(file, "utf8"));
+              json.version = process.env.VERSION;
+              fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n");
+            }
+          '
 
       - name: Build the AppImage and the deb package
         working-directory: apps/desktop-electron
@@ -156,7 +238,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if ! gh release view "$TAG" > /dev/null 2>&1; then
-            gh release create "$TAG" --draft --title "Morticord $TAG" --notes "See the assets below for the Windows, macOS and Linux installers."
+            gh release create "$TAG" --draft --target "${{ needs.plan.outputs.sha }}" --title "Morticord $TAG" --notes "See the assets below for the Windows, macOS and Linux installers."
           fi
           cd apps/desktop-electron/release
           gh release upload "$TAG" ./*.AppImage ./*.deb latest-linux.yml --clobber
+
+  # Publish the release when all installers are in it. The installed apps
+  # see only published releases. A failed build leaves the draft, and the
+  # next run removes it.
+  publish:
+    needs: [plan, desktop, linux]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "v${{ needs.plan.outputs.version }}" --repo "${{ github.repository }}" --draft=false --latest

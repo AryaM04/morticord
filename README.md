@@ -206,9 +206,9 @@ pnpm --filter @morticord/desktop-electron package
 The first command makes the Windows installers (and the macOS app on a
 Mac). The second command makes the AppImage and the deb package on Linux.
 
-The release workflow (`.github/workflows/release.yml`) runs when you push
-a tag such as `v0.1.0`. It makes a draft release. Check the draft and
-approve it by hand before you publish it. Read
+The release workflow (`.github/workflows/release.yml`) runs when CI passes
+on a push to main. When the app code changed, it builds all installers and
+publishes a new release. The installed apps then update themselves. Read
 [`docs/concepts/desktop-shells.md`](docs/concepts/desktop-shells.md) for
 the signing keys, the updates and the origin settings.
 

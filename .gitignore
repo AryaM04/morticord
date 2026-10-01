@@ -17,3 +17,6 @@ e2e/.server-data/
 
 backups/
 apps/server/data/
+
+# The state and logs of scripts/auto-deploy.sh.
+.deploy/

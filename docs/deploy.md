@@ -127,6 +127,28 @@ and to invite your friends.
 The API runs the database migrations when it starts. Make a backup before
 a large update (see step 9).
 
+### Automatic updates (Linux)
+
+`scripts/auto-deploy.sh` does steps 2 to 4 when a new commit is on the
+main branch of GitHub and CI passed on it. Cron starts it every 2 minutes.
+The script needs `git`, `curl` and `flock`. Ubuntu and Debian have them.
+
+1. Set `DEPLOY_REPO` in `.env`, for example `DEPLOY_REPO=owner/morticord`.
+2. Open the cron table: `crontab -e`.
+3. Add this line, with the full path of the stack folder:
+
+   ```
+   */2 * * * * /home/<user>/morticord/scripts/auto-deploy.sh
+   ```
+
+The script writes one line for each deploy to `.deploy/deploy.log`, and
+the build output of the last deploy to `.deploy/last-deploy.log`. When CI
+or the build fails, the stack stays on the old commit. The next commit
+starts a new deploy. To try the same commit again, remove `.deploy/skip`.
+
+CAUTION: The script only fast-forwards. Do not change tracked files in the
+stack folder, or the deploy stops. Keep host values in `.env`.
+
 Caddy renews the certificate about every 60 days. coturn needs no manual
 step: each hour, `infra/coturn/start.sh` compares the certificate files.
 When they changed, it sends the signal SIGUSR2 to coturn, and coturn reads

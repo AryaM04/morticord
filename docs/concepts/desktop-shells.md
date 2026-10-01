@@ -133,12 +133,16 @@ files without a login, so the check fails there.
 - `pnpm --filter @morticord/desktop-tauri build` makes the MSI and the NSIS installer
   on Windows (in `src-tauri/target/release/bundle`). A local build makes
   no updater files, so it needs no signing key.
-- `.github/workflows/release.yml` runs on a tag such as `v0.1.0`. It builds
-  on Windows and macOS (one universal app for Apple silicon and Intel),
-  signs the updater files when the key secret exists, and makes a draft
-  release with the installers and `latest.json`. Without the key, it
-  makes a release with installers only, and shows a warning.
-- The tag must match `version` in `tauri.conf.json`.
+- `.github/workflows/release.yml` runs when CI passes on a push to main.
+  It makes a release only when `apps/web`, `apps/desktop-tauri`,
+  `apps/desktop-electron` or `packages` changed since the last tag. Start it
+  by hand to release without an app change.
+- The version is the last tag with the patch number plus one. To start a
+  new minor or major version, set a higher `version` in `tauri.conf.json`.
+- It builds on Windows and macOS (one universal app for Apple silicon and
+  Intel) and on Linux, signs the updater files when the key secret exists,
+  and publishes the release when all builds pass. Without the key, the
+  release has installers only, and the workflow shows a warning.
 - The macOS app is not signed with an Apple Developer ID. macOS shows a
   warning at the first start. Open the app from Finder with Control-click
   and "Open".
@@ -308,8 +312,8 @@ main process. The app gets the screens and the windows from
   `xdotool`). A second run without a key ring checks the key ring page.
 - The "linux" job of `.github/workflows/release.yml` builds the AppImage
   and the deb package, and attaches them with `latest-linux.yml` to the
-  draft release of the tag. The tag must match `version` in
-  `apps/desktop-electron/package.json`.
+  release. The workflow sets `version` in
+  `apps/desktop-electron/package.json` to the release version.
 - Ubuntu 23.10 and later limit user namespaces with AppArmor. The deb
   package installs an AppArmor profile for the app. An AppImage has no
   profile, so the Chromium sandbox can refuse to start on these systems.
