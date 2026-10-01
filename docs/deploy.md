@@ -356,8 +356,8 @@ The example below uses these values. Change them for your server:
 
 | Item | Value |
 | --- | --- |
-| Web address | `morticord.haumlab.com` (through the tunnel) |
-| TURN name | `turn.haumlab.com` (DNS only) |
+| Web address | `morticord.example.com` (through the tunnel) |
+| TURN name | `turn.example.com` (DNS only) |
 | TURN port | 3479 (a different service uses 3478) |
 | Relay ports | 40000-40099 |
 | Local Caddy port | `127.0.0.1:8480` |
@@ -369,9 +369,9 @@ Do steps 1 to 3 first. Then set these values in `.env`:
 ```
 PROXY_MODE=cloudflare-tunnel
 HTTP_BIND=127.0.0.1:8480
-DOMAIN=morticord.haumlab.com
+DOMAIN=morticord.example.com
 TURN_PORT=3479
-TURN_PUBLIC_HOST=turn.haumlab.com
+TURN_PUBLIC_HOST=turn.example.com
 TURN_TLS_ENABLED=false
 TURN_RELAY_MIN_PORT=40000
 TURN_RELAY_MAX_PORT=40099
@@ -396,19 +396,19 @@ host.
 
 ### Tunnel public hostname
 
-Add one public hostname to the tunnel. It sends `morticord.haumlab.com` to
+Add one public hostname to the tunnel. It sends `morticord.example.com` to
 `http://localhost:8480`.
 
 - Tunnel managed in the Cloudflare dashboard: open Zero Trust, then
   Networks, then Tunnels. Select the tunnel and open "Public Hostname".
-  Add a hostname: subdomain `morticord`, domain `haumlab.com`, type
+  Add a hostname: subdomain `morticord`, domain `example.com`, type
   `HTTP`, URL `localhost:8480`. Cloudflare makes the DNS record.
 - Tunnel with a local `config.yml`: add this rule above the last rule (the
   rule without a hostname):
 
   ```
   ingress:
-    - hostname: morticord.haumlab.com
+    - hostname: morticord.example.com
       service: http://localhost:8480
     # ... other rules ...
     - service: http_status:404
@@ -417,7 +417,7 @@ Add one public hostname to the tunnel. It sends `morticord.haumlab.com` to
   Then make the DNS record and start cloudflared again:
 
   ```
-  cloudflared tunnel route dns <TUNNEL_NAME> morticord.haumlab.com
+  cloudflared tunnel route dns <TUNNEL_NAME> morticord.example.com
   sudo systemctl restart cloudflared
   ```
 
@@ -427,7 +427,7 @@ Content-Security-Policy then blocks them.
 
 ### DNS for TURN
 
-Make an `A` record `turn` (`turn.haumlab.com`) with the public IP address
+Make an `A` record `turn` (`turn.example.com`) with the public IP address
 of the home network. Set the proxy status to "DNS only" (grey cloud). If
 your public IP address changes, use dynamic DNS for this name (see step 4)
 and change `TURN_EXTERNAL_IP`.
@@ -452,16 +452,16 @@ sudo ufw allow 40000:40099/udp
 ### Check list
 
 1. Health: `curl http://127.0.0.1:8480/api/v1/health` on the host, and
-   `curl https://morticord.haumlab.com/api/v1/health` from a different
+   `curl https://morticord.example.com/api/v1/health` from a different
    network. Both must give `{"status":"ok"}`.
-2. Web app: open `https://morticord.haumlab.com`. Register and sign in.
+2. Web app: open `https://morticord.example.com`. Register and sign in.
 3. WebSocket: do the WebSocket check of step 12 with
-   `DOMAIN=morticord.haumlab.com`. The status must be 101. The gateway
+   `DOMAIN=morticord.example.com`. The status must be 101. The gateway
    sends a heartbeat each 30 seconds, so the Cloudflare idle limit (100
    seconds) does not close the connection.
 4. Client address: run `docker compose logs --tail 20 api`. The
    `remoteAddress` values must be public IP addresses of the users, not
    `172.x.x.x` addresses.
 5. TURN: do the TURN check of step 12 with the URL
-   `turn:turn.haumlab.com:3479`. The result must have a candidate of the
+   `turn:turn.example.com:3479`. The result must have a candidate of the
    type `relay`.
