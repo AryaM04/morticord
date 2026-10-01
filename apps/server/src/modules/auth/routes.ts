@@ -59,7 +59,7 @@ export function oauthReturnUrl(
 }
 
 export async function registerAuthRoutes(app: FastifyInstance, deps: AppDeps): Promise<void> {
-  const authDeps = { db: deps.db, config: deps.config, mailer: deps.mailer, gateway: deps.gateway };
+  const authDeps = { db: deps.db, config: deps.config, mailer: deps.mailer, gateway: deps.gateway, log: app.log };
   const oauthClients = createOAuthClients(deps.config);
   const limits = deps.config.authRateLimit;
   const loginGuard =

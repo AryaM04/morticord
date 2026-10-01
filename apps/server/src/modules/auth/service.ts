@@ -28,6 +28,7 @@ export interface AuthDeps {
   config: AppConfig;
   mailer: Mailer;
   gateway?: GatewayService;
+  log?: { warn(details: object, message: string): void };
 }
 
 // A constant hash, verified against when the user does not exist or has no
@@ -194,7 +195,13 @@ export async function registerUser(
   }
 
   const session = await createSession(db, deps.config, id, deviceName);
-  await sendVerificationEmail(deps, id, input.email);
+  // The account exists now. A mail fault must not make the sign-up fail:
+  // the user can ask for the verification mail again later.
+  try {
+    await sendVerificationEmail(deps, id, input.email);
+  } catch (error) {
+    deps.log?.warn({ err: error }, "The verification mail was not sent after sign-up.");
+  }
 
   const user = await loadUserOrThrow(db, id);
   return toAuthResult(user, session);

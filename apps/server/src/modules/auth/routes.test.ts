@@ -63,6 +63,20 @@ describeWithDb("auth routes", () => {
     expect(mailer.sent[0]!.text).toContain("/verify-email#token=");
   });
 
+  it("completes the sign-up when the mail server fails", async () => {
+    const send = mailer.send;
+    mailer.send = async () => {
+      throw new Error("SMTP is not available");
+    };
+    try {
+      const response = await register("mailfail@example.com", "mailfail");
+      expect(response.statusCode).toBe(201);
+      expect(response.json().user.username).toBe("mailfail");
+    } finally {
+      mailer.send = send;
+    }
+  });
+
   it("rejects a second registration with the same email as a conflict", async () => {
     await register("carol@example.com", "carol1");
     const response = await register("carol@example.com", "carol2");
