@@ -1,4 +1,4 @@
-// The voice REST route: TURN credentials. Voice join/leave/state/signal go
+// The voice REST route: TURN credentials and the voice audio bitrate. Voice join/leave/state/signal go
 // through the gateway, not REST (see modules/voice/gateway-ops.ts).
 import type { FastifyInstance } from "fastify";
 import type { TurnCredentialsResponse } from "@morticord/shared";
@@ -30,6 +30,7 @@ export async function registerVoiceRoutes(app: FastifyInstance, deps: AppDeps): 
       const response: TurnCredentialsResponse = {
         iceServers: [{ urls, username, credential }],
         ttlSeconds: TURN_CREDENTIALS_TTL_SECONDS,
+        audioBitrateBps: config.voiceAudioBitrateBps,
       };
       return reply.send(response);
     },

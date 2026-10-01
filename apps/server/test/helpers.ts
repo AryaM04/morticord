@@ -16,6 +16,7 @@ export function buildTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     turnPublicHost: "localhost",
     turnTlsEnabled: false,
     turnTlsPort: 5349,
+    voiceAudioBitrateBps: 128_000,
     webOrigin: "http://localhost:5173",
     corsAllowedOrigins: [],
     desktopUrlScheme: "morticord",

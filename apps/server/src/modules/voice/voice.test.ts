@@ -559,8 +559,10 @@ describeWithDb("voice", () => {
       const body = response.json() as {
         iceServers: Array<{ urls: string[]; username: string; credential: string }>;
         ttlSeconds: number;
+        audioBitrateBps: number;
       };
       expect(body.ttlSeconds).toBe(12 * 60 * 60);
+      expect(body.audioBitrateBps).toBe(128_000);
       expect(body.iceServers).toHaveLength(1);
       const server = body.iceServers[0]!;
       expect(server.urls.some((url) => url.startsWith("stun:"))).toBe(true);

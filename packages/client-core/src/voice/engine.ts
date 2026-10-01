@@ -11,8 +11,8 @@ import { applyOpusFec, capOpusBitrate } from "./sdp.js";
 import { chooseVideoEncoding, type VideoEncodingKind } from "./adaptive.js";
 import type { PeerKey, SignalPayload, SignalTransport } from "./signal-transport.js";
 
-/** The fixed outgoing audio bitrate cap, per docs/concepts/voice.md and the plan's audio section. */
-export const AUDIO_MAX_BITRATE_BPS = 40_000;
+/** The audio bitrate when the server does not send one (an older server). */
+export const DEFAULT_AUDIO_BITRATE_BPS = 40_000;
 
 /** How often the shared speaking-detection timer samples every audio source. */
 export const SPEAKING_TICK_MS = 100;
@@ -80,7 +80,7 @@ export interface AudioElementLike {
 }
 
 export interface VoiceEngineDeps {
-  getTurnCredentials(): Promise<{ iceServers: RTCIceServer[]; ttlSeconds: number }>;
+  getTurnCredentials(): Promise<{ iceServers: RTCIceServer[]; ttlSeconds: number; audioBitrateBps?: number }>;
   createSignalTransport(channelId: string): SignalTransport;
   sendVoiceJoin(channelId: string, selfMute: boolean, selfDeaf: boolean): void;
   sendVoiceLeave(): void;
@@ -372,6 +372,8 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
   /** Runs only while at least one local camera or screen track is live; see `ensureAdaptiveTimer`/`stopAdaptiveTimer`. */
   let adaptiveTimer: ReturnType<typeof setTimeout> | null = null;
   let turnCache: { iceServers: RTCIceServer[]; expiresAt: number } | null = null;
+  // The server sets the voice audio bitrate. It comes with the TURN credentials.
+  let audioBitrateBps = DEFAULT_AUDIO_BITRATE_BPS;
   // Resolves the moment our own VOICE_JOIN is confirmed by the server (its
   // VOICE_STATE_UPDATE echo for our own peer), so `join()` never starts
   // signaling before the server has actually registered us in the
@@ -451,6 +453,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
     }
     const result = await deps.getTurnCredentials();
     turnCache = { iceServers: result.iceServers, expiresAt: now + result.ttlSeconds * 1_000 };
+    audioBitrateBps = result.audioBitrateBps ?? DEFAULT_AUDIO_BITRATE_BPS;
     return turnCache.iceServers;
   }
 
@@ -824,7 +827,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
     try {
       runtime.makingOffer = true;
       const offer = await runtime.pc.createOffer();
-      const patched = applyOpusFec(offer);
+      const patched = applyOpusFec(offer, audioBitrateBps);
       await runtime.pc.setLocalDescription(patched);
       signalTransport?.send(runtime.key, { kind: "description", description: patched });
     } catch {
@@ -868,7 +871,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
       await runtime.pc.setRemoteDescription(description);
       await flushCandidateQueue(runtime);
       const answer = await runtime.pc.createAnswer();
-      const patched = applyOpusFec(answer);
+      const patched = applyOpusFec(answer, audioBitrateBps);
       await runtime.pc.setLocalDescription(patched);
       signalTransport?.send(runtime.key, { kind: "description", description: patched });
     } else {
@@ -1086,7 +1089,7 @@ export function createVoiceEngine(deps: VoiceEngineDeps): VoiceEngine {
         for (const track of localStream.getTracks()) {
           const sender = pc.addTrack(track, localStream);
           if (track.kind === "audio") {
-            void capOpusBitrate(sender, AUDIO_MAX_BITRATE_BPS).catch(() => {
+            void capOpusBitrate(sender, audioBitrateBps).catch(() => {
               // Not every fake/browser supports setParameters(); the bitrate cap is best-effort.
             });
             void setAudioSenderPriority(sender);

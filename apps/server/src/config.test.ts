@@ -119,6 +119,12 @@ describe("loadConfig", () => {
     expect(config.turnTlsPort).toBe(5350);
   });
 
+  it("reads the voice audio bitrate in kbps and gives it in bits per second", () => {
+    expect(loadConfig(validEnv).voiceAudioBitrateBps).toBe(128_000);
+    expect(loadConfig({ ...validEnv, VOICE_AUDIO_BITRATE_KBPS: "64" }).voiceAudioBitrateBps).toBe(64_000);
+    expect(() => loadConfig({ ...validEnv, VOICE_AUDIO_BITRATE_KBPS: "600" })).toThrow();
+  });
+
   it("scales auth rate limits from the default AUTH_RATE_LIMIT_PER_MINUTE", () => {
     const config = loadConfig(validEnv);
     expect(config.authRateLimit).toEqual({

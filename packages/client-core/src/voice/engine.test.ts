@@ -14,6 +14,7 @@ import {
   isPolite,
   JOIN_CONFIRM_TIMEOUT_MS,
   NEWCOMER_TRACK_SHARE_DELAY_MS,
+  DEFAULT_AUDIO_BITRATE_BPS,
   SPEAKING_OFF_MS,
   SPEAKING_TICK_MS,
   SPEAKING_VOLUME_THRESHOLD,
@@ -1095,6 +1096,28 @@ describe("adaptive quality applier", () => {
     // Steady state again: no further calls.
     await vi.advanceTimersByTimeAsync(ADAPTIVE_TICK_MS * 3);
     expect(sender.setParametersCalls).toHaveLength(2);
+  });
+
+  it("caps the audio sender at the bitrate from the server, or at the default without one", async () => {
+    for (const [audioBitrateBps, expected] of [
+      [128_000, 128_000],
+      [undefined, DEFAULT_AUDIO_BITRATE_BPS],
+    ] as const) {
+      const peerB: PeerKey = { userId: "b", deviceId: "d1" };
+      const { deps, pcs } = makeDeps({
+        getInitialPeers: () => [peerB],
+        getTurnCredentials: async () => ({ iceServers: [], ttlSeconds: 3600, audioBitrateBps }),
+      });
+      const engine = createVoiceEngine(deps);
+      const joinPromise = engine.join("guild-1", "channel-1");
+      await vi.advanceTimersByTimeAsync(JOIN_CONFIRM_TIMEOUT_MS + NEWCOMER_TRACK_SHARE_DELAY_MS);
+      await joinPromise;
+      const audioSender = pcs[0]!.senders.find((s) => s.track?.kind === "audio")!;
+      await Promise.resolve();
+      const capCall = audioSender.setParametersCalls.find((p) => p.encodings?.[0]?.maxBitrate !== undefined);
+      expect(capCall?.encodings[0]!.maxBitrate).toBe(expected);
+      await engine.leave();
+    }
   });
 
   it("sets the audio sender to high priority once, unaffected by later ticks", async () => {

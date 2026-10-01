@@ -51,8 +51,8 @@ function findOpusPayloadType(lines: string[], start: number, end: number): strin
   return null;
 }
 
-/** Merge the FEC and DTX params into an existing fmtp parameter list, without duplicate keys. */
-function mergeFmtpParams(existing: string): string {
+/** Merge the FEC, DTX, mono and bitrate params into an existing fmtp parameter list, without duplicate keys. */
+function mergeFmtpParams(existing: string, maxAverageBitrateBps: number): string {
   const params = new Map<string, string>();
   for (const part of existing.split(";")) {
     const trimmed = part.trim();
@@ -67,16 +67,18 @@ function mergeFmtpParams(existing: string): string {
   params.set("useinbandfec", "1");
   params.set("usedtx", "1");
   params.set("stereo", "0");
+  params.set("maxaveragebitrate", String(maxAverageBitrateBps));
   return [...params.entries()].map(([key, value]) => (value === "" ? key : `${key}=${value}`)).join(";");
 }
 
 /**
- * Set `useinbandfec=1;usedtx=1;stereo=0` on the opus fmtp line of an SDP.
- * This turns on Opus in-band forward error correction and discontinuous
- * transmission, and forces mono, for every offer and answer this client
- * builds. Every other codec, and the video section, is left untouched.
+ * Set `useinbandfec=1;usedtx=1;stereo=0;maxaveragebitrate=<bps>` on the opus
+ * fmtp line of an SDP. This turns on Opus in-band forward error correction
+ * and discontinuous transmission, forces mono, and asks the remote peer to
+ * send at the given bitrate, for every offer and answer this client builds.
+ * Every other codec, and the video section, is left untouched.
  */
-export function preferOpusFec(sdp: string): string {
+export function preferOpusFec(sdp: string, maxAverageBitrateBps: number): string {
   const { lines, usesCrlf } = splitLines(sdp);
   const audioSection = findMediaSection(lines, "audio");
   if (!audioSection) {
@@ -102,10 +104,10 @@ export function preferOpusFec(sdp: string): string {
     const rtpmapIndex = lines.findIndex(
       (line, i) => i >= audioSection.start && i < audioSection.end && line.startsWith(`a=rtpmap:${payloadType} `),
     );
-    nextLines.splice(rtpmapIndex + 1, 0, `${fmtpPrefix}useinbandfec=1;usedtx=1;stereo=0`);
+    nextLines.splice(rtpmapIndex + 1, 0, `${fmtpPrefix}${mergeFmtpParams("", maxAverageBitrateBps)}`);
   } else {
     const existingParams = lines[fmtpIndex]!.slice(fmtpPrefix.length);
-    nextLines[fmtpIndex] = `${fmtpPrefix}${mergeFmtpParams(existingParams)}`;
+    nextLines[fmtpIndex] = `${fmtpPrefix}${mergeFmtpParams(existingParams, maxAverageBitrateBps)}`;
   }
 
   return joinLines(nextLines, usesCrlf);
@@ -115,16 +117,19 @@ export function preferOpusFec(sdp: string): string {
  * Apply `preferOpusFec` to a session description's SDP text, returning a
  * new description object. Used right before `setLocalDescription`.
  */
-export function applyOpusFec(description: RTCSessionDescriptionInit): RTCSessionDescriptionInit {
+export function applyOpusFec(
+  description: RTCSessionDescriptionInit,
+  maxAverageBitrateBps: number,
+): RTCSessionDescriptionInit {
   if (!description.sdp) {
     return description;
   }
-  return { ...description, sdp: preferOpusFec(description.sdp) };
+  return { ...description, sdp: preferOpusFec(description.sdp, maxAverageBitrateBps) };
 }
 
 /**
  * Cap an RTP sender's outgoing bitrate. Used for the audio sender once it
- * exists, with `maxBitrateBps` set to the engine's fixed audio cap.
+ * exists, with `maxBitrateBps` set to the voice audio bitrate.
  */
 export async function capOpusBitrate(sender: RTCRtpSender, maxBitrateBps: number): Promise<void> {
   const parameters = sender.getParameters();

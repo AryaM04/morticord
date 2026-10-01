@@ -14,6 +14,8 @@ const envSchema = z.object({
   TURN_SECRET: z.string().min(1),
   TURN_DOMAIN: z.string().min(1),
   TURN_PORT: z.coerce.number().int().positive().default(3478),
+  // The Opus voice bitrate in kbps that every client sends. Opus accepts 6 to 510.
+  VOICE_AUDIO_BITRATE_KBPS: z.coerce.number().int().min(6).max(510).default(128),
   // The host name or address that voice clients use to reach TURN. It
   // defaults to TURN_DOMAIN, so most deployments need not set it. An
   // empty value (the common case in a copied .env.example) also falls
@@ -116,6 +118,8 @@ export interface AppConfig {
   turnPublicHost: string;
   turnTlsEnabled: boolean;
   turnTlsPort: number;
+  /** The Opus voice bitrate in bits per second. */
+  voiceAudioBitrateBps: number;
   webOrigin: string;
   /** Other origins that can call the API and open the gateway, for example the desktop app. */
   corsAllowedOrigins: string[];
@@ -223,6 +227,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     turnPublicHost: data.TURN_PUBLIC_HOST && data.TURN_PUBLIC_HOST.length > 0 ? data.TURN_PUBLIC_HOST : data.TURN_DOMAIN,
     turnTlsEnabled: data.TURN_TLS_ENABLED ?? false,
     turnTlsPort: data.TURN_TLS_PORT,
+    voiceAudioBitrateBps: data.VOICE_AUDIO_BITRATE_KBPS * 1000,
     webOrigin: data.WEB_ORIGIN,
     corsAllowedOrigins: parseOriginList(data.CORS_ALLOWED_ORIGINS),
     desktopUrlScheme: data.DESKTOP_URL_SCHEME,

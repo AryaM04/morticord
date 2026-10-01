@@ -6,7 +6,7 @@ export {
   createVoiceEngine,
   comparePeerKeys,
   isPolite,
-  AUDIO_MAX_BITRATE_BPS,
+  DEFAULT_AUDIO_BITRATE_BPS,
   SPEAKING_TICK_MS,
   SPEAKING_OFF_MS,
   SPEAKING_VOLUME_THRESHOLD,

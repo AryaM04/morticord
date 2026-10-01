@@ -14,6 +14,8 @@ export type IceServer = z.infer<typeof iceServerSchema>;
 export const turnCredentialsResponseSchema = z.object({
   iceServers: z.array(iceServerSchema),
   ttlSeconds: z.number().int().positive(),
+  /** The Opus voice bitrate that this server sets for every client. An older server does not send it. */
+  audioBitrateBps: z.number().int().positive().optional(),
 });
 export type TurnCredentialsResponse = z.infer<typeof turnCredentialsResponseSchema>;
 
