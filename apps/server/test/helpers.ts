@@ -37,6 +37,7 @@ export function buildTestConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     maxAttachmentBytes: 25 * 1024 * 1024,
     attachmentQuotaBytes: 2 * 1024 * 1024 * 1024,
     linkPreviewTestAllowLoopback: false,
+    releasesRepo: "AryaM04/morticord",
     ...overrides,
   };
 }

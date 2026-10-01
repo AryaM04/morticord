@@ -9,6 +9,7 @@ import { Avatar } from "./Avatar.js";
 import { describeError } from "../lib/errors.js";
 import { useSession } from "../lib/useSession.js";
 import { session } from "../lib/session.js";
+import { DownloadLink } from "./DownloadLink.js";
 import { desktopFeatures } from "../lib/platform.js";
 
 // The notification part loads only when the dialog opens, to keep the main bundle small.
@@ -151,6 +152,10 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           {desktopFeatures() && <DesktopSettings />}
         </Suspense>
       )}
+
+      <div className="mb-4 text-sm">
+        <DownloadLink onNavigate={onClose} />
+      </div>
 
       <button type="button" onClick={() => setSecurityOpen(true)} className="mb-4 text-sm underline">
         Security: devices and secure backup

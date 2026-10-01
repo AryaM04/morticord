@@ -1,7 +1,7 @@
 // Top-level router. See docs/architecture.md section 7 and the M1 build
 // notes: /app is protected (redirect to /login when signed out), every
 // other auth page is public.
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Redirect, Route, Switch } from "wouter";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage.js";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage.js";
@@ -11,6 +11,7 @@ import { ResetPasswordPage } from "./pages/ResetPasswordPage.js";
 import { VerifyEmailPage } from "./pages/VerifyEmailPage.js";
 import { AppShell } from "./pages/AppShell.js";
 import { InvitePage } from "./pages/InvitePage.js";
+const DownloadPage = lazy(() => import("./pages/DownloadPage.js"));
 import { session } from "./lib/session.js";
 import { useSession } from "./lib/useSession.js";
 import { startAutoIdle } from "./lib/presence.js";
@@ -58,6 +59,11 @@ export function App() {
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/verify-email" component={VerifyEmailPage} />
       <Route path="/auth/callback" component={AuthCallbackPage} />
+      <Route path="/download">
+        <Suspense fallback={<FullPageSpinner />}>
+          <DownloadPage />
+        </Suspense>
+      </Route>
       <Route path="/invite/:code" component={InvitePage} />
       <Route path="/app/:guildId?/:channelId?" component={ProtectedApp} />
       <Route>

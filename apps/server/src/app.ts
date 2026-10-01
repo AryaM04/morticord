@@ -16,6 +16,7 @@ import { authGuardPlugin } from "./plugins/auth-guard.js";
 import { registerAttachmentRoutes } from "./modules/attachments/routes.js";
 import { startAttachmentCleanup } from "./modules/attachments/service.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
+import { registerDesktopRoutes, type DesktopRouteOptions } from "./modules/desktop/routes.js";
 import { registerDmRoutes } from "./modules/dms/routes.js";
 import { registerFriendRoutes } from "./modules/friends/routes.js";
 import { registerGuildRoutes } from "./modules/guilds/routes.js";
@@ -54,6 +55,8 @@ export interface AppDeps {
   toDeviceQueueLimit?: number;
   /** Replaces parts of the link preview route. Tests use it. */
   linkPreview?: LinkPreviewRouteOptions;
+  /** Replaces parts of the desktop download route. Tests use it. */
+  desktop?: DesktopRouteOptions;
 }
 
 const IMAGE_CONTENT_TYPES = ["image/png", "image/jpeg", "image/webp"];
@@ -146,6 +149,7 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
   await app.register(async (instance) => registerLinkPreviewRoutes(instance, deps, deps.linkPreview), {
     prefix: "/api/v1",
   });
+  await app.register(async (instance) => registerDesktopRoutes(instance, deps, deps.desktop), { prefix: "/api/v1" });
   await app.register(
     async (instance) =>
       registerToDeviceRoutes(instance, { ...deps, delivery, toDeviceQueueLimit: deps.toDeviceQueueLimit ?? TO_DEVICE_QUEUE_LIMIT }),

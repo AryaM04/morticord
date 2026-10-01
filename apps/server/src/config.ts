@@ -97,6 +97,10 @@ const envSchema = z.object({
     .optional()
     .transform((value) => value === "true"),
 
+  // The GitHub repository ("owner/name") whose latest release the desktop
+  // download page shows. Empty: the route is off.
+  RELEASES_REPO: z.string().default("AryaM04/morticord"),
+
   // Write the server log to this file instead of standard output. Empty or
   // unset: standard output.
   LOG_FILE: z.string().optional(),
@@ -155,6 +159,8 @@ export interface AppConfig {
   linkPreviewTestAllowLoopback: boolean;
   /** One reverse proxy runs in front of the server. The client address is the last X-Forwarded-For entry. */
   trustProxy?: boolean;
+  /** The GitHub repository of the desktop releases. Empty: the download route is off. */
+  releasesRepo: string;
   /** The server log goes to this file, or to standard output when it is undefined. */
   logFile?: string;
 }
@@ -245,6 +251,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     attachmentQuotaBytes: data.ATTACHMENT_QUOTA_BYTES,
     linkPreviewTestAllowLoopback: data.LINK_PREVIEW_TEST_ALLOW_LOOPBACK,
     trustProxy: data.TRUST_PROXY,
+    releasesRepo: data.RELEASES_REPO.trim(),
     logFile: data.LOG_FILE ? data.LOG_FILE : undefined,
   };
 }

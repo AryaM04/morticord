@@ -3,6 +3,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useLocation } from "wouter";
 import { registerRequestSchema } from "@morticord/shared";
 import { AuthLayout } from "../components/AuthLayout.js";
+import { DownloadLink } from "../components/DownloadLink.js";
 import { FormField } from "../components/FormField.js";
 import { OAuthButtons } from "../components/OAuthButtons.js";
 import { describeError } from "../lib/errors.js";
@@ -102,6 +103,7 @@ export function RegisterPage() {
       </form>
       <div className="mt-4 text-sm" style={{ color: "var(--color-text-muted)" }}>
         Already have an account? <Link href="/login">Sign in</Link>
+        <DownloadLink />
       </div>
     </AuthLayout>
   );

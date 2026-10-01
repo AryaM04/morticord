@@ -10,3 +10,4 @@ export * from "./dms.js";
 export * from "./settings.js";
 export * from "./keys.js";
 export * from "./link-preview.js";
+export * from "./desktop.js";

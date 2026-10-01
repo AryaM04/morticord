@@ -4,6 +4,7 @@ import { Link, useLocation } from "wouter";
 import { loginRequestSchema } from "@morticord/shared";
 import { AuthLayout } from "../components/AuthLayout.js";
 import { FormField } from "../components/FormField.js";
+import { DownloadLink } from "../components/DownloadLink.js";
 import { OAuthButtons } from "../components/OAuthButtons.js";
 import { describeError } from "../lib/errors.js";
 import { session } from "../lib/session.js";
@@ -83,6 +84,7 @@ export function LoginPage() {
         <span>
           No account yet? <Link href="/register">Register</Link>
         </span>
+        <DownloadLink />
       </div>
     </AuthLayout>
   );
