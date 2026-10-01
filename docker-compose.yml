@@ -15,7 +15,7 @@ x-logging: &logging
 x-hardening: &hardening
   cap_drop: [ALL]
   security_opt:
-    - no-new-privileges:true
+    - no-new-privileges:${NO_NEW_PRIVILEGES:-true}
 
 services:
   # Reverse proxy. It serves the web app and sends /api and /gateway to the
@@ -244,7 +244,7 @@ services:
     # This image starts as root and then changes to its own user. It needs
     # the default capabilities for that, so only "no-new-privileges" is set.
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges:${NO_NEW_PRIVILEGES:-true}
     environment:
       SUBDOMAINS: ${DUCKDNS_SUBDOMAIN:-}
       TOKEN: ${DUCKDNS_TOKEN:-}

@@ -307,6 +307,13 @@ docker compose up -d --build
 
 Show the logs of a service: `docker compose logs --tail 100 <service>`.
 The service names are `caddy`, `api`, `postgres`, `coturn` and `backup`.
+
+**All services restart, and the log shows `exec ...: operation not permitted`.**
+Docker from the Ubuntu snap package causes this. It cannot start a container with the `no-new-privileges` flag.
+To make sure, run `docker run --rm --security-opt no-new-privileges:true alpine true`.
+If this command fails too, set `NO_NEW_PRIVILEGES=false` in `.env`, then run `docker compose up -d`.
+The containers still run without root, without capabilities and with read-only files.
+For full protection, install Docker from the Docker apt repository instead of the snap package.
 To see the user of a service, run `docker compose exec <service> id`.
 
 - **No certificate.** Check that ports 80 and 443 reach the server from the
